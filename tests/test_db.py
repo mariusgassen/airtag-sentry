@@ -24,9 +24,10 @@ def conn():
         pytest.skip(f"Postgres not reachable at {TEST_DATABASE_URL}; start it to run this test.")
 
 
-def _report(iso: str, lat: float, lon: float) -> Report:
+def _report(iso: str, lat: float, lon: float, airtag_id: str = "bike") -> Report:
     return Report(
         id=None,
+        airtag_id=airtag_id,
         timestamp=dt.datetime.fromisoformat(iso).replace(tzinfo=dt.timezone.utc),
         lat=lat,
         lon=lon,
@@ -60,3 +61,16 @@ def test_insert_reports_returns_only_new_rows(conn):
         cur.execute("SELECT count(*) FROM location_reports")
         (count,) = cur.fetchone()
     assert count == 3
+
+
+def test_insert_reports_allows_same_timestamp_for_different_airtag(conn):
+    ts = "2026-01-01T10:00:00"
+    inserted_a = insert_reports(conn, [_report(ts, 52.5, 13.4, airtag_id="bike")])
+    inserted_b = insert_reports(conn, [_report(ts, 48.1, 11.6, airtag_id="backpack")])
+    assert len(inserted_a) == 1
+    assert len(inserted_b) == 1
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM location_reports")
+        (count,) = cur.fetchone()
+    assert count == 2

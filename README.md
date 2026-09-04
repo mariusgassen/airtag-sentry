@@ -23,18 +23,93 @@ timeline.
 
 ## ⚠️ What you must already have
 
-- **An AirTag key.** This app does not extract AirTag keys from Apple's
-  Find My app — that's a separate, non-trivial step (typically exporting the
-  keychain item for an officially-paired AirTag, e.g. via the
-  `macless-haystack`/`plist_to_json` tooling that ships with `FindMy.py`, or
-  using your own self-made tracker's key). You need either:
-  - a base64-encoded private key (`AIRTAG_PRIVATE_KEY_B64` in `.env`), or
-  - an exported `FindMyAccessory` JSON file (`airtag.accessory_json_path` in
-    `config.yaml`).
+- **An AirTag key for each AirTag you want to track.** See
+  [Extracting your AirTag key](#extracting-your-airtag-key) below. For each
+  entry in `config.yaml`'s `airtags:` list you need either:
+  - a base64-encoded private key (`AIRTAG_PRIVATE_KEY_B64_<ID>` in `.env`), or
+  - an exported `FindMyAccessory` JSON file (`accessory_json_path` in that
+    entry).
 - **Your own Apple ID**, with 2FA you can complete interactively once.
+- **A GitHub OAuth App**, so the dashboard can require you to log in with your
+  own GitHub account. See [Dashboard login](#dashboard-login-github-oauth)
+  below.
 - Using this against an AirTag you don't own, or in a way that violates
   Apple's Terms of Service, is on you — this is for tracking your own
   property.
+
+## Extracting your AirTag key
+
+This app does not need the AirTag physically present to get its key — the key
+material is generated at pairing time and synced via iCloud to any Mac signed
+into the same Apple ID, as a local encrypted record. You just need **a Mac
+that has the AirTag paired in the Find My app** (the AirTag itself can be
+anywhere, as long as it still shows up as an owned item in Find My).
+
+On that Mac, with `findmy` installed (it's already a project dependency —
+`pip install -e ".[dev]"`, or just `pip install findmy` if you don't want the
+whole project there):
+
+```bash
+python -m findmy decrypt --out-dir data/keys
+```
+
+This will prompt for your macOS login keychain password / Touch ID (possibly
+twice) to read the `BeaconStore` Keychain item, then decrypts the local Find My
+accessory records and writes one `<uuid>.json` file per paired accessory
+(AirTags, AirPods, paired Macs/iPhones, etc.) into `data/keys/` — already in
+the exact format `accessory_json_path` expects. Files are named by internal
+UUID, not by display name, so open each one and match its `"name"` field
+against the AirTag you're after, then rename it to something meaningful, e.g.:
+
+```bash
+mv data/keys/<uuid>.json data/keys/bike.json
+```
+
+Reference it from that AirTag's entry in `config.yaml`:
+
+```yaml
+airtags:
+  - id: "bike"
+    name: "Fahrrad"
+    accessory_json_path: "data/keys/bike.json"
+```
+
+This only works for accessories already paired to your own Apple ID on that
+Mac — extract keys for your own property only.
+
+## Dashboard login (GitHub OAuth)
+
+The dashboard requires logging in with a specific GitHub account before
+showing any data. To set it up:
+
+1. Create a GitHub OAuth App at
+   [github.com/settings/applications/new](https://github.com/settings/applications/new).
+   - Homepage URL: anything (GitHub requires a value).
+   - Authorization callback URL: `https://<your-domain>/auth/callback`.
+2. Put the resulting Client ID/Secret, your own GitHub username, and a random
+   session secret into `.env`:
+   ```
+   GITHUB_CLIENT_ID=...
+   GITHUB_CLIENT_SECRET=...
+   GITHUB_ALLOWED_LOGIN=your-github-username
+   SESSION_SECRET_KEY=...   # e.g. `openssl rand -hex 32`
+   ```
+
+Note: a GitHub OAuth App supports only **one** callback URL. If you want to
+test the login flow locally as well as in production, create a second OAuth
+App for local development (`http://localhost:8000/auth/callback`) with its
+own `.env.local`-style credentials — otherwise just test everything except the
+login flow itself locally, and verify login against the deployed instance.
+
+The session cookie is always marked `Secure`/HTTPS-only, which browsers will
+only ever send back over an HTTPS connection. This matches the deployment
+model this repo assumes (Coolify terminates TLS at the edge, so the browser
+always talks to the dashboard over `https://`). **If you access the dashboard
+over plain HTTP** — e.g. running it directly on `http://localhost:8000` with
+no TLS-terminating proxy in front — the browser will silently refuse to send
+the cookie back, and login will loop back to `/login` with no clear error.
+For that case, set `https_only=False` on the `SessionMiddleware` call in
+`airtag_sentry/web/app.py`.
 
 ## Local setup
 
@@ -45,8 +120,11 @@ python scripts/generate_vapid_keys.py   # paste the output into .env for Web Pus
 ```
 
 Edit `config.yaml`:
-- Set `airtag.accessory_json_path` **or** leave it `null` and set
-  `AIRTAG_PRIVATE_KEY_B64` in `.env` instead — exactly one is required.
+- Add one entry per AirTag under `airtags:`. For each, set
+  `accessory_json_path` **or** leave it `null` and set
+  `AIRTAG_PRIVATE_KEY_B64_<ID>` in `.env` instead (`<ID>` = that entry's `id`,
+  uppercased with non-alphanumeric characters replaced by `_`) — exactly one
+  key source is required per entry.
 - For Docker Compose, set `apple.anisette.mode: remote` and
   `apple.anisette.remote_url: http://anisette:6969` so polling uses the
   bundled anisette container instead of generating anisette data in-process.
@@ -136,7 +214,8 @@ pytest   # movement math + notifier payloads run standalone;
   real credentials/devices and were **not** exercised end-to-end by whoever
   built this — only unit/integration-tested against a real local Postgres and
   a hand-seeded dashboard. Verify these yourself after setup.
-- Single AirTag, single user, no mobile app beyond the installable PWA — all
-  intentional per the original spec's non-goals.
+- Single user (one allowed GitHub login), no mobile app beyond the installable
+  PWA — intentional per the original spec's non-goals. Multiple AirTags per
+  Apple ID are supported via `config.yaml`'s `airtags:` list.
 - If Apple changes the Find My protocol, `FindMy.py` (and therefore this app)
   can break without warning — keep an eye on its upstream repo.

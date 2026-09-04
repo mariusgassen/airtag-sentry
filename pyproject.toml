@@ -13,6 +13,7 @@ dependencies = [
     "requests>=2.32",
     "pywebpush>=2.0",
     "py-vapid>=1.9",
+    "itsdangerous>=2.1",
 ]
 
 [project.optional-dependencies]

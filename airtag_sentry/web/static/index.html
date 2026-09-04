@@ -26,7 +26,11 @@
 <body>
 <header>
   <h1 id="title">AirTagSentry</h1>
-  <button id="enable-push">Benachrichtigungen aktivieren</button>
+  <div style="display:flex; align-items:center; gap:0.75rem;">
+    <select id="airtag-select"></select>
+    <button id="enable-push">Benachrichtigungen aktivieren</button>
+    <a id="logout" href="/logout" style="color:#8b949e;">Abmelden</a>
+  </div>
 </header>
 <div id="status">Lade Daten…</div>
 <div id="map"></div>
@@ -39,13 +43,64 @@
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+let currentAirtagId = null;
+let map = null;
+let currentLayer = null;
+
+function renderMap(reports) {
+  const mapEl = document.getElementById('map');
+  if (reports.length === 0) {
+    if (map) { map.remove(); map = null; currentLayer = null; }
+    mapEl.textContent = 'Keine Standortdaten vorhanden.';
+    return;
+  }
+  if (!map) {
+    mapEl.textContent = '';
+    map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+  }
+  if (currentLayer) {
+    map.removeLayer(currentLayer);
+  }
+  const latlngs = reports.map(r => [r.lat, r.lon]);
+  currentLayer = L.layerGroup([
+    L.polyline(latlngs, { color: '#1f6feb' }),
+    L.marker(latlngs[latlngs.length - 1]).bindPopup('Letzte Position'),
+  ]).addTo(map);
+  map.fitBounds(latlngs);
+}
+
+async function loadAirtags() {
+  const res = await fetch('/api/airtags');
+  if (res.status === 401) { location.href = '/login'; return; }
+  const airtags = await res.json();
+  const select = document.getElementById('airtag-select');
+  select.innerHTML = '';
+  for (const a of airtags) {
+    const opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = a.name;
+    select.appendChild(opt);
+  }
+  currentAirtagId = airtags[0]?.id ?? null;
+  select.addEventListener('change', () => {
+    currentAirtagId = select.value;
+    loadData();
+  });
+}
+
 async function loadData() {
+  const qs = currentAirtagId ? `airtag_id=${encodeURIComponent(currentAirtagId)}` : '';
   const [reportsRes, statusRes] = await Promise.all([
-    fetch('/api/reports?limit=500'),
-    fetch('/api/status'),
+    fetch(`/api/reports?limit=500${qs ? '&' + qs : ''}`),
+    fetch(`/api/status${qs ? '?' + qs : ''}`),
   ]);
+  if (reportsRes.status === 401 || statusRes.status === 401) { location.href = '/login'; return; }
   const reports = await reportsRes.json();
   const status = await statusRes.json();
+  document.getElementById('airtag-select').value = status.airtag_id;
 
   document.getElementById('title').textContent = `AirTagSentry — ${status.airtag_name}`;
   const statusEl = document.getElementById('status');
@@ -66,20 +121,13 @@ async function loadData() {
     tbody.appendChild(tr);
   }
 
-  if (reports.length > 0) {
-    const latlngs = reports.map(r => [r.lat, r.lon]);
-    const map = L.map('map').setView(latlngs[latlngs.length - 1], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(map);
-    L.polyline(latlngs, { color: '#1f6feb' }).addTo(map);
-    L.marker(latlngs[latlngs.length - 1]).addTo(map).bindPopup('Letzte Position').openPopup();
-    map.fitBounds(latlngs);
-  } else {
-    document.getElementById('map').textContent = 'Keine Standortdaten vorhanden.';
-  }
+  renderMap(reports);
 }
-loadData();
+
+(async () => {
+  await loadAirtags();
+  await loadData();
+})();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');

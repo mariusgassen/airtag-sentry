@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -31,6 +32,7 @@ class AppleConfig:
 
 @dataclasses.dataclass
 class AirtagConfig:
+    id: str
     name: str
     accessory_json_path: str | None
     private_key_b64: str | None
@@ -53,6 +55,14 @@ class MovementConfig:
 class WebConfig:
     host: str
     port: int
+
+
+@dataclasses.dataclass
+class AuthConfig:
+    github_client_id: str
+    github_client_secret: str
+    allowed_login: str
+    session_secret_key: str
 
 
 @dataclasses.dataclass
@@ -83,10 +93,11 @@ class NotificationsConfig:
 @dataclasses.dataclass
 class Config:
     apple: AppleConfig
-    airtag: AirtagConfig
+    airtags: list[AirtagConfig]
     polling: PollingConfig
     movement: MovementConfig
     web: WebConfig
+    auth: AuthConfig
     database_url: str
     notifications: NotificationsConfig
 
@@ -113,19 +124,45 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         ),
     )
 
-    airtag_raw = raw.get("airtag", {}) or {}
-    accessory_json_path = airtag_raw.get("accessory_json_path")
-    private_key_b64 = _env("AIRTAG_PRIVATE_KEY_B64")
-    if bool(accessory_json_path) == bool(private_key_b64):
-        raise ConfigError(
-            "Set exactly one of airtag.accessory_json_path (config.yaml) or "
-            "AIRTAG_PRIVATE_KEY_B64 (.env) as the AirTag's key source."
+    airtags_raw = raw.get("airtags") or []
+    if not airtags_raw:
+        raise ConfigError("config.yaml must define at least one entry under 'airtags:'.")
+
+    airtags: list[AirtagConfig] = []
+    seen_ids: set[str] = set()
+    seen_env_suffixes: dict[str, str] = {}
+    for entry in airtags_raw:
+        airtag_id = str((entry or {}).get("id") or "").strip()
+        if not airtag_id:
+            raise ConfigError("Every entry in airtags: must have a non-empty 'id'.")
+        if airtag_id in seen_ids:
+            raise ConfigError(f"Duplicate airtag id '{airtag_id}' in airtags:.")
+        seen_ids.add(airtag_id)
+
+        suffix = re.sub(r"[^A-Za-z0-9]", "_", airtag_id).upper()
+        if suffix in seen_env_suffixes:
+            raise ConfigError(
+                f"airtag ids '{seen_env_suffixes[suffix]}' and '{airtag_id}' both map to "
+                f"the same env var AIRTAG_PRIVATE_KEY_B64_{suffix} - use more distinct ids."
+            )
+        seen_env_suffixes[suffix] = airtag_id
+
+        accessory_json_path = entry.get("accessory_json_path")
+        env_name = f"AIRTAG_PRIVATE_KEY_B64_{suffix}"
+        private_key_b64 = _env(env_name)
+        if bool(accessory_json_path) == bool(private_key_b64):
+            raise ConfigError(
+                f"airtags[id={airtag_id}]: set exactly one of accessory_json_path "
+                f"(config.yaml) or {env_name} (.env) as this AirTag's key source."
+            )
+        airtags.append(
+            AirtagConfig(
+                id=airtag_id,
+                name=entry.get("name", airtag_id),
+                accessory_json_path=accessory_json_path,
+                private_key_b64=private_key_b64,
+            )
         )
-    airtag = AirtagConfig(
-        name=airtag_raw.get("name", "AirTag"),
-        accessory_json_path=accessory_json_path,
-        private_key_b64=private_key_b64,
-    )
 
     polling_raw = raw.get("polling", {}) or {}
     polling = PollingConfig(interval_minutes=int(polling_raw.get("interval_minutes", 15)))
@@ -140,6 +177,31 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 
     web_raw = raw.get("web", {}) or {}
     web = WebConfig(host=web_raw.get("host", "0.0.0.0"), port=int(web_raw.get("port", 8000)))
+
+    github_client_id = _env("GITHUB_CLIENT_ID")
+    github_client_secret = _env("GITHUB_CLIENT_SECRET")
+    allowed_login = _env("GITHUB_ALLOWED_LOGIN")
+    session_secret_key = _env("SESSION_SECRET_KEY")
+    missing_auth = [
+        name
+        for name, value in [
+            ("GITHUB_CLIENT_ID", github_client_id),
+            ("GITHUB_CLIENT_SECRET", github_client_secret),
+            ("GITHUB_ALLOWED_LOGIN", allowed_login),
+            ("SESSION_SECRET_KEY", session_secret_key),
+        ]
+        if not value
+    ]
+    if missing_auth:
+        raise ConfigError(
+            "Missing required dashboard-login env var(s): " + ", ".join(missing_auth)
+        )
+    auth = AuthConfig(
+        github_client_id=github_client_id,
+        github_client_secret=github_client_secret,
+        allowed_login=allowed_login,
+        session_secret_key=session_secret_key,
+    )
 
     database_url = _env("DATABASE_URL")
     if not database_url:
@@ -170,10 +232,11 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 
     return Config(
         apple=apple,
-        airtag=airtag,
+        airtags=airtags,
         polling=polling,
         movement=movement,
         web=web,
+        auth=auth,
         database_url=database_url,
         notifications=notifications,
     )

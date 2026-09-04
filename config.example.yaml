@@ -8,14 +8,20 @@ apple:
     libs_path: "data/ani_libs.bin"
     remote_url: null # e.g. http://anisette:6969, used when mode: remote
 
-airtag:
-  name: "Fahrrad"
-  # Exactly one key source is required: either set accessory_json_path here,
-  # or set AIRTAG_PRIVATE_KEY_B64 in .env. accessory_json_path points to a
-  # FindMyAccessory export (see FindMy.py's plist_to_json / macless-haystack
-  # conversion tools) for an officially-paired AirTag whose key was already
-  # extracted. Extracting that key is outside this app's scope.
-  accessory_json_path: null
+airtags:
+  # One entry per AirTag. Each `id` must be unique and is used to derive its
+  # env var name for AIRTAG_PRIVATE_KEY_B64_<ID> (id uppercased, non-alphanumeric
+  # chars replaced by `_`). Exactly one key source is required per entry: either
+  # set accessory_json_path here, or set the corresponding env var in .env.
+  # accessory_json_path points to a FindMyAccessory export - extract one with
+  # `python -m findmy decrypt --out-dir data/keys` (see README: "Extracting your
+  # AirTag key").
+  - id: "bike"
+    name: "Fahrrad"
+    accessory_json_path: null
+  # - id: "backpack"
+  #   name: "Rucksack"
+  #   accessory_json_path: "data/keys/backpack.json"
 
 polling:
   interval_minutes: 15

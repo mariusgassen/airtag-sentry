@@ -41,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
 
         from airtag_sentry.web.app import create_app
 
-        uvicorn.run(create_app(cfg), host=cfg.web.host, port=cfg.web.port)
+        uvicorn.run(
+            create_app(cfg),
+            host=cfg.web.host,
+            port=cfg.web.port,
+            proxy_headers=True,
+            forwarded_allow_ips="*",
+        )
 
     return 0
