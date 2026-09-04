@@ -9,66 +9,15 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import logging
 from contextlib import contextmanager
 from typing import Iterator
 
 import psycopg
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS location_reports (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    airtag_id TEXT NOT NULL,
-    "timestamp" TIMESTAMPTZ NOT NULL,
-    lat DOUBLE PRECISION NOT NULL,
-    lon DOUBLE PRECISION NOT NULL,
-    accuracy DOUBLE PRECISION,
-    confidence SMALLINT,
-    source TEXT NOT NULL DEFAULT 'findmy',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT location_reports_airtag_timestamp_key UNIQUE (airtag_id, "timestamp")
-);
+from airtag_sentry.migrations import MIGRATIONS
 
-CREATE TABLE IF NOT EXISTS alerts (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    airtag_id TEXT NOT NULL,
-    "timestamp" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    reason TEXT NOT NULL,
-    distance_meters DOUBLE PRECISION NOT NULL,
-    report_id BIGINT NOT NULL REFERENCES location_reports(id)
-);
-
-CREATE TABLE IF NOT EXISTS push_subscriptions (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    endpoint TEXT NOT NULL UNIQUE,
-    p256dh TEXT NOT NULL,
-    auth TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Migration for pre-multi-airtag deployments: backfill existing rows under a
--- 'default' airtag_id and replace the old single-column uniqueness with a
--- composite one, so different airtags may share a timestamp. Must run before
--- the airtag_id-referencing indexes below, since a legacy table won't have
--- that column until these ALTERs apply.
-ALTER TABLE location_reports ADD COLUMN IF NOT EXISTS airtag_id TEXT NOT NULL DEFAULT 'default';
-ALTER TABLE location_reports ALTER COLUMN airtag_id DROP DEFAULT;
-ALTER TABLE location_reports DROP CONSTRAINT IF EXISTS location_reports_timestamp_key;
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'location_reports_airtag_timestamp_key'
-    ) THEN
-        ALTER TABLE location_reports
-            ADD CONSTRAINT location_reports_airtag_timestamp_key UNIQUE (airtag_id, "timestamp");
-    END IF;
-END $$;
-ALTER TABLE alerts ADD COLUMN IF NOT EXISTS airtag_id TEXT NOT NULL DEFAULT 'default';
-ALTER TABLE alerts ALTER COLUMN airtag_id DROP DEFAULT;
-
-CREATE INDEX IF NOT EXISTS idx_location_reports_timestamp ON location_reports ("timestamp");
-CREATE INDEX IF NOT EXISTS idx_location_reports_airtag_timestamp ON location_reports (airtag_id, "timestamp");
-CREATE INDEX IF NOT EXISTS idx_alerts_airtag_timestamp ON alerts (airtag_id, "timestamp");
-"""
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,6 +40,13 @@ class Alert:
 
 
 @dataclasses.dataclass(frozen=True)
+class StoredKey:
+    airtag_id: str
+    key_type: str  # "accessory_json" | "private_key_b64"
+    encrypted_data: str
+
+
+@dataclasses.dataclass(frozen=True)
 class PushSubscription:
     # Deliberately not scoped to an airtag_id: a subscribed browser gets alerts
     # for every configured AirTag.
@@ -105,10 +61,30 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
         yield conn
 
 
-def init_schema(conn: psycopg.Connection) -> None:
+def run_migrations(conn: psycopg.Connection) -> None:
+    """Apply every migration from airtag_sentry.migrations not yet recorded in
+    schema_migrations, in order, each in its own transaction."""
     with conn.cursor() as cur:
-        cur.execute(SCHEMA)
-    conn.commit()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+            """
+        )
+        conn.commit()
+        cur.execute("SELECT version FROM schema_migrations")
+        applied = {row[0] for row in cur.fetchall()}
+
+    for version, sql in MIGRATIONS:
+        if version in applied:
+            continue
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            cur.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (version,))
+        conn.commit()
+        logger.info("Applied migration %s", version)
 
 
 def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Report]:
@@ -223,3 +199,41 @@ def list_push_subscriptions(conn: psycopg.Connection) -> list[PushSubscription]:
     with conn.cursor() as cur:
         cur.execute("SELECT endpoint, p256dh, auth FROM push_subscriptions")
         return [PushSubscription(*row) for row in cur.fetchall()]
+
+
+def set_airtag_key(conn: psycopg.Connection, key: StoredKey) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO airtag_keys (airtag_id, key_type, encrypted_data, updated_at)
+            VALUES (%s, %s, %s, now())
+            ON CONFLICT (airtag_id) DO UPDATE
+                SET key_type = EXCLUDED.key_type,
+                    encrypted_data = EXCLUDED.encrypted_data,
+                    updated_at = now()
+            """,
+            (key.airtag_id, key.key_type, key.encrypted_data),
+        )
+    conn.commit()
+
+
+def get_airtag_key(conn: psycopg.Connection, airtag_id: str) -> StoredKey | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT airtag_id, key_type, encrypted_data FROM airtag_keys WHERE airtag_id = %s",
+            (airtag_id,),
+        )
+        row = cur.fetchone()
+        return StoredKey(*row) if row else None
+
+
+def delete_airtag_key(conn: psycopg.Connection, airtag_id: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM airtag_keys WHERE airtag_id = %s", (airtag_id,))
+    conn.commit()
+
+
+def list_keyed_airtag_ids(conn: psycopg.Connection) -> set[str]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT airtag_id FROM airtag_keys")
+        return {row[0] for row in cur.fetchall()}

@@ -27,9 +27,22 @@ services:
         condition: service_healthy
       anisette:
         condition: service_started
+    # env_file for plain `docker compose up`; the explicit environment: block
+    # below is what makes each variable show up individually in Coolify's UI.
     env_file: .env
-    # accessory_json_path files (per-airtag key exports) also live under here,
-    # e.g. ./data/keys/bike.json -> /app/data/keys/bike.json.
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_ALLOWED_LOGIN: ${GITHUB_ALLOWED_LOGIN}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
+      AIRTAG_KEY_ENCRYPTION_KEY: ${AIRTAG_KEY_ENCRYPTION_KEY}
+      NTFY_TOPIC_URL: ${NTFY_TOPIC_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
     volumes:
       - app_data:/app/data
       - ./config.yaml:/app/config.yaml:ro
@@ -42,6 +55,19 @@ services:
       postgres:
         condition: service_healthy
     env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_ALLOWED_LOGIN: ${GITHUB_ALLOWED_LOGIN}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
+      AIRTAG_KEY_ENCRYPTION_KEY: ${AIRTAG_KEY_ENCRYPTION_KEY}
+      NTFY_TOPIC_URL: ${NTFY_TOPIC_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
     volumes:
       - app_data:/app/data:ro
       - ./config.yaml:/app/config.yaml:ro

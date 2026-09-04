@@ -23,12 +23,12 @@ timeline.
 
 ## ⚠️ What you must already have
 
-- **An AirTag key for each AirTag you want to track.** See
-  [Extracting your AirTag key](#extracting-your-airtag-key) below. For each
-  entry in `config.yaml`'s `airtags:` list you need either:
-  - a base64-encoded private key (`AIRTAG_PRIVATE_KEY_B64_<ID>` in `.env`), or
-  - an exported `FindMyAccessory` JSON file (`accessory_json_path` in that
-    entry).
+- **An AirTag key for each AirTag you want to track**, entered through the
+  dashboard once it's running. See
+  [Extracting your AirTag key](#extracting-your-airtag-key) below.
+- **An encryption key for storing those AirTag keys at rest.** See
+  [AirTag key storage](#airtag-key-storage-config-first-encrypted-at-rest)
+  below.
 - **Your own Apple ID**, with 2FA you can complete interactively once.
 - **A GitHub OAuth App**, so the dashboard can require you to log in with your
   own GitHub account. See [Dashboard login](#dashboard-login-github-oauth)
@@ -36,6 +36,25 @@ timeline.
 - Using this against an AirTag you don't own, or in a way that violates
   Apple's Terms of Service, is on you — this is for tracking your own
   property.
+
+## AirTag key storage (config-first, encrypted at rest)
+
+`config.yaml`'s `airtags:` list only declares each AirTag's identity — `id`
+and display `name`. The actual secret key material never goes in
+`config.yaml` or `.env`; instead it's entered through the dashboard's
+**AirTags verwalten** (⚙️) panel, encrypted, and stored in Postgres.
+
+This needs one encryption key in `.env`, used to encrypt/decrypt that stored
+key material — it can't itself live in the database it protects:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Paste the result into `.env` as `AIRTAG_KEY_ENCRYPTION_KEY`. Once the
+dashboard is running (see [Local setup](#local-setup)), open the ⚙️ panel,
+pick the AirTag, and either paste its base64 key or upload the JSON file
+exported per the next section.
 
 ## Extracting your AirTag key
 
@@ -56,23 +75,11 @@ python -m findmy decrypt --out-dir data/keys
 This will prompt for your macOS login keychain password / Touch ID (possibly
 twice) to read the `BeaconStore` Keychain item, then decrypts the local Find My
 accessory records and writes one `<uuid>.json` file per paired accessory
-(AirTags, AirPods, paired Macs/iPhones, etc.) into `data/keys/` — already in
-the exact format `accessory_json_path` expects. Files are named by internal
-UUID, not by display name, so open each one and match its `"name"` field
-against the AirTag you're after, then rename it to something meaningful, e.g.:
-
-```bash
-mv data/keys/<uuid>.json data/keys/bike.json
-```
-
-Reference it from that AirTag's entry in `config.yaml`:
-
-```yaml
-airtags:
-  - id: "bike"
-    name: "Fahrrad"
-    accessory_json_path: "data/keys/bike.json"
-```
+(AirTags, AirPods, paired Macs/iPhones, etc.) into `data/keys/`. Files are
+named by internal UUID, not by display name, so open each one and check its
+`"name"` field to find the AirTag you're after, then upload that file
+directly in the dashboard's AirTags-verwalten panel (see above) — no need to
+rename it or reference it from `config.yaml`.
 
 This only works for accessories already paired to your own Apple ID on that
 Mac — extract keys for your own property only.
@@ -117,14 +124,13 @@ For that case, set `https_only=False` on the `SessionMiddleware` call in
 cp config.example.yaml config.yaml   # adjust thresholds, airtag name, key source
 cp .env.example .env                 # fill in DATABASE_URL, notifier creds, etc.
 python scripts/generate_vapid_keys.py   # paste the output into .env for Web Push
+
+# Local (non-Coolify) only: publish the dashboard on localhost.
+cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
 Edit `config.yaml`:
-- Add one entry per AirTag under `airtags:`. For each, set
-  `accessory_json_path` **or** leave it `null` and set
-  `AIRTAG_PRIVATE_KEY_B64_<ID>` in `.env` instead (`<ID>` = that entry's `id`,
-  uppercased with non-alphanumeric characters replaced by `_`) — exactly one
-  key source is required per entry.
+- Add one entry (`id` + `name`) per AirTag under `airtags:`.
 - For Docker Compose, set `apple.anisette.mode: remote` and
   `apple.anisette.remote_url: http://anisette:6969` so polling uses the
   bundled anisette container instead of generating anisette data in-process.
@@ -135,7 +141,13 @@ docker compose run --rm app python -m airtag_sentry login   # interactive, needs
 docker compose up -d
 ```
 
-The dashboard is then at `http://localhost:8000`.
+The dashboard is then at `http://localhost:8000` (with the override file from
+above — without it, plain `docker compose up` doesn't publish any host port,
+matching how Coolify runs it) — open it, log in with
+GitHub, and add each AirTag's key via the ⚙️ panel (see
+[AirTag key storage](#airtag-key-storage-config-first-encrypted-at-rest)).
+Until a key is added, that tag's poll is skipped with a log line — it won't
+crash the scheduler.
 
 **The `login` step cannot be automated or run in CI** — it needs your Apple ID
 password and a live 2FA code from your phone. Run it once; the resulting
@@ -173,10 +185,15 @@ notifications, even when the app isn't open.
 
 1. Create a new **Docker Compose** resource in Coolify pointed at this repo
    (`docker-compose.yml` at the root).
-2. Set the variables from `.env.example` in Coolify's environment tab (or
-   commit your own non-secret defaults and let Coolify prompt for secrets).
+2. Every variable from `.env.example` is declared explicitly in
+   `docker-compose.yml`'s `environment:` blocks, so Coolify's environment tab
+   lists each one individually — fill them in there.
 3. Uncomment `SERVICE_FQDN_DASHBOARD_8000` in your env — Coolify auto-assigns
-   a public domain + TLS to the `dashboard` service's port 8000.
+   a public domain + TLS to the `dashboard` service's port 8000. It's the
+   only `SERVICE_FQDN_*` variable in the stack, so the whole deployment sits
+   behind a single domain — the `dashboard` service isn't given a host port
+   mapping in `docker-compose.yml`; Coolify's proxy reaches it directly over
+   the internal Docker network.
 4. Deploy. Coolify persists the `postgres_data` and `app_data` named volumes
    across redeploys automatically.
 5. Run the login step once against the deployed stack: open the `app`
@@ -196,6 +213,17 @@ consecutive reports:
 
 The very first poll backfills ~7 days of history; alerts for that backfill are
 suppressed unless you set `movement.alert_on_backfill: true`.
+
+## Database migrations
+
+Schema changes live as an ordered list of one-time SQL migrations in
+`airtag_sentry/migrations.py`, each recorded in a `schema_migrations` table
+once applied (`SELECT * FROM schema_migrations ORDER BY applied_at` shows the
+history). Both `poll`/`run` and `serve` call `run_migrations()` on startup, so
+there's no separate migration step to remember — a fresh database and an
+upgraded one both replay the same history and end up in the same state.
+Never edit a migration that has already shipped; add a new entry to the list
+instead.
 
 ## Development
 
@@ -217,5 +245,10 @@ pytest   # movement math + notifier payloads run standalone;
 - Single user (one allowed GitHub login), no mobile app beyond the installable
   PWA — intentional per the original spec's non-goals. Multiple AirTags per
   Apple ID are supported via `config.yaml`'s `airtags:` list.
+- **Upgrading from a version that used `accessory_json_path` or
+  `AIRTAG_PRIVATE_KEY_B64_<ID>`**: those config/env fields are gone. Remove
+  them from `config.yaml`/`.env`, set `AIRTAG_KEY_ENCRYPTION_KEY`, and
+  re-enter each AirTag's key (the same base64 string or JSON file you already
+  have) once via the dashboard's ⚙️ panel.
 - If Apple changes the Find My protocol, `FindMy.py` (and therefore this app)
   can break without warning — keep an eye on its upstream repo.
