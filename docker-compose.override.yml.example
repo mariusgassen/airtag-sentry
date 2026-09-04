@@ -1,0 +1,8 @@
+# For plain local `docker compose up` without Coolify: copy this to
+# docker-compose.override.yml (auto-loaded, gitignored) to publish the
+# dashboard on localhost. Coolify deployments don't need this - its proxy
+# reaches the `dashboard` service directly over the internal Docker network.
+services:
+  dashboard:
+    ports:
+      - "8000:8000"

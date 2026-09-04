@@ -4,10 +4,12 @@ movement check -> notify.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from findmy import FindMyAccessory, KeyPair
 
+from airtag_sentry import keystore
 from airtag_sentry.auth import restore_account
 from airtag_sentry.config import AirtagConfig, Config
 from airtag_sentry.db import (
@@ -17,8 +19,9 @@ from airtag_sentry.db import (
     Report,
     count_reports,
     fetch_reports_before,
+    get_airtag_key,
     get_conn,
-    init_schema,
+    run_migrations,
     insert_reports,
     record_alert,
 )
@@ -33,17 +36,24 @@ _ALERT_TITLES = {
 }
 
 
-def _load_key(airtag: AirtagConfig):
-    if airtag.accessory_json_path:
-        return FindMyAccessory.from_json(airtag.accessory_json_path)
-    return KeyPair.from_b64(airtag.private_key_b64)
+def _load_key(cfg: Config, conn, airtag_id: str):
+    stored = get_airtag_key(conn, airtag_id)
+    if stored is None:
+        raise RuntimeError(
+            f"No key stored for airtag '{airtag_id}' - add one via the dashboard's "
+            "Manage AirTags panel."
+        )
+    plaintext = keystore.decrypt(cfg.key_encryption_key, stored.encrypted_data)
+    if stored.key_type == "accessory_json":
+        return FindMyAccessory.from_json(json.loads(plaintext))
+    return KeyPair.from_b64(plaintext)
 
 
 def poll_once(cfg: Config) -> None:
     account = restore_account(cfg)
 
     with get_conn(cfg.database_url) as conn:
-        init_schema(conn)
+        run_migrations(conn)
         notifiers = build_notifiers(cfg)
         for airtag in cfg.airtags:
             try:
@@ -55,7 +65,7 @@ def poll_once(cfg: Config) -> None:
 
 
 def _poll_airtag(cfg: Config, account, airtag: AirtagConfig, conn, notifiers) -> None:
-    key = _load_key(airtag)
+    key = _load_key(cfg, conn, airtag.id)
     location_reports = account.fetch_location_history(key)
 
     if not location_reports:

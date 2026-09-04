@@ -87,3 +87,72 @@ Source: user's spec (`airtagsentryspec.md`) + amendments (Postgres, PWA push, Co
   dashboard switching in an actual browser, and `python -m findmy decrypt`
   itself. `pytest` (movement + notifiers) and a syntax/import check were run;
   see PR description for the full verification list.
+
+## v3: Coolify env exposure, fancier mobile UI, encrypted UI-managed keys
+- [x] `docker-compose.yml`: explicit `environment:` blocks on `app`/`dashboard`
+      (kept alongside `env_file: .env`) so Coolify's UI lists every var
+- [x] AirTag keys moved out of `config.yaml`/`.env` entirely: `AirtagConfig`
+      is now just `id`+`name`; keys are encrypted (Fernet,
+      `AIRTAG_KEY_ENCRYPTION_KEY`) and stored in a new `airtag_keys` Postgres
+      table, managed via `/api/airtags/{id}/key` (POST/DELETE)
+- [x] `airtag_sentry/keystore.py`: small encrypt/decrypt module
+- [x] `tracker.py`: `_load_key` now decrypts from the DB per poll instead of
+      reading `accessory_json_path`/env vars
+- [x] `web/static/index.html`: full rewrite — mobile-first responsive layout,
+      stat cards, restyled map/table, and a new "AirTags verwalten" panel for
+      uploading/pasting keys and removing them, with client-side validation
+      before sending
+- [x] README: config-first/encrypted-at-rest key storage section, updated
+      key-extraction flow (upload via UI instead of `accessory_json_path`),
+      post-upgrade callout for existing users
+
+## Review (v3)
+- Another breaking change, no back-compat shim: `accessory_json_path` and
+  `AIRTAG_PRIVATE_KEY_B64_<ID>` are gone. Existing users must set
+  `AIRTAG_KEY_ENCRYPTION_KEY` and re-enter each key once via the dashboard.
+- The encryption master key is still an env var by necessity (a key can't
+  protect data while living inside that same data store) — this is the one
+  secret that couldn't move to "config first."
+- Key validation happens server-side before storing (constructs a real
+  `KeyPair`/`FindMyAccessory` from the submitted value) so a bad paste/upload
+  is rejected immediately with a 400, not discovered at the next poll.
+- Not verified in this sandbox (no browser available here): the dashboard's
+  actual visual appearance and mobile responsiveness. Logic was verified via
+  `pytest` against a real local Postgres and a `TestClient`-driven exercise of
+  the new key-management endpoints (set via both b64 and JSON, confirm
+  `has_key`, delete) — see PR description.
+
+## v4: tracked schema migrations, Coolify single-domain/no-port-bind follow-up
+- [x] Confirmed the dashboard's `ports:` mapping was already removed directly
+      on `main` (user commit, merged with PR #2) — no `ports:` on any service
+      now, so Coolify's proxy reaches `dashboard` over the internal network
+      only; added `docker-compose.override.yml.example` for local host-port
+      access without touching the Coolify-facing compose file
+- [x] Confirmed "single domain": `SERVICE_FQDN_DASHBOARD_8000` is the only
+      `SERVICE_FQDN_*` var in the stack — documented explicitly in
+      `.env.example` and the Coolify section rather than leaving it implicit
+- [x] Replaced the hand-rolled idempotent `SCHEMA` blob in `db.py` with real
+      tracked migrations: `airtag_sentry/migrations.py` holds an ordered
+      `(version, sql)` list (`0001_initial_schema`, `0002_multi_airtag`,
+      `0003_airtag_keys` — the exact history so far, decomposed), applied by
+      a new `run_migrations()` that records each version in a
+      `schema_migrations` table so it only ever runs once; `init_schema` is
+      gone, renamed everywhere it was called (`web/app.py`, `tracker.py`,
+      `tests/test_db.py`)
+- [x] Tests: `schema_migrations` is asserted to contain exactly the 3 expected
+      versions after a fresh run, and re-running `run_migrations` is asserted
+      idempotent (no re-inserts)
+
+## Review (v4)
+- This removes the "IF NOT EXISTS defensive guard" style of migration for
+  anything new going forward — a migration only ever runs once per database,
+  tracked by `schema_migrations`, so new migrations can write plain
+  non-idempotent SQL. `0002_multi_airtag` keeps its `IF NOT EXISTS`/`DO $$`
+  guards specifically because it's the one migration that might already have
+  partially applied on a database that ran this project before
+  `schema_migrations` existed (i.e. before this change) — that's a one-time
+  transitional concern, not the new pattern going forward.
+- Verified against a real local Postgres: a completely fresh database ends up
+  with exactly the 3 expected `schema_migrations` rows; re-running
+  `run_migrations()` is a no-op; `docker compose config` still parses with
+  the override file's `services.dashboard.ports` merged in when present.

@@ -4,7 +4,17 @@ import os
 import psycopg
 import pytest
 
-from airtag_sentry.db import Report, get_conn, init_schema, insert_reports
+from airtag_sentry.db import (
+    Report,
+    StoredKey,
+    delete_airtag_key,
+    get_airtag_key,
+    get_conn,
+    insert_reports,
+    list_keyed_airtag_ids,
+    run_migrations,
+    set_airtag_key,
+)
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://airtag:airtag@localhost:5432/airtag_sentry_test"
@@ -15,9 +25,12 @@ TEST_DATABASE_URL = os.environ.get(
 def conn():
     try:
         with get_conn(TEST_DATABASE_URL) as connection:
-            init_schema(connection)
+            run_migrations(connection)
             with connection.cursor() as cur:
-                cur.execute("TRUNCATE location_reports, alerts, push_subscriptions RESTART IDENTITY CASCADE")
+                cur.execute(
+                    "TRUNCATE location_reports, alerts, push_subscriptions, airtag_keys "
+                    "RESTART IDENTITY CASCADE"
+                )
             connection.commit()
             yield connection
     except psycopg.OperationalError:
@@ -42,7 +55,27 @@ def test_schema_creates_tables(conn):
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
         )
         tables = {row[0] for row in cur.fetchall()}
-    assert {"location_reports", "alerts", "push_subscriptions"} <= tables
+    assert {
+        "location_reports",
+        "alerts",
+        "push_subscriptions",
+        "airtag_keys",
+        "schema_migrations",
+    } <= tables
+
+
+def test_migrations_recorded_and_idempotent(conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT version FROM schema_migrations ORDER BY version")
+        versions = [row[0] for row in cur.fetchall()]
+    assert versions == ["0001_initial_schema", "0002_multi_airtag", "0003_airtag_keys"]
+
+    # Re-running must not error and must not re-apply anything.
+    run_migrations(conn)
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM schema_migrations")
+        (count,) = cur.fetchone()
+    assert count == 3
 
 
 def test_insert_reports_returns_only_new_rows(conn):
@@ -74,3 +107,22 @@ def test_insert_reports_allows_same_timestamp_for_different_airtag(conn):
         cur.execute("SELECT count(*) FROM location_reports")
         (count,) = cur.fetchone()
     assert count == 2
+
+
+def test_airtag_key_set_get_delete_round_trip(conn):
+    assert get_airtag_key(conn, "bike") is None
+    assert list_keyed_airtag_ids(conn) == set()
+
+    set_airtag_key(conn, StoredKey(airtag_id="bike", key_type="private_key_b64", encrypted_data="tok1"))
+    stored = get_airtag_key(conn, "bike")
+    assert stored == StoredKey(airtag_id="bike", key_type="private_key_b64", encrypted_data="tok1")
+    assert list_keyed_airtag_ids(conn) == {"bike"}
+
+    # Setting again for the same id replaces rather than duplicating.
+    set_airtag_key(conn, StoredKey(airtag_id="bike", key_type="accessory_json", encrypted_data="tok2"))
+    stored = get_airtag_key(conn, "bike")
+    assert stored == StoredKey(airtag_id="bike", key_type="accessory_json", encrypted_data="tok2")
+
+    delete_airtag_key(conn, "bike")
+    assert get_airtag_key(conn, "bike") is None
+    assert list_keyed_airtag_ids(conn) == set()

@@ -5,9 +5,9 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
-import re
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,6 @@ class AppleConfig:
 class AirtagConfig:
     id: str
     name: str
-    accessory_json_path: str | None
-    private_key_b64: str | None
 
 
 @dataclasses.dataclass
@@ -99,6 +97,7 @@ class Config:
     web: WebConfig
     auth: AuthConfig
     database_url: str
+    key_encryption_key: str
     notifications: NotificationsConfig
 
 
@@ -130,7 +129,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 
     airtags: list[AirtagConfig] = []
     seen_ids: set[str] = set()
-    seen_env_suffixes: dict[str, str] = {}
     for entry in airtags_raw:
         airtag_id = str((entry or {}).get("id") or "").strip()
         if not airtag_id:
@@ -138,31 +136,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         if airtag_id in seen_ids:
             raise ConfigError(f"Duplicate airtag id '{airtag_id}' in airtags:.")
         seen_ids.add(airtag_id)
-
-        suffix = re.sub(r"[^A-Za-z0-9]", "_", airtag_id).upper()
-        if suffix in seen_env_suffixes:
-            raise ConfigError(
-                f"airtag ids '{seen_env_suffixes[suffix]}' and '{airtag_id}' both map to "
-                f"the same env var AIRTAG_PRIVATE_KEY_B64_{suffix} - use more distinct ids."
-            )
-        seen_env_suffixes[suffix] = airtag_id
-
-        accessory_json_path = entry.get("accessory_json_path")
-        env_name = f"AIRTAG_PRIVATE_KEY_B64_{suffix}"
-        private_key_b64 = _env(env_name)
-        if bool(accessory_json_path) == bool(private_key_b64):
-            raise ConfigError(
-                f"airtags[id={airtag_id}]: set exactly one of accessory_json_path "
-                f"(config.yaml) or {env_name} (.env) as this AirTag's key source."
-            )
-        airtags.append(
-            AirtagConfig(
-                id=airtag_id,
-                name=entry.get("name", airtag_id),
-                accessory_json_path=accessory_json_path,
-                private_key_b64=private_key_b64,
-            )
-        )
+        airtags.append(AirtagConfig(id=airtag_id, name=entry.get("name", airtag_id)))
 
     polling_raw = raw.get("polling", {}) or {}
     polling = PollingConfig(interval_minutes=int(polling_raw.get("interval_minutes", 15)))
@@ -207,6 +181,17 @@ def load_config(path: str | Path = "config.yaml") -> Config:
     if not database_url:
         raise ConfigError("DATABASE_URL is not set. Copy .env.example to .env and adjust it.")
 
+    key_encryption_key = _env("AIRTAG_KEY_ENCRYPTION_KEY")
+    if not key_encryption_key:
+        raise ConfigError(
+            "AIRTAG_KEY_ENCRYPTION_KEY is not set. Generate one with: "
+            'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+        )
+    try:
+        Fernet(key_encryption_key.encode())
+    except ValueError as exc:
+        raise ConfigError(f"AIRTAG_KEY_ENCRYPTION_KEY is not a valid Fernet key: {exc}") from exc
+
     ntfy_url = _env("NTFY_TOPIC_URL")
     ntfy = NtfyConfig(topic_url=ntfy_url) if ntfy_url else None
 
@@ -238,5 +223,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         web=web,
         auth=auth,
         database_url=database_url,
+        key_encryption_key=key_encryption_key,
         notifications=notifications,
     )

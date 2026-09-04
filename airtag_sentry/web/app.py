@@ -7,26 +7,34 @@ in its threadpool automatically - no async DB driver needed at this scale.
 
 from __future__ import annotations
 
+import json
 import secrets
 from pathlib import Path
+from typing import Any
 
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from findmy import FindMyAccessory, KeyPair
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from airtag_sentry import keystore
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     PushSubscription,
+    StoredKey,
     add_push_subscription,
+    delete_airtag_key,
     fetch_reports,
     get_conn,
-    init_schema,
+    run_migrations,
     latest_alert,
+    list_keyed_airtag_ids,
     remove_push_subscription,
+    set_airtag_key,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -71,6 +79,11 @@ class SubscriptionIn(BaseModel):
 
 class UnsubscribeIn(BaseModel):
     endpoint: str
+
+
+class AirtagKeyIn(BaseModel):
+    private_key_b64: str | None = None
+    accessory_json: dict[str, Any] | None = None
 
 
 def create_app(cfg: Config | None = None) -> FastAPI:
@@ -147,13 +160,56 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
 
     @app.get("/api/airtags")
     def get_airtags():
-        return [{"id": a.id, "name": a.name} for a in cfg.airtags]
+        with get_conn(cfg.database_url) as conn:
+            run_migrations(conn)
+            keyed_ids = list_keyed_airtag_ids(conn)
+        return [{"id": a.id, "name": a.name, "has_key": a.id in keyed_ids} for a in cfg.airtags]
+
+    @app.post("/api/airtags/{airtag_id}/key")
+    def set_airtag_key_route(airtag_id: str, body: AirtagKeyIn):
+        _resolve_airtag_id(airtag_id)
+        if bool(body.private_key_b64) == bool(body.accessory_json):
+            raise HTTPException(
+                status_code=400,
+                detail="Provide exactly one of private_key_b64 or accessory_json.",
+            )
+
+        if body.accessory_json is not None:
+            key_type = "accessory_json"
+            plaintext = json.dumps(body.accessory_json)
+            try:
+                FindMyAccessory.from_json(body.accessory_json)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid accessory_json: {exc}") from exc
+        else:
+            key_type = "private_key_b64"
+            plaintext = body.private_key_b64
+            try:
+                KeyPair.from_b64(plaintext)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid private_key_b64: {exc}") from exc
+
+        encrypted = keystore.encrypt(cfg.key_encryption_key, plaintext)
+        with get_conn(cfg.database_url) as conn:
+            run_migrations(conn)
+            set_airtag_key(
+                conn, StoredKey(airtag_id=airtag_id, key_type=key_type, encrypted_data=encrypted)
+            )
+        return {"ok": True}
+
+    @app.delete("/api/airtags/{airtag_id}/key")
+    def delete_airtag_key_route(airtag_id: str):
+        _resolve_airtag_id(airtag_id)
+        with get_conn(cfg.database_url) as conn:
+            run_migrations(conn)
+            delete_airtag_key(conn, airtag_id)
+        return {"ok": True}
 
     @app.get("/api/reports")
     def get_reports(airtag_id: str | None = None, limit: int | None = None):
         resolved = _resolve_airtag_id(airtag_id)
         with get_conn(cfg.database_url) as conn:
-            init_schema(conn)
+            run_migrations(conn)
             reports = fetch_reports(conn, resolved, limit=limit)
         return [
             {
@@ -171,7 +227,7 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     def get_status(airtag_id: str | None = None):
         resolved = _resolve_airtag_id(airtag_id)
         with get_conn(cfg.database_url) as conn:
-            init_schema(conn)
+            run_migrations(conn)
             reports = fetch_reports(conn, resolved, limit=1)
             alert = latest_alert(conn, resolved)
         return {
@@ -199,7 +255,7 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     @app.post("/api/push/subscribe")
     def subscribe(sub: SubscriptionIn):
         with get_conn(cfg.database_url) as conn:
-            init_schema(conn)
+            run_migrations(conn)
             add_push_subscription(
                 conn,
                 PushSubscription(endpoint=sub.endpoint, p256dh=sub.keys.p256dh, auth=sub.keys.auth),
@@ -209,7 +265,7 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     @app.post("/api/push/unsubscribe")
     def unsubscribe(body: UnsubscribeIn):
         with get_conn(cfg.database_url) as conn:
-            init_schema(conn)
+            run_migrations(conn)
             remove_push_subscription(conn, body.endpoint)
         return {"ok": True}
 
