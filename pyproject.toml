@@ -1,0 +1,29 @@
+[project]
+name = "airtag-sentry"
+version = "0.1.0"
+description = "Self-hosted location history and movement alerts for a single AirTag."
+requires-python = ">=3.11"
+dependencies = [
+    "findmy>=0.9.6",
+    "psycopg[binary]>=3.1",
+    "apscheduler>=3.10",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pyyaml>=6.0",
+    "requests>=2.32",
+    "pywebpush>=2.0",
+    "py-vapid>=1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["airtag_sentry*"]

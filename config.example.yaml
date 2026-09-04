@@ -1,0 +1,34 @@
+# Copy to config.yaml and adjust. Secrets and infra values (DB, VAPID, notifier
+# credentials) live in .env instead — see .env.example.
+
+apple:
+  store_path: "data/account.json"
+  anisette:
+    mode: local # local | remote
+    libs_path: "data/ani_libs.bin"
+    remote_url: null # e.g. http://anisette:6969, used when mode: remote
+
+airtag:
+  name: "Fahrrad"
+  # Exactly one key source is required: either set accessory_json_path here,
+  # or set AIRTAG_PRIVATE_KEY_B64 in .env. accessory_json_path points to a
+  # FindMyAccessory export (see FindMy.py's plist_to_json / macless-haystack
+  # conversion tools) for an officially-paired AirTag whose key was already
+  # extracted. Extracting that key is outside this app's scope.
+  accessory_json_path: null
+
+polling:
+  interval_minutes: 15
+
+movement:
+  # Normal "it moved" alert.
+  distance_threshold_meters: 100
+  # A smaller move only matters once the tag has been stationary this long.
+  stillstand_hours: 24
+  stillstand_movement_meters: 15
+  # Suppress alerts for the ~7 days of history backfilled on the very first poll.
+  alert_on_backfill: false
+
+web:
+  host: "0.0.0.0"
+  port: 8000
