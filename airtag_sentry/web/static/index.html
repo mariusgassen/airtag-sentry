@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirTagSentry</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1f6feb">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+  header { padding: 1rem; display: flex; justify-content: space-between; align-items: center; background: #161b22; }
+  h1 { font-size: 1.1rem; margin: 0; }
+  #map { height: 60vh; width: 100%; }
+  #status { padding: 0.75rem 1rem; font-size: 0.9rem; color: #8b949e; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { padding: 0.4rem 1rem; text-align: left; border-bottom: 1px solid #21262d; }
+  button { background: #238636; color: white; border: none; border-radius: 6px; padding: 0.5rem 0.9rem; cursor: pointer; }
+  button:disabled { background: #30363d; cursor: default; }
+  #reports-wrap { max-height: 40vh; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">AirTagSentry</h1>
+  <button id="enable-push">Benachrichtigungen aktivieren</button>
+</header>
+<div id="status">Lade Daten…</div>
+<div id="map"></div>
+<div id="reports-wrap">
+  <table>
+    <thead><tr><th>Zeit</th><th>Lat</th><th>Lon</th><th>Genauigkeit (m)</th></tr></thead>
+    <tbody id="reports-body"></tbody>
+  </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+async function loadData() {
+  const [reportsRes, statusRes] = await Promise.all([
+    fetch('/api/reports?limit=500'),
+    fetch('/api/status'),
+  ]);
+  const reports = await reportsRes.json();
+  const status = await statusRes.json();
+
+  document.getElementById('title').textContent = `AirTagSentry — ${status.airtag_name}`;
+  const statusEl = document.getElementById('status');
+  if (status.last_report) {
+    const alertText = status.last_alert
+      ? ` · letzter Alarm: ${status.last_alert.reason} um ${new Date(status.last_alert.timestamp).toLocaleString()}`
+      : '';
+    statusEl.textContent = `Letzter Report: ${new Date(status.last_report.timestamp).toLocaleString()} · Polling alle ${status.poll_interval_minutes} min${alertText}`;
+  } else {
+    statusEl.textContent = 'Noch keine Reports vorhanden.';
+  }
+
+  const tbody = document.getElementById('reports-body');
+  tbody.innerHTML = '';
+  for (const r of [...reports].reverse()) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${new Date(r.timestamp).toLocaleString()}</td><td>${r.lat.toFixed(5)}</td><td>${r.lon.toFixed(5)}</td><td>${r.accuracy ?? '-'}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  if (reports.length > 0) {
+    const latlngs = reports.map(r => [r.lat, r.lon]);
+    const map = L.map('map').setView(latlngs[latlngs.length - 1], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+    L.polyline(latlngs, { color: '#1f6feb' }).addTo(map);
+    L.marker(latlngs[latlngs.length - 1]).addTo(map).bindPopup('Letzte Position').openPopup();
+    map.fitBounds(latlngs);
+  } else {
+    document.getElementById('map').textContent = 'Keine Standortdaten vorhanden.';
+  }
+}
+loadData();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js');
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+document.getElementById('enable-push').addEventListener('click', async () => {
+  const button = document.getElementById('enable-push');
+  button.disabled = true;
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      alert('Benachrichtigungen wurden nicht erlaubt.');
+      button.disabled = false;
+      return;
+    }
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    if (!keyRes.ok) {
+      alert('Web Push ist serverseitig nicht konfiguriert.');
+      button.disabled = false;
+      return;
+    }
+    const { publicKey } = await keyRes.json();
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    button.textContent = 'Benachrichtigungen aktiv';
+  } catch (err) {
+    console.error(err);
+    alert('Aktivierung fehlgeschlagen: ' + err.message);
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

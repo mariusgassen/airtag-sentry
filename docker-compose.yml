@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  anisette:
+    image: dadoum/anisette-v3-server
+    restart: unless-stopped
+
+  app:
+    build: .
+    restart: unless-stopped
+    command: ["run"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      anisette:
+        condition: service_started
+    env_file: .env
+    volumes:
+      - app_data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+
+  dashboard:
+    build: .
+    restart: unless-stopped
+    command: ["serve"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    volumes:
+      - app_data:/app/data:ro
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres_data:
+  app_data:
