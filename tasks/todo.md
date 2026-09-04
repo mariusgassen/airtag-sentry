@@ -50,4 +50,40 @@ Source: user's spec (`airtagsentryspec.md`) + amendments (Postgres, PWA push, Co
 ## Non-goals (v1, per spec)
 - No multi-user support
 - No native mobile app (PWA dashboard instead)
-- No multi-AirTag support
+- ~~No multi-AirTag support~~ — added, see below.
+
+## v2: multi-AirTag, dashboard login, key extraction docs
+- [x] `config.yaml`: `airtag:` → `airtags:` list, each entry keyed by `id`,
+      private key sourced from `AIRTAG_PRIVATE_KEY_B64_<ID>` when
+      `accessory_json_path` isn't set; env-var-suffix collisions rejected
+- [x] `db.py`: `airtag_id` column + composite `(airtag_id, timestamp)`
+      uniqueness on `location_reports`, idempotent migration for existing
+      deployments, `airtag_id` threaded through all report/alert queries
+- [x] `tracker.py`: `poll_once` loops over all configured airtags under one
+      Apple session, isolates per-tag failures
+- [x] `web/app.py`: `/api/airtags`, `airtag_id` param on `/api/reports` +
+      `/api/status`
+- [x] `web/static/index.html`: airtag selector dropdown, fixed a real Leaflet
+      "map already initialized" bug that the dropdown would have triggered
+- [x] Dashboard auth: GitHub OAuth (`/login`, `/auth/callback`, `/logout`),
+      session-cookie middleware protecting all routes including the mounted
+      static app
+- [x] README: GitHub OAuth App setup, `python -m findmy decrypt` key
+      extraction steps (replacing the old "outside this app's scope" framing)
+- [x] Tests updated for the new `airtag_id` field on `Report`/`Alert`; added a
+      regression test for cross-tag timestamp uniqueness
+
+## Review
+- Breaking config change, no back-compat shim: existing single-tag
+  `config.yaml`/`.env` files must be migrated to the new `airtags:`/
+  `AIRTAG_PRIVATE_KEY_B64_<ID>` shape. Existing Postgres data migrates
+  automatically (backfilled under `airtag_id = 'default'`) the next time
+  `init_schema` runs.
+- Dashboard login is now mandatory — `GITHUB_CLIENT_ID`/`_SECRET`,
+  `GITHUB_ALLOWED_LOGIN`, `SESSION_SECRET_KEY` are required env vars for every
+  CLI subcommand, not just `serve`, since they share `load_config()`.
+- Not verified in this sandbox (no real Apple ID, GitHub OAuth App, live
+  Postgres/browser, or a Mac): the GitHub OAuth round-trip, multi-tag
+  dashboard switching in an actual browser, and `python -m findmy decrypt`
+  itself. `pytest` (movement + notifiers) and a syntax/import check were run;
+  see PR description for the full verification list.

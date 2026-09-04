@@ -14,7 +14,7 @@ CFG = MovementConfig(
 
 def _report(hours_ago: float, lat: float, lon: float) -> Report:
     ts = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc) - dt.timedelta(hours=hours_ago)
-    return Report(id=None, timestamp=ts, lat=lat, lon=lon, accuracy=5.0, confidence=2)
+    return Report(id=None, airtag_id="test", timestamp=ts, lat=lat, lon=lon, accuracy=5.0, confidence=2)
 
 
 def test_haversine_zero_distance():

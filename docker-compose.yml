@@ -28,6 +28,8 @@ services:
       anisette:
         condition: service_started
     env_file: .env
+    # accessory_json_path files (per-airtag key exports) also live under here,
+    # e.g. ./data/keys/bike.json -> /app/data/keys/bike.json.
     volumes:
       - app_data:/app/data
       - ./config.yaml:/app/config.yaml:ro
