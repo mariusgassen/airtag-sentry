@@ -47,7 +47,15 @@ from airtag_sentry.db import (
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-_PUBLIC_PATHS = {"/login", "/auth/callback", "/logout", "/manifest.webmanifest", "/registerSW.js", "/sw.js"}
+_PUBLIC_PATHS = {
+    "/login",
+    "/auth/callback",
+    "/logout",
+    "/manifest.webmanifest",
+    "/registerSW.js",
+    "/sw.js",
+    "/health",
+}
 
 
 def _is_public(path: str) -> bool:
@@ -61,6 +69,9 @@ def _is_public(path: str) -> bool:
     broken/missing app icon or, for sw.js, discards the "update" since it's
     not valid JS. None of these are sensitive; only the app's data and the
     app shell itself need a session.
+
+    `/health` is the same story for a different caller: Coolify's Docker
+    healthcheck probes it directly, with no session cookie to send.
     """
     return path in _PUBLIC_PATHS or path.startswith("/icons/")
 
@@ -160,6 +171,19 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     def _airtag_name(conn, airtag_id: str) -> str:
         return next(a.name for a in list_airtags(conn) if a.id == airtag_id)
+
+    @app.get("/health")
+    def health():
+        """Liveness/readiness probe for Coolify's (or `docker compose`'s) container
+        healthcheck. Actually round-trips to Postgres rather than returning a bare
+        200, so a DB outage - the one dependency that would otherwise make every
+        page silently fail - shows up as "unhealthy" instead of "running"."""
+        try:
+            with get_conn(cfg.database_url) as conn:
+                conn.execute("SELECT 1")
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+        return {"status": "ok"}
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):

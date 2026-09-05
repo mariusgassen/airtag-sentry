@@ -257,6 +257,14 @@ notifications, even when the app isn't open.
    service's container terminal in Coolify (or SSH to the host) and run
    `python -m airtag_sentry login` interactively.
 
+The `dashboard` service has a `GET /health` endpoint (round-trips to Postgres,
+returns 503 if the database is unreachable) wired up as its Docker
+`healthcheck:` in `docker-compose.yml`, so Coolify's health indicator and
+zero-downtime deploys reflect whether the dashboard is actually serving, not
+just whether the container process is running. The `app` service has no HTTP
+surface to probe, so it's left to Coolify/Docker's own container-running
+state — the same signal `restart: unless-stopped` already acts on.
+
 ## Movement detection
 
 Two alert conditions, both based on the Haversine distance between
