@@ -9,6 +9,20 @@ declare const self: ServiceWorkerGlobalScope & {
 // Workbox's build-time precache manifest (app shell assets) gets injected here.
 precacheAndRoute(self.__WB_MANIFEST)
 
+// registerType: 'autoUpdate' (vite.config.ts) only swaps the client's
+// controller to a new worker once one reaches "activated" - by default a
+// newly installed worker instead sits "waiting" until every client of the
+// old one closes, which for a backgrounded iOS home-screen PWA can mean
+// never. Skip that wait and take over existing clients immediately so a new
+// deploy's fixes actually reach an already-installed PWA.
+self.addEventListener('install', () => {
+  self.skipWaiting()
+})
+
+self.addEventListener('activate', (event: ExtendableEvent) => {
+  event.waitUntil(self.clients.claim())
+})
+
 interface PushPayload {
   title: string
   message: string
