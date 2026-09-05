@@ -72,6 +72,16 @@ def test_login_then_callback_succeeds(client, monkeypatch):
     assert resp.headers["location"] == "/"
 
 
+def test_login_page_is_never_cached(client):
+    # Each visit mints a fresh, single-use state baked into the page's link.
+    # A cached copy would hand out a stale state that no longer matches
+    # anything pending, once the browser or a proxy served it from cache
+    # instead of hitting the server again.
+    resp = client.get("/login")
+
+    assert resp.headers["cache-control"] == "no-store"
+
+
 def test_concurrent_login_hit_does_not_invalidate_in_flight_state(client, monkeypatch):
     # Regression test: a background fetch to /login (e.g. the PWA service
     # worker's Workbox precache hitting a protected path and getting
@@ -132,10 +142,32 @@ def test_repeated_background_fetches_do_not_evict_in_flight_state(client, monkey
 
 
 def test_real_navigation_to_protected_path_still_redirects_to_login(client):
-    resp = client.get("/", headers={"sec-fetch-mode": "navigate"})
+    resp = client.get("/", headers={"sec-fetch-mode": "navigate", "sec-fetch-user": "?1"})
 
     assert resp.status_code == 302
     assert resp.headers["location"] == "/login"
+
+
+def test_navigation_without_user_gesture_gets_401_not_login_redirect(client):
+    # iOS periodically wakes an installed PWA in the background (for
+    # push/badge refresh) and does a real top-level navigation to "/" with
+    # no user present - still Sec-Fetch-Mode: navigate, but never carrying
+    # Sec-Fetch-User: ?1. That must not reach /login either.
+    resp = client.get("/", headers={"sec-fetch-mode": "navigate"})
+
+    assert resp.status_code == 401
+
+
+def test_repeated_background_navigations_do_not_evict_in_flight_state(client, monkeypatch):
+    _mock_github(monkeypatch)
+    state = _extract_state(client.get("/login").text)
+
+    for _ in range(10):
+        client.get("/", headers={"sec-fetch-mode": "navigate"}, follow_redirects=True)
+
+    resp = client.get(f"/auth/callback?code=abc&state={state}")
+
+    assert resp.status_code == 302
 
 
 def test_health_is_reachable_without_a_session(client, monkeypatch):

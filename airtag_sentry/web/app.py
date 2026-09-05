@@ -102,19 +102,28 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if request.url.path.startswith("/api/"):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             # The PWA service worker precaches the app shell ("/", "/assets/*")
-            # in the background, independent of whatever page is open. A tab
-            # that was logged in before keeps that worker installed and
-            # running its own update/precache fetches even while logged out
-            # in this tab. Redirecting THOSE to /login re-ran the login route
-            # as if the user had clicked it, repeatedly regenerating the
-            # OAuth state and evicting the one a real, in-progress login was
-            # waiting on - which is why login only failed in tabs that had
-            # previously installed the service worker. Browsers only ever
-            # send Sec-Fetch-Mode: navigate for an actual top-level
-            # navigation (never from fetch()/a service worker), so use it to
-            # 401 those background requests without touching the session or
-            # ever reaching /login; a real navigation still redirects there.
-            if request.headers.get("sec-fetch-mode") not in (None, "navigate"):
+            # in the background, independent of whatever page is open, and
+            # redirecting those fetches to /login re-ran the login route as
+            # if the user had clicked it, regenerating the OAuth state.
+            # Browsers only ever send Sec-Fetch-Mode: navigate for an actual
+            # top-level navigation (never from fetch()/a service worker), so
+            # reject anything else outright instead of touching /login.
+            sec_fetch_mode = request.headers.get("sec-fetch-mode")
+            if sec_fetch_mode is not None and sec_fetch_mode != "navigate":
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            # A genuine navigation isn't enough either: iOS periodically
+            # wakes an installed PWA in the background (for push/badge
+            # refresh) and does a real top-level navigation to "/" with no
+            # user present. That's still Sec-Fetch-Mode: navigate, and it
+            # kept regenerating the OAuth state during the exact window a
+            # real login was waiting on GitHub - evicting it from the capped
+            # pending list once enough of these fired. Sec-Fetch-User: ?1 is
+            # only ever sent when a navigation followed an actual user
+            # gesture (a tap/click), so require it whenever the browser
+            # supports Fetch Metadata at all (i.e. it already sent
+            # Sec-Fetch-Mode); a real user opening the app from its icon or
+            # clicking a link always carries it.
+            if sec_fetch_mode == "navigate" and request.headers.get("sec-fetch-user") != "?1":
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             return RedirectResponse(url="/login", status_code=302)
         return await call_next(request)
@@ -213,13 +222,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             f"{_GITHUB_AUTHORIZE_URL}?client_id={cfg.auth.github_client_id}"
             f"&scope=read:user&state={state}"
         )
-        return f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
+        html = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
 <title>AirTagSentry - Login</title></head>
 <body style="font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;
 display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
 <a href="{authorize_url}" style="background:#238636;color:white;padding:0.75rem 1.25rem;
 border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a>
 </body></html>"""
+        # This page mints a fresh, single-use OAuth state every time it's
+        # rendered. Without an explicit no-store, a browser (or intermediate
+        # proxy) is free to cache this dynamic HTML and hand the *same*
+        # state back out on a later visit - e.g. via the back button, a
+        # reopened tab, or plain heuristic caching - producing a GitHub
+        # authorize link whose state no longer matches anything pending.
+        return HTMLResponse(
+            content=html,
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
 
     @app.get("/auth/callback")
     def auth_callback(request: Request, code: str | None = None, state: str | None = None):
