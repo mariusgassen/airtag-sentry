@@ -148,14 +148,21 @@ def test_real_navigation_to_protected_path_still_redirects_to_login(client):
     assert resp.headers["location"] == "/login"
 
 
-def test_navigation_without_user_gesture_gets_401_not_login_redirect(client):
+def test_navigation_without_user_gesture_still_redirects_to_login(client):
     # iOS periodically wakes an installed PWA in the background (for
     # push/badge refresh) and does a real top-level navigation to "/" with
     # no user present - still Sec-Fetch-Mode: navigate, but never carrying
-    # Sec-Fetch-User: ?1. That must not reach /login either.
+    # Sec-Fetch-User: ?1. A plain browser reload of "/" *also* never carries
+    # Sec-Fetch-User: ?1 (it's a reload, not a link/bookmark activation), so
+    # gating the redirect on that header 401'd real users reloading the
+    # dashboard instead of sending them to /login. Both cases now redirect;
+    # what actually needed fixing was the OAuth state list evicting an
+    # in-flight login under a burst of these (see
+    # test_repeated_background_navigations_do_not_evict_in_flight_state).
     resp = client.get("/", headers={"sec-fetch-mode": "navigate"})
 
-    assert resp.status_code == 401
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/login"
 
 
 def test_repeated_background_navigations_do_not_evict_in_flight_state(client, monkeypatch):
@@ -197,6 +204,53 @@ def test_health_reports_503_when_database_is_unreachable(cfg):
     resp = client.get("/health")
 
     assert resp.status_code == 503
+
+
+def test_fingerprinted_asset_is_cached_immutably(client, monkeypatch):
+    # Vite fingerprints everything under /assets/ with a content hash, so a
+    # given filename's content never changes - safe to cache forever.
+    _mock_github(monkeypatch)
+    state = _extract_state(client.get("/login").text)
+    client.get(f"/auth/callback?code=abc&state={state}")
+
+    assets_dir = app_module.STATIC_DIR / "assets"
+    assets_dir.mkdir(exist_ok=True)
+    asset = assets_dir / "index-deadbeef.js"
+    asset.write_text("console.log('hi')")
+    try:
+        resp = client.get("/assets/index-deadbeef.js")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "public, max-age=31536000, immutable"
+    finally:
+        asset.unlink()
+        assets_dir.rmdir()
+
+
+def test_app_shell_is_never_cached(client, monkeypatch):
+    # index.html is unhashed and points the browser at the current
+    # fingerprinted asset filenames. Vite's emptyOutDir deletes the old
+    # assets on every build, so a browser holding a stale cached index.html
+    # after a new deploy gets 404s on its own <script>/<link> tags until a
+    # hard refresh - it must always be revalidated.
+    _mock_github(monkeypatch)
+    state = _extract_state(client.get("/login").text)
+    client.get(f"/auth/callback?code=abc&state={state}")
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_service_worker_script_is_never_cached(client):
+    sw = app_module.STATIC_DIR / "sw.js"
+    sw.write_text("// service worker")
+    try:
+        resp = client.get("/sw.js")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache"
+    finally:
+        sw.unlink()
 
 
 def test_favicon_is_servable_without_a_session(client):
