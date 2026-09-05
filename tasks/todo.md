@@ -364,3 +364,49 @@ were subtly broken, and focusing a form field zoomed the whole page in.
   `/registerSW.js`, and `/sw.js` now 200; `/`, `/assets/*`, and `/api/*`
   still redirect to `/login` (302) or 401 exactly as before. Full `pytest`
   (20 passed / 10 skipped - same DB-backed skips as always, no regression).
+
+## v8: Coolify health check
+Trigger: "A health check is missing so coolify does not know the state" -
+neither `docker-compose.yml` service had a `healthcheck:`, so Coolify could
+only infer state from "is the container process running", not from whether
+the dashboard was actually serving.
+
+- [x] `web/app.py`: new `GET /health` route - round-trips to Postgres
+      (`SELECT 1`) and returns `{"status": "ok"}`/200, or 503 with the error
+      detail if the DB is unreachable. Added to `_PUBLIC_PATHS` (same reason
+      as the PWA install paths already there: the prober - Docker's
+      healthcheck this time, not a browser - has no session cookie to send).
+- [x] `docker-compose.yml`: `healthcheck:` on the `dashboard` service, probed
+      with `python -c "...urlopen(...)"` since the `python:3.14-slim` base
+      image has no curl/wget. Added a comment on `app` explaining why it
+      deliberately has none: it's the scheduler loop with no HTTP surface to
+      probe, so Coolify/Docker's own container-running state (already what
+      `restart: unless-stopped` acts on) is its health signal.
+- [x] `tests/test_web_auth.py`: `/health` reachable without a session (DB
+      round-trip stubbed via `monkeypatch`, consistent with this file's
+      already-fake Postgres creds in the `cfg` fixture) and returns 503 when
+      pointed at a genuinely unreachable database.
+- [x] README: documented the new endpoint/healthcheck and the `app`/
+      `dashboard` split in the Coolify deployment section.
+
+## Review (v8)
+- Small, additive change - one new route, one new `_PUBLIC_PATHS` entry, one
+  compose `healthcheck:` block. No breaking changes, no schema/env changes.
+- Verified against a real local Postgres (started for this session):
+  `.venv/bin/python -m pytest` - 39 passed. Also stopped Postgres and
+  re-ran - 29 passed / 10 skipped, same pre-existing DB-backed skip pattern,
+  no new failures.
+- Verified the actual production code path end-to-end, not just the test
+  double: ran `python -m airtag_sentry serve` against real Postgres and hit
+  it with the literal `python -c "import urllib.request as u; u.urlopen(...)"`
+  command that's now in the compose `healthcheck:`, confirming it returns
+  200 against a live server. Separately drove `create_app()` through
+  `TestClient` with a bad `database_url` and confirmed a 503.
+- `docker compose config` (Compose v5.1.1) parses the updated file cleanly
+  with a dummy `.env` (not committed - `.env` is gitignored); the rendered
+  `healthcheck:` block matches what was hand-verified above.
+- Not verified: an actual Coolify deployment showing the healthy/unhealthy
+  badge (no Coolify instance in this sandbox) and `docker build`/a full
+  container run (no Docker daemon available here) - the healthcheck command
+  itself was verified directly against `uvicorn`, which is what runs inside
+  the container either way.

@@ -1,3 +1,5 @@
+import contextlib
+import dataclasses
 import shutil
 from unittest.mock import Mock
 
@@ -134,3 +136,32 @@ def test_real_navigation_to_protected_path_still_redirects_to_login(client):
 
     assert resp.status_code == 302
     assert resp.headers["location"] == "/login"
+
+
+def test_health_is_reachable_without_a_session(client, monkeypatch):
+    # Coolify's Docker healthcheck probes this directly, with no session cookie.
+    # Stub the DB round-trip so this test doesn't need a real Postgres (this
+    # file's `cfg` fixture uses made-up Postgres creds, like every other test
+    # here) - the real round-trip is exercised by test_health_reports_503_*
+    # below and by test_db.py's live-Postgres suite.
+    monkeypatch.setattr(
+        app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock(execute=lambda *a: None))
+    )
+
+    resp = client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_health_reports_503_when_database_is_unreachable(cfg):
+    broken_cfg = dataclasses.replace(
+        cfg, database_url=cfg.database_url.replace(cfg.database_url.rsplit("/", 1)[-1], "does-not-exist")
+    )
+    client = TestClient(
+        app_module.create_app(broken_cfg), base_url="https://testserver", follow_redirects=False
+    )
+
+    resp = client.get("/health")
+
+    assert resp.status_code == 503
