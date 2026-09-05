@@ -72,6 +72,16 @@ def test_login_then_callback_succeeds(client, monkeypatch):
     assert resp.headers["location"] == "/"
 
 
+def test_login_page_is_never_cached(client):
+    # Each visit mints a fresh, single-use state baked into the page's link.
+    # A cached copy would hand out a stale state that no longer matches
+    # anything pending, once the browser or a proxy served it from cache
+    # instead of hitting the server again.
+    resp = client.get("/login")
+
+    assert resp.headers["cache-control"] == "no-store"
+
+
 def test_concurrent_login_hit_does_not_invalidate_in_flight_state(client, monkeypatch):
     # Regression test: a background fetch to /login (e.g. the PWA service
     # worker's Workbox precache hitting a protected path and getting

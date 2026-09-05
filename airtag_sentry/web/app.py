@@ -222,13 +222,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             f"{_GITHUB_AUTHORIZE_URL}?client_id={cfg.auth.github_client_id}"
             f"&scope=read:user&state={state}"
         )
-        return f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
+        html = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
 <title>AirTagSentry - Login</title></head>
 <body style="font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;
 display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
 <a href="{authorize_url}" style="background:#238636;color:white;padding:0.75rem 1.25rem;
 border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a>
 </body></html>"""
+        # This page mints a fresh, single-use OAuth state every time it's
+        # rendered. Without an explicit no-store, a browser (or intermediate
+        # proxy) is free to cache this dynamic HTML and hand the *same*
+        # state back out on a later visit - e.g. via the back button, a
+        # reopened tab, or plain heuristic caching - producing a GitHub
+        # authorize link whose state no longer matches anything pending.
+        return HTMLResponse(
+            content=html,
+            headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+        )
 
     @app.get("/auth/callback")
     def auth_callback(request: Request, code: str | None = None, state: str | None = None):
