@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Airtag, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
-import { AirtagGlyph, BellIcon, ChevronRightIcon, LogoutIcon, PlusIcon } from './icons'
+import { AirtagGlyph, BellIcon, ChevronRightIcon, PlusIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -124,14 +124,6 @@ export function AirtagList({
           </div>
         )}
       </div>
-
-      <a
-        href="/logout"
-        className="flex items-center gap-2 border-t border-[var(--divider)] px-4 py-3 text-sm text-[var(--text-secondary)] hover:text-white"
-      >
-        <LogoutIcon className="h-4 w-4" />
-        Abmelden
-      </a>
     </div>
   )
 }

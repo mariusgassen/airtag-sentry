@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -12,6 +12,13 @@ L.Icon.Default.mergeOptions({
   iconRetinaUrl: markerIcon2x,
   iconUrl: markerIcon,
   shadowUrl: markerShadow,
+})
+
+const CURRENT_LOCATION_ICON = L.divIcon({
+  className: 'current-location-marker',
+  html: '<span class="pulse"></span><span class="dot"></span>',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
 })
 
 function FitBounds({ positions }: { positions: [number, number][] }) {
@@ -42,15 +49,54 @@ function InvalidateSizeOnResize() {
   return null
 }
 
-export function MapCard({ reports }: { reports: Report[] }) {
-  const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+/** Browser geolocation, requested once on mount. Used only as a fallback view
+ * for a brand-new AirTag with no reports yet - never overrides real device
+ * positions. */
+function useCurrentPosition() {
+  const [position, setPosition] = useState<[number, number] | null>(null)
 
-  if (positions.length === 0) {
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setPosition([pos.coords.latitude, pos.coords.longitude]),
+      () => setPosition(null),
+      { enableHighAccuracy: false, timeout: 10_000 },
+    )
+  }, [])
+
+  return position
+}
+
+function NoReportsView() {
+  const here = useCurrentPosition()
+
+  if (!here) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-[var(--surface)] text-sm text-[var(--text-secondary)]">
         Keine Standortdaten vorhanden.
       </div>
     )
+  }
+
+  return (
+    <MapContainer center={here} zoom={14} className="h-full w-full">
+      <TileLayer
+        attribution="&copy; OpenStreetMap contributors"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      <Marker position={here} icon={CURRENT_LOCATION_ICON}>
+        <Popup>Aktueller Standort</Popup>
+      </Marker>
+      <InvalidateSizeOnResize />
+    </MapContainer>
+  )
+}
+
+export function MapCard({ reports }: { reports: Report[] }) {
+  const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+
+  if (positions.length === 0) {
+    return <NoReportsView />
   }
 
   return (

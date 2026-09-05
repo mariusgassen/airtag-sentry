@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Airtag, Report, Status } from './api'
 import { createAirtag, getAirtags, getReports, getStatus } from './api'
 import { AirtagList } from './components/AirtagList'
@@ -18,6 +19,10 @@ export default function App() {
   const [showDetail, setShowDetail] = useState(false)
   const [sheetExpanded, setSheetExpanded] = useState(false)
   const push = usePushNotifications()
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const dragStartY = useRef(0)
+  const dragStartExpanded = useRef(false)
+  const dragHandledClick = useRef(false)
 
   const refreshAirtags = useCallback(async () => {
     const list = await getAirtags()
@@ -76,6 +81,68 @@ export default function App() {
     handleSelect(created.id)
   }
 
+  // The grab handle used to only support a tap (setSheetExpanded toggle) -
+  // it looked draggable but wasn't. This drives a live height preview via
+  // the --drag-delta CSS var (see index.css) while dragging, and resolves
+  // to a collapsed/expanded snap on release; a real click (e.g. keyboard
+  // activation, which never fires these pointer events) still just toggles.
+  const CLICK_THRESHOLD_PX = 6
+  const SNAP_THRESHOLD_PX = 40
+
+  function handleHandlePointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragStartY.current = e.clientY
+    dragStartExpanded.current = sheetExpanded
+    if (sheetRef.current) sheetRef.current.dataset.dragging = 'true'
+  }
+
+  function handleHandlePointerMove(e: ReactPointerEvent<HTMLButtonElement>) {
+    const sheet = sheetRef.current
+    if (!sheet || sheet.dataset.dragging !== 'true') return
+    const delta = dragStartY.current - e.clientY
+    const clamped = Math.max(-window.innerHeight, Math.min(window.innerHeight, delta))
+    sheet.style.setProperty('--drag-delta', `${clamped}px`)
+  }
+
+  function handleHandlePointerUp(e: ReactPointerEvent<HTMLButtonElement>) {
+    const sheet = sheetRef.current
+    if (!sheet) return
+    const delta = dragStartY.current - e.clientY
+    sheet.dataset.dragging = 'false'
+    sheet.style.removeProperty('--drag-delta')
+
+    const wasExpanded = dragStartExpanded.current
+    let nextExpanded = wasExpanded
+    if (Math.abs(delta) < CLICK_THRESHOLD_PX) {
+      nextExpanded = !wasExpanded
+    } else if (!wasExpanded && delta > SNAP_THRESHOLD_PX) {
+      nextExpanded = true
+    } else if (wasExpanded && -delta > SNAP_THRESHOLD_PX) {
+      nextExpanded = false
+    }
+    dragHandledClick.current = true
+    setSheetExpanded(nextExpanded)
+  }
+
+  function handleHandlePointerCancel() {
+    const sheet = sheetRef.current
+    if (!sheet) return
+    sheet.dataset.dragging = 'false'
+    sheet.style.removeProperty('--drag-delta')
+  }
+
+  function handleHandleClick() {
+    // Pointer interactions already resolved the toggle in
+    // handleHandlePointerUp and this click is the synthetic one that
+    // follows it - swallow it once. A click with no preceding pointerup
+    // (keyboard/switch-control activation) still toggles normally.
+    if (dragHandledClick.current) {
+      dragHandledClick.current = false
+      return
+    }
+    setSheetExpanded((v) => !v)
+  }
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[var(--bg)] md:flex">
       {/* isolate: Leaflet's internal panes use z-index up to 700 (markers,
@@ -93,15 +160,20 @@ export default function App() {
           sidebar column. */}
       <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col md:static md:h-full md:w-[360px] md:shrink-0 md:border-r md:border-[var(--divider)]">
         <div
+          ref={sheetRef}
           className="sheet flex flex-col overflow-hidden rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
           data-expanded={sheetExpanded}
         >
           <button
             type="button"
-            onClick={() => setSheetExpanded((v) => !v)}
+            onPointerDown={handleHandlePointerDown}
+            onPointerMove={handleHandlePointerMove}
+            onPointerUp={handleHandlePointerUp}
+            onPointerCancel={handleHandlePointerCancel}
+            onClick={handleHandleClick}
             aria-expanded={sheetExpanded}
             aria-label={sheetExpanded ? 'Ansicht verkleinern' : 'Ansicht auf Vollbild vergrößern'}
-            className="flex shrink-0 justify-center py-2 md:hidden"
+            className="chrome-blur flex shrink-0 touch-none justify-center py-2 md:hidden"
           >
             <span className="h-1 w-9 rounded-full bg-[var(--divider)]" />
           </button>

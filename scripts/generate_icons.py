@@ -12,7 +12,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 OUT_DIR = Path(__file__).resolve().parent.parent / "airtag_sentry" / "web" / "static" / "icons"
-BG = (31, 111, 235)  # matches manifest theme_color
+FAVICON_OUT = Path(__file__).resolve().parent.parent / "frontend" / "public" / "favicon.ico"
+BG = (10, 132, 255)  # matches the app's --accent (index.css)
 FG = (255, 255, 255)
 
 
@@ -62,6 +63,16 @@ def main() -> None:
     make_icon(512, maskable=False).save(OUT_DIR / "icon-512.png")
     make_icon(512, maskable=True).save(OUT_DIR / "icon-maskable-512.png")
     print(f"Wrote icons to {OUT_DIR}")
+
+    # Browsers/bookmark tools request /favicon.ico directly regardless of the
+    # <link rel="icon"> tag - render it from the same glyph at the sizes a
+    # .ico is actually expected to carry, into frontend/public/ so Vite
+    # copies it to the build root alongside the manifest.
+    FAVICON_OUT.parent.mkdir(parents=True, exist_ok=True)
+    make_icon(256, maskable=False).save(
+        FAVICON_OUT, sizes=[(16, 16), (32, 32), (48, 48)]
+    )
+    print(f"Wrote favicon to {FAVICON_OUT}")
 
 
 if __name__ == "__main__":
