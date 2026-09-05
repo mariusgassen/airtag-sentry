@@ -24,30 +24,47 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
   return null
 }
 
+/**
+ * Leaflet caches its container size and only recalculates on window
+ * `resize`. This two-pane layout resizes the map's container via CSS alone
+ * (sidebar toggling, breakpoint changes) without the window itself
+ * resizing, which otherwise leaves the map rendering into a stale-size box
+ * (grey bands / misaligned tiles) - watch the container directly instead.
+ */
+function InvalidateSizeOnResize() {
+  const map = useMap()
+  useEffect(() => {
+    const container = map.getContainer()
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 export function MapCard({ reports }: { reports: Report[] }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
 
-  return (
-    <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] shadow-lg">
-      <div className="h-[55vh] min-h-[320px] w-full">
-        {positions.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm text-[#8b949e]">
-            Keine Standortdaten vorhanden.
-          </div>
-        ) : (
-          <MapContainer center={positions[positions.length - 1]} zoom={15} className="h-full w-full">
-            <TileLayer
-              attribution="&copy; OpenStreetMap contributors"
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <Polyline positions={positions} pathOptions={{ color: '#1f6feb', weight: 4 }} />
-            <Marker position={positions[positions.length - 1]}>
-              <Popup>Letzte Position</Popup>
-            </Marker>
-            <FitBounds positions={positions} />
-          </MapContainer>
-        )}
+  if (positions.length === 0) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-[var(--surface)] text-sm text-[var(--text-secondary)]">
+        Keine Standortdaten vorhanden.
       </div>
-    </section>
+    )
+  }
+
+  return (
+    <MapContainer center={positions[positions.length - 1]} zoom={15} className="h-full w-full">
+      <TileLayer
+        attribution="&copy; OpenStreetMap contributors"
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      <Polyline positions={positions} pathOptions={{ color: '#0a84ff', weight: 4 }} />
+      <Marker position={positions[positions.length - 1]}>
+        <Popup>Letzte Position</Popup>
+      </Marker>
+      <FitBounds positions={positions} />
+      <InvalidateSizeOnResize />
+    </MapContainer>
   )
 }

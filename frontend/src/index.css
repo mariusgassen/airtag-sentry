@@ -2,19 +2,44 @@
 
 :root {
   color-scheme: dark;
+  /* iOS/macOS system dark-mode palette, used via arbitrary Tailwind values. */
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --accent: #0a84ff;
+  --destructive: #ff453a;
+  --success: #32d74b;
+  --text: #ffffff;
+  --text-secondary: #8e8e93;
+  --divider: #38383a;
 }
 
 body {
   margin: 0;
-  background: #0d1117;
-  color: #e6edf3;
+  background: var(--bg);
+  color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
 }
 
-/* Leaflet needs its container to have a concrete height. */
+/* Leaflet needs its container to have a concrete height, and we theme the
+   default light basemap chrome (attribution/zoom) to sit on a dark map. */
 .leaflet-container {
   height: 100%;
   width: 100%;
-  background: #0d1117;
+  background: var(--surface);
+  font-family: inherit;
+}
+.leaflet-control-zoom a {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--divider) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(28, 28, 30, 0.8) !important;
+  color: var(--text-secondary) !important;
+}
+.leaflet-control-attribution a {
+  color: var(--text-secondary) !important;
 }
