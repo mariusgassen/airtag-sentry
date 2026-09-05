@@ -148,8 +148,8 @@ export function SettingsPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.9rem+env(safe-area-inset-top))]">
-      <div className="mb-4 flex items-baseline justify-between px-4">
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-baseline justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Einstellungen</h1>
         <span
           aria-live="polite"
@@ -163,74 +163,76 @@ export function SettingsPanel() {
         </span>
       </div>
 
-      <div className="px-3">
-        <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-          Darstellung
-        </p>
-        <Section>
-          <ThemeField />
-        </Section>
-      </div>
-
-      {!settings ? (
-        <p className="px-4 text-sm text-[var(--text-secondary)]">Lädt…</p>
-      ) : (
+      <div className="flex flex-1 flex-col overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
         <div className="px-3">
           <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-            Abfrage
+            Darstellung
           </p>
           <Section>
-            <Field
-              label="Abfrageintervall"
-              suffix="min"
-              value={settings.polling_interval_minutes}
-              error={errors.polling_interval_minutes}
-              onChange={(v) => update({ polling_interval_minutes: v })}
-            />
-          </Section>
-
-          <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-            Bewegungserkennung
-          </p>
-          <Section>
-            <Field
-              label="Distanzschwelle"
-              suffix="m"
-              value={settings.movement_distance_threshold_meters}
-              error={errors.movement_distance_threshold_meters}
-              onChange={(v) => update({ movement_distance_threshold_meters: v })}
-            />
-            <Field
-              label="Stillstandsdauer"
-              suffix="h"
-              value={settings.movement_stillstand_hours}
-              error={errors.movement_stillstand_hours}
-              onChange={(v) => update({ movement_stillstand_hours: v })}
-            />
-            <Field
-              label="Bewegung nach Stillstand"
-              suffix="m"
-              value={settings.movement_stillstand_movement_meters}
-              error={errors.movement_stillstand_movement_meters}
-              onChange={(v) => update({ movement_stillstand_movement_meters: v })}
-            />
-            <label className="flex items-center justify-between gap-3 border-t border-[var(--divider)] px-4 py-3">
-              <span className="flex-1 text-[0.95rem]">Alarm beim ersten Abruf</span>
-              <input
-                type="checkbox"
-                checked={settings.movement_alert_on_backfill}
-                onChange={(e) => update({ movement_alert_on_backfill: e.target.checked }, { immediate: true })}
-                className="h-5 w-5 accent-[var(--accent)]"
-              />
-            </label>
+            <ThemeField />
           </Section>
         </div>
-      )}
 
-      <div className="mt-auto px-3 pt-2">
-        <Section>
-          <Row icon={<LogoutIcon className="h-5 w-5" />} label="Abmelden" destructive onClick={() => (window.location.href = '/logout')} bordered={false} />
-        </Section>
+        {!settings ? (
+          <p className="px-4 text-sm text-[var(--text-secondary)]">Lädt…</p>
+        ) : (
+          <div className="px-3">
+            <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+              Abfrage
+            </p>
+            <Section>
+              <Field
+                label="Abfrageintervall"
+                suffix="min"
+                value={settings.polling_interval_minutes}
+                error={errors.polling_interval_minutes}
+                onChange={(v) => update({ polling_interval_minutes: v })}
+              />
+            </Section>
+
+            <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+              Bewegungserkennung
+            </p>
+            <Section>
+              <Field
+                label="Distanzschwelle"
+                suffix="m"
+                value={settings.movement_distance_threshold_meters}
+                error={errors.movement_distance_threshold_meters}
+                onChange={(v) => update({ movement_distance_threshold_meters: v })}
+              />
+              <Field
+                label="Stillstandsdauer"
+                suffix="h"
+                value={settings.movement_stillstand_hours}
+                error={errors.movement_stillstand_hours}
+                onChange={(v) => update({ movement_stillstand_hours: v })}
+              />
+              <Field
+                label="Bewegung nach Stillstand"
+                suffix="m"
+                value={settings.movement_stillstand_movement_meters}
+                error={errors.movement_stillstand_movement_meters}
+                onChange={(v) => update({ movement_stillstand_movement_meters: v })}
+              />
+              <label className="flex items-center justify-between gap-3 border-t border-[var(--divider)] px-4 py-3">
+                <span className="flex-1 text-[0.95rem]">Alarm beim ersten Abruf</span>
+                <input
+                  type="checkbox"
+                  checked={settings.movement_alert_on_backfill}
+                  onChange={(e) => update({ movement_alert_on_backfill: e.target.checked }, { immediate: true })}
+                  className="h-5 w-5 accent-[var(--accent)]"
+                />
+              </label>
+            </Section>
+          </div>
+        )}
+
+        <div className="mt-auto px-3 pt-2">
+          <Section>
+            <Row icon={<LogoutIcon className="h-5 w-5" />} label="Abmelden" destructive onClick={() => (window.location.href = '/logout')} bordered={false} />
+          </Section>
+        </div>
       </div>
     </div>
   )

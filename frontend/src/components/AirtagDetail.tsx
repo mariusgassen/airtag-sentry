@@ -78,107 +78,109 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.6rem+env(safe-area-inset-top))]">
+    <div className="flex h-full flex-col">
       <button
         type="button"
         onClick={onBack}
-        className="mb-2 flex items-center gap-0.5 px-3 py-1 text-[0.95rem] text-[var(--accent)]"
+        className="flex shrink-0 items-center gap-0.5 px-3 pb-1 pt-[0.6rem] text-[0.95rem] text-[var(--accent)]"
       >
         <ChevronLeftIcon className="h-5 w-5" />
         AirTags
       </button>
 
-      <div className="mb-6 flex flex-col items-center px-4 text-center">
-        <span className="mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--accent)]">
-          <AirtagGlyph className="h-12 w-12" />
-        </span>
-        <h2 className="text-xl font-semibold">{airtag.name}</h2>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          {status?.last_report ? `Zuletzt gesehen ${formatRelative(status.last_report.timestamp)}` : 'Kein Standort verfügbar'}
-        </p>
-        {status?.last_alert && (
-          <p className="mt-1 text-sm text-[var(--destructive)]">
-            Alarm: {status.last_alert.reason} · {formatRelative(status.last_alert.timestamp)}
+      <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        <div className="mb-6 flex flex-col items-center px-4 text-center">
+          <span className="mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--accent)]">
+            <AirtagGlyph className="h-12 w-12" />
+          </span>
+          <h2 className="text-xl font-semibold">{airtag.name}</h2>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            {status?.last_report ? `Zuletzt gesehen ${formatRelative(status.last_report.timestamp)}` : 'Kein Standort verfügbar'}
           </p>
-        )}
-      </div>
-
-      <div className="px-3">
-        <Section>
-          <Row
-            icon={<BellIcon className="h-5 w-5" filled={pushStatus === 'active'} />}
-            label="Benachrichtigungen"
-            trailing={
-              <span className={`text-sm ${pushStatus === 'active' ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
-                {pushStatus === 'active' ? 'Aktiv' : 'Aktivieren'}
-              </span>
-            }
-            onClick={pushStatus === 'active' ? undefined : onEnablePush}
-          />
-        </Section>
-
-        <Section>
-          <Row
-            icon={<PencilIcon className="h-5 w-5" />}
-            label="Umbenennen"
-            trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
-            onClick={() => setRenameOpen((v) => !v)}
-            bordered={false}
-          />
-          {renameOpen && (
-            <RenameForm
-              airtag={airtag}
-              onDone={async () => {
-                setRenameOpen(false)
-                await onChanged()
-              }}
-            />
+          {status?.last_alert && (
+            <p className="mt-1 text-sm text-[var(--destructive)]">
+              Alarm: {status.last_alert.reason} · {formatRelative(status.last_alert.timestamp)}
+            </p>
           )}
-        </Section>
+        </div>
 
-        <Section>
-          <Row
-            icon={<KeyIcon className="h-5 w-5" />}
-            label="Schlüssel verwalten"
-            trailing={
-              <span className="flex items-center gap-2">
-                <span className={`text-sm ${airtag.has_key ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
-                  {airtag.has_key ? 'Hinterlegt' : 'Fehlt'}
+        <div className="px-3">
+          <Section>
+            <Row
+              icon={<BellIcon className="h-5 w-5" filled={pushStatus === 'active'} />}
+              label="Benachrichtigungen"
+              trailing={
+                <span className={`text-sm ${pushStatus === 'active' ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
+                  {pushStatus === 'active' ? 'Aktiv' : 'Aktivieren'}
                 </span>
-                <ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />
-              </span>
-            }
-            onClick={() => setKeyOpen((v) => !v)}
-            bordered={false}
-          />
-          {keyOpen && <KeyForm airtag={airtag} onDone={onChanged} />}
-        </Section>
+              }
+              onClick={pushStatus === 'active' ? undefined : onEnablePush}
+            />
+          </Section>
 
-        <Section>
-          <Row
-            icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
-            label="Verlauf"
-            trailing={
-              <span className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                {reports.length}
-                <ChevronRightIcon className={`h-4 w-4 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
-              </span>
-            }
-            onClick={() => setHistoryOpen((v) => !v)}
-            bordered={false}
-          />
-          {historyOpen && <HistoryList reports={reports} />}
-        </Section>
+          <Section>
+            <Row
+              icon={<PencilIcon className="h-5 w-5" />}
+              label="Umbenennen"
+              trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
+              onClick={() => setRenameOpen((v) => !v)}
+              bordered={false}
+            />
+            {renameOpen && (
+              <RenameForm
+                airtag={airtag}
+                onDone={async () => {
+                  setRenameOpen(false)
+                  await onChanged()
+                }}
+              />
+            )}
+          </Section>
 
-        <Section>
-          <Row
-            icon={<TrashIcon className="h-5 w-5" />}
-            label="AirTag entfernen"
-            destructive
-            onClick={handleDelete}
-            bordered={false}
-          />
-        </Section>
+          <Section>
+            <Row
+              icon={<KeyIcon className="h-5 w-5" />}
+              label="Schlüssel verwalten"
+              trailing={
+                <span className="flex items-center gap-2">
+                  <span className={`text-sm ${airtag.has_key ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
+                    {airtag.has_key ? 'Hinterlegt' : 'Fehlt'}
+                  </span>
+                  <ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />
+                </span>
+              }
+              onClick={() => setKeyOpen((v) => !v)}
+              bordered={false}
+            />
+            {keyOpen && <KeyForm airtag={airtag} onDone={onChanged} />}
+          </Section>
+
+          <Section>
+            <Row
+              icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
+              label="Verlauf"
+              trailing={
+                <span className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  {reports.length}
+                  <ChevronRightIcon className={`h-4 w-4 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
+                </span>
+              }
+              onClick={() => setHistoryOpen((v) => !v)}
+              bordered={false}
+            />
+            {historyOpen && <HistoryList reports={reports} />}
+          </Section>
+
+          <Section>
+            <Row
+              icon={<TrashIcon className="h-5 w-5" />}
+              label="AirTag entfernen"
+              destructive
+              onClick={handleDelete}
+              bordered={false}
+            />
+          </Section>
+        </div>
       </div>
     </div>
   )

@@ -42,7 +42,7 @@ export function AirtagList({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 pb-2 pt-[calc(0.9rem+env(safe-area-inset-top))]">
+      <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">AirTags</h1>
         <div className="flex items-center gap-1">
           <button
