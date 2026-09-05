@@ -182,6 +182,25 @@ Each backend is optional and independent — configure any combination in `.env`
 | Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`                    |
 | Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT`, then click "Enable notifications" on the dashboard |
 
+**The VAPID keypair has the same rotation problem as `AIRTAG_KEY_ENCRYPTION_KEY`.**
+`VAPID_PUBLIC_KEY` is baked into each browser's push subscription at the
+moment it clicks "Enable notifications" (it's the `applicationServerKey`
+passed to the browser's Push API). If you regenerate the keypair with
+`scripts/generate_vapid_keys.py` and change `.env`, every device subscribed
+under the old key stops receiving pushes — the server now signs with a key
+the push service no longer associates with that subscription, and nothing
+surfaces an error for it; alerts just silently stop arriving on that device.
+Worse, clicking "Enable notifications" again does *not* fix it: the browser
+already holds a subscription for this origin under the old key, and
+`pushManager.subscribe()` with a different key throws instead of replacing
+it (this app has no unsubscribe button in the UI, though the server API
+supports it at `/api/push/unsubscribe`). The only reliable per-device fix
+today is clearing that subscription from outside the app — e.g. the
+browser's site settings, resetting the Notifications permission for the
+dashboard's origin, or removing the installed PWA — and then re-enabling.
+Generate the keypair once, back it up with your other `.env` secrets, and
+only regenerate it if you have a reason to.
+
 ## App behavior settings
 
 Two different kinds of "setting" here, deliberately not treated the same way:
