@@ -40,11 +40,11 @@ timeline.
 
 ## AirTags: fully UI-managed, keys encrypted at rest
 
-AirTags are not configured in `config.yaml` at all — there is nothing to edit
-in a file. Add, rename, and remove them entirely through the dashboard's
+AirTags are not configured in a file at all — there is nothing to edit for
+them. Add, rename, and remove them entirely through the dashboard's
 **AirTags verwalten** (⚙️) panel; each one is a row in Postgres. The actual
 secret key material is entered the same way (paste a base64 key or upload a
-JSON export) and stored encrypted, never in `config.yaml` or `.env`.
+JSON export) and stored encrypted, never in `.env`.
 
 This needs one encryption key in `.env`, used to encrypt/decrypt that stored
 key material — it can't itself live in the database it protects:
@@ -81,7 +81,7 @@ accessory records and writes one `<uuid>.json` file per paired accessory
 named by internal UUID, not by display name, so open each one and check its
 `"name"` field to find the AirTag you're after, then upload that file
 directly in the dashboard's AirTags-verwalten panel (see above) — no need to
-rename it or reference it from `config.yaml`.
+rename it or reference it anywhere else.
 
 This only works for accessories already paired to your own Apple ID on that
 Mac — extract keys for your own property only.
@@ -123,19 +123,18 @@ For that case, set `https_only=False` on the `SessionMiddleware` call in
 ## Local setup
 
 ```bash
-cp config.example.yaml config.yaml   # adjust polling/movement thresholds
-cp .env.example .env                 # fill in POSTGRES_* creds, GitHub OAuth, encryption key, etc.
+cp .env.example .env   # fill in POSTGRES_* creds, GitHub OAuth, encryption key, etc.
 python scripts/generate_vapid_keys.py   # paste the output into .env for Web Push
 
 # Local (non-Coolify) only: publish the dashboard on localhost.
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-`config.yaml` only has Apple/polling/movement/web settings — AirTags
-themselves are added later, through the dashboard. For Docker Compose, set
-`apple.anisette.mode: remote` and `apple.anisette.remote_url: http://anisette:6969`
-so polling uses the bundled anisette container instead of generating anisette
-data in-process.
+Every setting lives in `.env` — AirTags themselves are added later, through
+the dashboard. `docker-compose.yml` already points the `app` service at the
+bundled anisette container (`ANISETTE_MODE=remote`,
+`ANISETTE_REMOTE_URL=http://anisette:6969`), so there's nothing to set for
+that when using Docker Compose.
 
 ```bash
 docker compose up -d postgres anisette
@@ -175,6 +174,25 @@ Each backend is optional and independent — configure any combination in `.env`
 | Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`                    |
 | Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT`, then click "Enable notifications" on the dashboard |
 
+## App behavior settings
+
+All optional — every one has a default and lives in `.env` alongside the
+secrets above:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `APPLE_STORE_PATH` | `data/account.json` | Where the Apple session token (from `login`) is persisted. |
+| `ANISETTE_MODE` | `local` | `local` (generate anisette data in-process) or `remote` (use an `anisette-v3-server`). Docker Compose hardcodes this to `remote`. |
+| `ANISETTE_LIBS_PATH` | `data/ani_libs.bin` | Cache path for the local anisette provider's libraries. Only used when `ANISETTE_MODE=local`. |
+| `ANISETTE_REMOTE_URL` | unset | URL of the anisette server. Required when `ANISETTE_MODE=remote`. |
+| `POLLING_INTERVAL_MINUTES` | `15` | How often the scheduler polls Find My. |
+| `MOVEMENT_DISTANCE_THRESHOLD_METERS` | `100` | See [Movement detection](#movement-detection). |
+| `MOVEMENT_STILLSTAND_HOURS` | `24` | See [Movement detection](#movement-detection). |
+| `MOVEMENT_STILLSTAND_MOVEMENT_METERS` | `15` | See [Movement detection](#movement-detection). |
+| `MOVEMENT_ALERT_ON_BACKFILL` | `false` | Whether the first-ever ~7 day backfill poll should raise alerts. |
+| `WEB_HOST` | `0.0.0.0` | Dashboard bind address. |
+| `WEB_PORT` | `8000` | Dashboard bind port. |
+
 ## Installing the dashboard as an app (PWA)
 
 Open the dashboard in a browser (Chrome/Edge on desktop or Android, Safari
@@ -187,9 +205,15 @@ notifications, even when the app isn't open.
 
 1. Create a new **Docker Compose** resource in Coolify pointed at this repo
    (`docker-compose.yml` at the root).
-2. Every variable from `.env.example` is declared explicitly in
-   `docker-compose.yml`'s `environment:` blocks, so Coolify's environment tab
-   lists each one individually — fill them in there.
+2. Every secret and tunable setting from `.env.example` is declared
+   explicitly in `docker-compose.yml`'s `environment:` blocks, so Coolify's
+   environment tab lists each one individually — fill them in there. A few
+   settings (`APPLE_STORE_PATH`, `ANISETTE_LIBS_PATH`, `ANISETTE_MODE`/
+   `ANISETTE_REMOTE_URL`, `WEB_HOST`/`WEB_PORT`) are deliberately *not*
+   wired into Coolify's UI — they're either fixed by this compose topology
+   (anisette) or would break the container's volume mount or the
+   `SERVICE_FQDN_DASHBOARD_8000` routing below if changed, so their defaults
+   are left alone under Docker.
 3. Uncomment `SERVICE_FQDN_DASHBOARD_8000` in your env — Coolify auto-assigns
    a public domain + TLS to the `dashboard` service's port 8000. It's the
    only `SERVICE_FQDN_*` variable in the stack, so the whole deployment sits
@@ -207,14 +231,14 @@ notifications, even when the app isn't open.
 Two alert conditions, both based on the Haversine distance between
 consecutive reports:
 - **`distance_threshold`**: the tag moved more than
-  `movement.distance_threshold_meters` (default 100 m) since the last report.
+  `MOVEMENT_DISTANCE_THRESHOLD_METERS` (default 100 m) since the last report.
 - **`stillstand_movement`**: the tag had been stationary for at least
-  `movement.stillstand_hours` (default 24 h) and then moved more than
-  `movement.stillstand_movement_meters` (default 15 m) — catches "someone
+  `MOVEMENT_STILLSTAND_HOURS` (default 24 h) and then moved more than
+  `MOVEMENT_STILLSTAND_MOVEMENT_METERS` (default 15 m) — catches "someone
   finally rolled it away" moves too small to trip the main threshold.
 
 The very first poll backfills ~7 days of history; alerts for that backfill are
-suppressed unless you set `movement.alert_on_backfill: true`.
+suppressed unless you set `MOVEMENT_ALERT_ON_BACKFILL=true`.
 
 ## Database migrations
 

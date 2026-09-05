@@ -143,6 +143,48 @@ Source: user's spec (`airtagsentryspec.md`) + amendments (Postgres, PWA push, Co
       versions after a fresh run, and re-running `run_migrations` is asserted
       idempotent (no re-inserts)
 
+## v5: drop config.yaml, all app-behavior settings become env vars
+- [x] Root cause of a Coolify deploy crash (`IsADirectoryError: config.yaml`):
+      `config.yaml` was git-ignored and bind-mounted by `docker-compose.yml`;
+      a fresh Coolify clone never had the file on disk, so Docker silently
+      created an empty directory at that path instead of erroring, which
+      then blew up `yaml.safe_load(path.read_text())` at startup
+- [x] `config.py`: removed YAML parsing entirely; `apple`/`polling`/
+      `movement`/`web` settings now read from env vars (`APPLE_STORE_PATH`,
+      `ANISETTE_MODE`/`ANISETTE_LIBS_PATH`/`ANISETTE_REMOTE_URL`,
+      `POLLING_INTERVAL_MINUTES`, `MOVEMENT_*`, `WEB_HOST`/`WEB_PORT`) with
+      the same defaults `config.example.yaml` used to have; `load_config()`
+      takes no path argument anymore
+- [x] `cli.py`: dropped the now-meaningless `--config` flag
+- [x] `docker-compose.yml`: removed both `./config.yaml:/app/config.yaml:ro`
+      bind mounts; `app`/`dashboard` now get the new settings via their
+      `environment:` blocks (only the ones safe to change under Docker -
+      `POLLING_INTERVAL_MINUTES`/`MOVEMENT_*`; anisette mode is hardcoded to
+      `remote` for the bundled container, and `APPLE_STORE_PATH`/
+      `ANISETTE_LIBS_PATH`/`WEB_HOST`/`WEB_PORT` are left at their defaults
+      since changing them would break the volume mount or Coolify's
+      `SERVICE_FQDN_DASHBOARD_8000` routing)
+- [x] Deleted `config.example.yaml`; removed its `COPY` from `Dockerfile`,
+      its entries from `.gitignore`/`.dockerignore`, and the now-unused
+      `pyyaml` dependency from `pyproject.toml`
+- [x] `.env.example` and README updated so every setting the app reads is
+      documented in one place instead of split across `.env`/`config.yaml`
+- [x] `tests/test_config.py`: added coverage for `load_config()`'s
+      apple/polling/movement/web env-var parsing (previously untested either
+      way - the old YAML path had zero test coverage too)
+
+## Review (v5)
+- Another breaking change, no back-compat shim: anyone with an existing
+  `config.yaml` needs to move its values into `.env` per the new table in
+  the README. Postgres/GitHub/session/encryption-key requirements are
+  unchanged.
+- Verified: `pytest` (full suite, 20 passed/7 skipped - skips are the
+  real-Postgres `test_db.py` cases, unrelated to this change) in a fresh
+  venv; `load_config()` exercised directly with only the required env vars
+  set, confirming defaults match the old YAML defaults exactly; `docker
+  compose config` parses cleanly with no bind mount left pointing at
+  `config.yaml` and no "variable not set" warnings for the new vars.
+
 ## Review (v4)
 - This removes the "IF NOT EXISTS defensive guard" style of migration for
   anything new going forward — a migration only ever runs once per database,

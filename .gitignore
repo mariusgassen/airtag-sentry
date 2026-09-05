@@ -12,7 +12,6 @@ airtag_sentry/web/static/
 
 # secrets & local state
 .env
-config.yaml
 docker-compose.override.yml
 data/
 *.db

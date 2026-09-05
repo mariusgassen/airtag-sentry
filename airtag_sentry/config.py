@@ -1,21 +1,19 @@
-"""Configuration loading: config.yaml (app behavior) + .env (secrets/infra)."""
+"""Configuration loading: everything comes from the environment (.env)."""
 
 from __future__ import annotations
 
 import dataclasses
 import logging
 import os
-from pathlib import Path
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet
-import yaml
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigError(RuntimeError):
-    """Raised when config.yaml / the environment is missing or inconsistent."""
+    """Raised when a required environment variable is missing or inconsistent."""
 
 
 @dataclasses.dataclass
@@ -100,6 +98,25 @@ def _env(name: str) -> str | None:
     return value if value else None
 
 
+def _env_str(name: str, default: str) -> str:
+    return _env(name) or default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = _env(name)
+    return int(value) if value is not None else default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = _env(name)
+    return float(value) if value is not None else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = _env(name)
+    return value.strip().lower() in ("1", "true", "yes") if value is not None else default
+
+
 def database_url_from_env() -> str:
     """Build the Postgres connection URL from POSTGRES_* env vars.
 
@@ -129,36 +146,26 @@ def database_url_from_env() -> str:
     )
 
 
-def load_config(path: str | Path = "config.yaml") -> Config:
-    path = Path(path)
-    if not path.exists():
-        raise ConfigError(f"{path} not found. Copy config.example.yaml to {path} and adjust it.")
-    raw = yaml.safe_load(path.read_text()) or {}
-
-    apple_raw = raw.get("apple", {}) or {}
-    anisette_raw = apple_raw.get("anisette", {}) or {}
+def load_config() -> Config:
     apple = AppleConfig(
-        store_path=apple_raw.get("store_path", "data/account.json"),
+        store_path=_env_str("APPLE_STORE_PATH", "data/account.json"),
         anisette=AnisetteConfig(
-            mode=anisette_raw.get("mode", "local"),
-            libs_path=anisette_raw.get("libs_path", "data/ani_libs.bin"),
-            remote_url=anisette_raw.get("remote_url"),
+            mode=_env_str("ANISETTE_MODE", "local"),
+            libs_path=_env_str("ANISETTE_LIBS_PATH", "data/ani_libs.bin"),
+            remote_url=_env("ANISETTE_REMOTE_URL"),
         ),
     )
 
-    polling_raw = raw.get("polling", {}) or {}
-    polling = PollingConfig(interval_minutes=int(polling_raw.get("interval_minutes", 15)))
+    polling = PollingConfig(interval_minutes=_env_int("POLLING_INTERVAL_MINUTES", 15))
 
-    movement_raw = raw.get("movement", {}) or {}
     movement = MovementConfig(
-        distance_threshold_meters=float(movement_raw.get("distance_threshold_meters", 100)),
-        stillstand_hours=float(movement_raw.get("stillstand_hours", 24)),
-        stillstand_movement_meters=float(movement_raw.get("stillstand_movement_meters", 15)),
-        alert_on_backfill=bool(movement_raw.get("alert_on_backfill", False)),
+        distance_threshold_meters=_env_float("MOVEMENT_DISTANCE_THRESHOLD_METERS", 100),
+        stillstand_hours=_env_float("MOVEMENT_STILLSTAND_HOURS", 24),
+        stillstand_movement_meters=_env_float("MOVEMENT_STILLSTAND_MOVEMENT_METERS", 15),
+        alert_on_backfill=_env_bool("MOVEMENT_ALERT_ON_BACKFILL", False),
     )
 
-    web_raw = raw.get("web", {}) or {}
-    web = WebConfig(host=web_raw.get("host", "0.0.0.0"), port=int(web_raw.get("port", 8000)))
+    web = WebConfig(host=_env_str("WEB_HOST", "0.0.0.0"), port=_env_int("WEB_PORT", 8000))
 
     github_client_id = _env("GITHUB_CLIENT_ID")
     github_client_secret = _env("GITHUB_CLIENT_SECRET")

@@ -46,9 +46,17 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
+      # Bundled anisette container, not the in-process generator - fixed by
+      # this compose topology, not something to set in .env.
+      ANISETTE_MODE: remote
+      ANISETTE_REMOTE_URL: http://anisette:6969
+      POLLING_INTERVAL_MINUTES: ${POLLING_INTERVAL_MINUTES}
+      MOVEMENT_DISTANCE_THRESHOLD_METERS: ${MOVEMENT_DISTANCE_THRESHOLD_METERS}
+      MOVEMENT_STILLSTAND_HOURS: ${MOVEMENT_STILLSTAND_HOURS}
+      MOVEMENT_STILLSTAND_MOVEMENT_METERS: ${MOVEMENT_STILLSTAND_MOVEMENT_METERS}
+      MOVEMENT_ALERT_ON_BACKFILL: ${MOVEMENT_ALERT_ON_BACKFILL}
     volumes:
       - app_data:/app/data
-      - ./config.yaml:/app/config.yaml:ro
 
   dashboard:
     build: .
@@ -74,9 +82,9 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
+      POLLING_INTERVAL_MINUTES: ${POLLING_INTERVAL_MINUTES}
     volumes:
       - app_data:/app/data:ro
-      - ./config.yaml:/app/config.yaml:ro
 
 volumes:
   postgres_data:

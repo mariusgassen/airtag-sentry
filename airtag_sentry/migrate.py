@@ -3,7 +3,7 @@ CLI subcommand (poll/run/serve) - not per-request, unlike the old hand-rolled
 migration tracker this replaced.
 
 Resolves alembic.ini relative to the current working directory, the same
-convention config.yaml/.env already use - this app is always run from its
+convention .env already uses - this app is always run from its
 project/deployment root (see Dockerfile's WORKDIR).
 """
 
