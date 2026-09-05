@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import secrets
+import time
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,30 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 logger = logging.getLogger(__name__)
 
+
+class _CacheControlledStaticFiles(StaticFiles):
+    """Serves the Vite build with cache headers that make a new deploy visible right away.
+
+    Vite fingerprints every file under /assets/ with a content hash, so those
+    are safe to cache forever - a new deploy simply ships differently-named
+    files, never a changed one. Everything else (index.html and the SPA
+    fallback that serves it, sw.js, manifest.webmanifest, registerSW.js,
+    icons) is unhashed and *does* change in place on a new deploy, so it must
+    never be served from a stale cache: index.html is what points the browser
+    at the current asset filenames, and vite's `emptyOutDir` deletes the old
+    ones on every build, so a cached old index.html means 404s on its
+    <script>/<link> tags until a hard refresh.
+    """
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        is_fingerprinted = Path(full_path).parent.name == "assets"
+        response.headers["cache-control"] = (
+            "public, max-age=31536000, immutable" if is_fingerprinted else "no-cache"
+        )
+        return response
+
+
 _PUBLIC_PATHS = {
     "/login",
     "/auth/callback",
@@ -86,6 +111,20 @@ _GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 _GITHUB_USER_URL = "https://api.github.com/user"
 
+# Comfortably longer than a GitHub consent-screen round trip. Pending states
+# used to be capped to the last 5 instead of expired by age, which broke down
+# whenever more than 5 background hits to /login (e.g. iOS waking the
+# installed PWA in the background) landed during a single in-flight login,
+# evicting the real state before the user got back from GitHub. Expiring by
+# time tolerates any number of those, since they aren't the state a real
+# login is waiting on.
+_OAUTH_STATE_TTL_SECONDS = 600
+
+
+def _prune_oauth_states(pending: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cutoff = time.time() - _OAUTH_STATE_TTL_SECONDS
+    return [p for p in pending if p["minted_at"] >= cutoff]
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     """Requires a logged-in session for every route except the login/callback/logout ones.
@@ -111,22 +150,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Browsers only ever send Sec-Fetch-Mode: navigate for an actual
             # top-level navigation (never from fetch()/a service worker), so
             # reject anything else outright instead of touching /login.
+            #
+            # A previous version also required Sec-Fetch-User: ?1 here to
+            # filter out iOS's background PWA wake-ups (a genuine top-level
+            # navigation with no user present, still Sec-Fetch-Mode:
+            # navigate). That header is never sent for a plain page reload
+            # either, though, so it also silently 401'd real users reloading
+            # the dashboard instead of sending them to /login. The OAuth
+            # state list below is now time-based rather than count-capped,
+            # which is what actually needed fixing to tolerate background
+            # wake-ups - see _prune_oauth_states.
             sec_fetch_mode = request.headers.get("sec-fetch-mode")
             if sec_fetch_mode is not None and sec_fetch_mode != "navigate":
-                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
-            # A genuine navigation isn't enough either: iOS periodically
-            # wakes an installed PWA in the background (for push/badge
-            # refresh) and does a real top-level navigation to "/" with no
-            # user present. That's still Sec-Fetch-Mode: navigate, and it
-            # kept regenerating the OAuth state during the exact window a
-            # real login was waiting on GitHub - evicting it from the capped
-            # pending list once enough of these fired. Sec-Fetch-User: ?1 is
-            # only ever sent when a navigation followed an actual user
-            # gesture (a tap/click), so require it whenever the browser
-            # supports Fetch Metadata at all (i.e. it already sent
-            # Sec-Fetch-Mode); a real user opening the app from its icon or
-            # clicking a link always carries it.
-            if sec_fetch_mode == "navigate" and request.headers.get("sec-fetch-user") != "?1":
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             return RedirectResponse(url="/login", status_code=302)
         return await call_next(request)
@@ -207,17 +242,18 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         # e.g. the PWA service worker's Workbox precache fetching "/" while
         # logged out, which AuthMiddleware redirects here. That silently
         # replaced the state the user was about to come back with, so
-        # /auth/callback rejected an otherwise valid login. Keeping a capped
-        # list of pending states tolerates that without weakening the check:
-        # each one is still random, single-use, and tied to this session.
+        # /auth/callback rejected an otherwise valid login. Keeping a list of
+        # pending states (expired by age, see _prune_oauth_states) tolerates
+        # that without weakening the check: each one is still random,
+        # single-use, and tied to this session.
         state = secrets.token_urlsafe(24)
-        pending_states = request.session.get("oauth_states", [])
-        pending_states.append(state)
-        request.session["oauth_states"] = pending_states[-5:]
+        pending_states = _prune_oauth_states(request.session.get("oauth_states", []))
+        pending_states.append({"state": state, "minted_at": time.time()})
+        request.session["oauth_states"] = pending_states
         logger.info(
             "oauth login: minted state=%s… (pending now %d) sec-fetch-mode=%s ua=%s",
             state[:8],
-            len(request.session["oauth_states"]),
+            len(pending_states),
             request.headers.get("sec-fetch-mode"),
             request.headers.get("user-agent"),
         )
@@ -387,18 +423,18 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/auth/callback")
     def auth_callback(request: Request, code: str | None = None, state: str | None = None):
-        pending_states = request.session.get("oauth_states", [])
-        if not code or not state or state not in pending_states:
+        pending_states = _prune_oauth_states(request.session.get("oauth_states", []))
+        if not code or not state or not any(p["state"] == state for p in pending_states):
             logger.warning(
                 "oauth callback rejected: code_present=%s state=%s… pending=%s referer=%s ua=%s",
                 bool(code),
                 (state or "")[:8],
-                [s[:8] for s in pending_states],
+                [p["state"][:8] for p in pending_states],
                 request.headers.get("referer"),
                 request.headers.get("user-agent"),
             )
             raise HTTPException(status_code=403, detail="Invalid OAuth state")
-        pending_states.remove(state)
+        pending_states = [p for p in pending_states if p["state"] != state]
         request.session["oauth_states"] = pending_states
         logger.info("oauth callback: accepted state=%s…", state[:8])
 
@@ -591,7 +627,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return {"ok": True}
 
     # Mounted last so the /api/* routes above always take precedence.
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+    app.mount("/", _CacheControlledStaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     # Middleware order matters: Starlette wraps the most-recently-added middleware
     # outermost, so SessionMiddleware (added second) runs before AuthMiddleware and
