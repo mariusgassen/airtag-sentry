@@ -5,6 +5,7 @@ import psycopg
 import pytest
 
 from airtag_sentry.db import (
+    AppSettings,
     Report,
     StoredKey,
     create_airtag,
@@ -12,11 +13,13 @@ from airtag_sentry.db import (
     delete_airtag_key,
     get_airtag_key,
     get_conn,
+    get_settings,
     insert_reports,
     list_airtags,
     list_keyed_airtag_ids,
     rename_airtag,
     set_airtag_key,
+    update_settings,
 )
 from airtag_sentry.migrate import upgrade_to_head
 
@@ -35,6 +38,19 @@ def conn():
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys "
                     "RESTART IDENTITY CASCADE"
+                )
+                # settings is a singleton row (id pinned to 1), not per-test data -
+                # reset it to defaults in place rather than truncating it away.
+                cur.execute(
+                    """
+                    UPDATE settings SET
+                        polling_interval_minutes = 15,
+                        movement_distance_threshold_meters = 100,
+                        movement_stillstand_hours = 24,
+                        movement_stillstand_movement_meters = 15,
+                        movement_alert_on_backfill = false
+                    WHERE id = 1
+                    """
                 )
             connection.commit()
             # Most tests below reference these two ids as if they already exist
@@ -70,6 +86,7 @@ def test_schema_creates_tables(conn):
         "alerts",
         "push_subscriptions",
         "airtag_keys",
+        "settings",
         "alembic_version",
     } <= tables
 
@@ -173,3 +190,40 @@ def test_airtag_key_set_get_delete_round_trip(conn):
     delete_airtag_key(conn, "bike")
     assert get_airtag_key(conn, "bike") is None
     assert list_keyed_airtag_ids(conn) == set()
+
+
+def test_get_settings_returns_seeded_defaults(conn):
+    settings = get_settings(conn)
+    assert settings == AppSettings(
+        polling_interval_minutes=15,
+        movement_distance_threshold_meters=100,
+        movement_stillstand_hours=24,
+        movement_stillstand_movement_meters=15,
+        movement_alert_on_backfill=False,
+    )
+
+
+def test_update_settings_round_trips(conn):
+    updated = update_settings(
+        conn,
+        AppSettings(
+            polling_interval_minutes=30,
+            movement_distance_threshold_meters=200,
+            movement_stillstand_hours=12,
+            movement_stillstand_movement_meters=5,
+            movement_alert_on_backfill=True,
+        ),
+    )
+    assert updated.polling_interval_minutes == 30
+    assert get_settings(conn) == updated
+
+
+def test_settings_table_stays_single_row(conn):
+    with conn.cursor() as cur:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            cur.execute("INSERT INTO settings (id) VALUES (2)")
+    conn.rollback()
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM settings")
+        (count,) = cur.fetchone()
+    assert count == 1

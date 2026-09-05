@@ -24,11 +24,11 @@ interface Props {
   onEnablePush: () => void
 }
 
-function Section({ children }: { children: ReactNode }) {
+export function Section({ children }: { children: ReactNode }) {
   return <div className="mb-6 overflow-hidden rounded-2xl bg-[var(--surface)]">{children}</div>
 }
 
-function Row({
+export function Row({
   icon,
   label,
   trailing,

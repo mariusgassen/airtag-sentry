@@ -4,6 +4,7 @@ import { createAirtag, getAirtags, getReports, getStatus } from './api'
 import { AirtagList } from './components/AirtagList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { MapCard } from './components/MapCard'
+import { SettingsPanel } from './components/SettingsPanel'
 import { usePushNotifications } from './hooks/usePushNotifications'
 
 export default function App() {
@@ -11,7 +12,7 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
-  const [sidebarView, setSidebarView] = useState<'list' | 'detail'>('list')
+  const [sidebarView, setSidebarView] = useState<'list' | 'detail' | 'settings'>('list')
   const push = usePushNotifications()
 
   const refreshAirtags = useCallback(async () => {
@@ -102,6 +103,8 @@ export default function App() {
               pushStatus={push.status}
               onEnablePush={push.enable}
             />
+          ) : sidebarView === 'settings' ? (
+            <SettingsPanel onBack={() => setSidebarView('list')} />
           ) : (
             <AirtagList
               airtags={airtags}
@@ -109,6 +112,7 @@ export default function App() {
               currentId={currentId}
               onSelect={handleSelect}
               onCreate={handleCreate}
+              onOpenSettings={() => setSidebarView('settings')}
               pushStatus={push.status}
               onEnablePush={push.enable}
             />

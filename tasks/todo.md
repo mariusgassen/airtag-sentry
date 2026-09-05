@@ -198,3 +198,80 @@ Source: user's spec (`airtagsentryspec.md`) + amendments (Postgres, PWA push, Co
   with exactly the 3 expected `schema_migrations` rows; re-running
   `run_migrations()` is a no-op; `docker compose config` still parses with
   the override file's `services.dashboard.ports` merged in when present.
+
+## v6: polling interval / movement thresholds move from env vars to a UI setting
+Trigger: "AirTag encryption key is not documented" (small doc gap - the
+`AIRTAG_KEY_ENCRYPTION_KEY` section never says what happens if you lose or
+rotate it) + "move polling interval, distance threshold etc to a setting in
+the UI" (a real feature - v5 just moved these the *other* direction, into
+env vars, for the Coolify config.yaml bug; the request now is DB + UI
+instead, so the `app` scheduler process and the `dashboard` process both
+need to see the same live value without a restart).
+
+- [x] README: add the missing warning to the "AirTags: fully UI-managed,
+      keys encrypted at rest" section - `AIRTAG_KEY_ENCRYPTION_KEY` must not
+      be lost or changed once keys are stored; doing so makes every stored
+      key undecryptable and each one has to be re-entered via the dashboard.
+- [x] New Alembic migration (`0002_...`): single-row `settings` table
+      (`id` constrained to one row via `CHECK`), columns
+      `polling_interval_minutes`, `movement_distance_threshold_meters`,
+      `movement_stillstand_hours`, `movement_stillstand_movement_meters`,
+      `movement_alert_on_backfill`, seeded with today's defaults
+      (15 / 100 / 24 / 15 / false) in the same migration.
+- [x] `db.py`: `AppSettings` dataclass, `get_settings(conn)`,
+      `update_settings(conn, ...)`.
+- [x] `config.py`: drop `PollingConfig`/`MovementConfig` and their env
+      parsing (`POLLING_INTERVAL_MINUTES`, `MOVEMENT_*`) entirely - another
+      breaking change, no back-compat shim, consistent with v3/v5. Drop the
+      now-dead `_env_float`/`_env_bool` helpers too.
+- [x] `movement.py`: `MovementConfig` moves here (keeps this module's "no DB
+      access" pure-function design intact); `tracker.py` builds one from
+      `AppSettings` each `poll_once()` call instead of from `cfg`.
+- [x] `scheduler.py`: swap the fixed APScheduler `interval` trigger for a
+      self-rescheduling `date` trigger - after every poll, re-read
+      `polling_interval_minutes` from the DB and schedule the next single
+      run that far out (`replace_existing=True`). Makes an interval change
+      take effect starting next poll, not on the next container restart.
+- [x] `web/app.py`: `GET`/`PUT /api/settings` (validated Pydantic body,
+      reuses the existing `AuthMiddleware` coverage of `/api/*`); `/api/status`
+      reads `poll_interval_minutes` from DB settings instead of `cfg.polling`.
+- [x] Frontend: `api.ts` (`AppSettings`, `getSettings`/`updateSettings`),
+      a gear icon, a `SettingsPanel` component styled like
+      `AirtagDetail`'s Section/Row forms, wired into `App.tsx`'s sidebar
+      views next to the existing list/detail panels.
+- [x] Strip `POLLING_INTERVAL_MINUTES`/`MOVEMENT_*` from `.env.example`,
+      `docker-compose.yml` `environment:` blocks, the README "App behavior
+      settings" table, and the `run` CLI help text; note where they live now.
+- [x] Tests: `test_config.py` (drop the removed env vars), `test_movement.py`
+      (import `MovementConfig` from `airtag_sentry.movement`), `test_db.py`
+      (settings get/update round-trip, single-row invariant). Full `pytest`
+      run against real Postgres; `docker compose config`; frontend
+      `tsc`/`vite build`.
+
+## Review (v6)
+- Another breaking change, no back-compat shim (consistent with v3/v5):
+  `POLLING_INTERVAL_MINUTES`/`MOVEMENT_*` env vars are gone; anyone with
+  them set in `.env` just has them ignored now (harmless, not an error) —
+  the DB-seeded defaults match the old env-var defaults exactly, so nothing
+  changes behaviorally for an existing deployment on upgrade.
+- The scheduler no longer uses APScheduler's `interval` trigger at all — it
+  self-reschedules a `date` trigger after every poll, re-reading
+  `polling_interval_minutes` from Postgres each time. A change made in the
+  dashboard takes effect starting with the very next poll; there is no
+  "still running on the old interval until restart" window.
+- Verified against a real local Postgres (started for this session): full
+  `pytest` (30 passed, 0 skipped — first time this suite has actually run
+  against live Postgres rather than skipping the DB-backed tests), including
+  new coverage for `get_settings`/`update_settings` round-tripping and the
+  `CHECK (id = 1)` single-row constraint actually rejecting a second row.
+  Also manually exercised `GET`/`PUT /api/settings` and `/api/status` through
+  a `TestClient` with a hand-signed session cookie (real auth middleware,
+  not bypassed): round-trips correctly, and `PUT` with
+  `polling_interval_minutes: 0` correctly 422s. `docker compose config`
+  parses cleanly with no `POLLING_INTERVAL_MINUTES`/`MOVEMENT_*` left in any
+  `environment:` block. Frontend: `tsc -b && vite build` succeeds with no
+  type errors.
+- Not verified: the Settings panel's actual appearance/interaction in a
+  real browser (no browser available in this sandbox) — logic was verified
+  via the API round-trip above and by reading the component against the
+  existing `AirtagDetail`/`AirtagList` styling it reuses (`Section`/`Row`).

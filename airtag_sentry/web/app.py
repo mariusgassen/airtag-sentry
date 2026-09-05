@@ -7,6 +7,7 @@ in its threadpool automatically - no async DB driver needed at this scale.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import secrets
@@ -18,13 +19,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from findmy import FindMyAccessory, KeyPair
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from airtag_sentry import keystore
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
+    AppSettings,
     PushSubscription,
     StoredKey,
     add_push_subscription,
@@ -33,12 +35,14 @@ from airtag_sentry.db import (
     delete_airtag_key,
     fetch_reports,
     get_conn,
+    get_settings,
     latest_alert,
     list_airtags,
     list_keyed_airtag_ids,
     remove_push_subscription,
     rename_airtag,
     set_airtag_key,
+    update_settings,
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -92,6 +96,14 @@ class AirtagKeyIn(BaseModel):
 
 class AirtagIn(BaseModel):
     name: str
+
+
+class SettingsIn(BaseModel):
+    polling_interval_minutes: int = Field(gt=0)
+    movement_distance_threshold_meters: float = Field(gt=0)
+    movement_stillstand_hours: float = Field(gt=0)
+    movement_stillstand_movement_meters: float = Field(gt=0)
+    movement_alert_on_backfill: bool
 
 
 def _slugify(name: str) -> str:
@@ -278,6 +290,7 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
             reports = fetch_reports(conn, resolved, limit=1)
             alert = latest_alert(conn, resolved)
             airtag_name = _airtag_name(conn, resolved)
+            poll_interval_minutes = get_settings(conn).polling_interval_minutes
         return {
             "airtag_id": resolved,
             "airtag_name": airtag_name,
@@ -291,8 +304,20 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
                 else None
             ),
             "last_alert": ({"reason": alert[0], "timestamp": alert[1].isoformat()} if alert else None),
-            "poll_interval_minutes": cfg.polling.interval_minutes,
+            "poll_interval_minutes": poll_interval_minutes,
         }
+
+    @app.get("/api/settings")
+    def get_settings_route():
+        with get_conn(cfg.database_url) as conn:
+            settings = get_settings(conn)
+        return dataclasses.asdict(settings)
+
+    @app.put("/api/settings")
+    def update_settings_route(body: SettingsIn):
+        with get_conn(cfg.database_url) as conn:
+            settings = update_settings(conn, AppSettings(**body.model_dump()))
+        return dataclasses.asdict(settings)
 
     @app.get("/api/push/vapid-public-key")
     def get_vapid_public_key():

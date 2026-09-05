@@ -17,16 +17,18 @@ from airtag_sentry.db import (
 )
 from airtag_sentry.db import (
     AirtagRecord,
+    AppSettings,
     Report,
     count_reports,
     fetch_reports_before,
     get_airtag_key,
     get_conn,
+    get_settings,
     insert_reports,
     list_airtags,
     record_alert,
 )
-from airtag_sentry.movement import evaluate_movement
+from airtag_sentry.movement import MovementConfig, evaluate_movement
 from airtag_sentry.notifiers import build_notifiers, notify_all
 
 logger = logging.getLogger(__name__)
@@ -54,17 +56,20 @@ def poll_once(cfg: Config) -> None:
     account = restore_account(cfg)
 
     with get_conn(cfg.database_url) as conn:
+        settings = get_settings(conn)
         notifiers = build_notifiers(cfg)
         for airtag in list_airtags(conn):
             try:
-                _poll_airtag(cfg, account, airtag, conn, notifiers)
+                _poll_airtag(cfg, account, airtag, conn, notifiers, settings)
             except Exception:
                 logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
             finally:
                 account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
 
 
-def _poll_airtag(cfg: Config, account, airtag: AirtagRecord, conn, notifiers) -> None:
+def _poll_airtag(
+    cfg: Config, account, airtag: AirtagRecord, conn, notifiers, settings: AppSettings
+) -> None:
     key = _load_key(cfg, conn, airtag.id)
     location_reports = account.fetch_location_history(key)
 
@@ -94,7 +99,7 @@ def _poll_airtag(cfg: Config, account, airtag: AirtagRecord, conn, notifiers) ->
 
     logger.info("[%s] Inserted %d new report(s).", airtag.id, len(newly_inserted))
 
-    if was_empty and not cfg.movement.alert_on_backfill:
+    if was_empty and not settings.movement_alert_on_backfill:
         logger.info(
             "[%s] First-ever poll: skipping alerts for the %d backfilled report(s).",
             airtag.id,
@@ -102,9 +107,15 @@ def _poll_airtag(cfg: Config, account, airtag: AirtagRecord, conn, notifiers) ->
         )
         return
 
+    movement_cfg = MovementConfig(
+        distance_threshold_meters=settings.movement_distance_threshold_meters,
+        stillstand_hours=settings.movement_stillstand_hours,
+        stillstand_movement_meters=settings.movement_stillstand_movement_meters,
+        alert_on_backfill=settings.movement_alert_on_backfill,
+    )
     for report in newly_inserted:
         prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
-        alert = evaluate_movement(report, prior_reports, cfg.movement)
+        alert = evaluate_movement(report, prior_reports, movement_cfg)
         if alert is None:
             continue
 

@@ -30,19 +30,6 @@ class AppleConfig:
 
 
 @dataclasses.dataclass
-class PollingConfig:
-    interval_minutes: int
-
-
-@dataclasses.dataclass
-class MovementConfig:
-    distance_threshold_meters: float
-    stillstand_hours: float
-    stillstand_movement_meters: float
-    alert_on_backfill: bool
-
-
-@dataclasses.dataclass
 class WebConfig:
     host: str
     port: int
@@ -84,8 +71,6 @@ class NotificationsConfig:
 @dataclasses.dataclass
 class Config:
     apple: AppleConfig
-    polling: PollingConfig
-    movement: MovementConfig
     web: WebConfig
     auth: AuthConfig
     database_url: str
@@ -105,16 +90,6 @@ def _env_str(name: str, default: str) -> str:
 def _env_int(name: str, default: int) -> int:
     value = _env(name)
     return int(value) if value is not None else default
-
-
-def _env_float(name: str, default: float) -> float:
-    value = _env(name)
-    return float(value) if value is not None else default
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    value = _env(name)
-    return value.strip().lower() in ("1", "true", "yes") if value is not None else default
 
 
 def database_url_from_env() -> str:
@@ -154,15 +129,6 @@ def load_config() -> Config:
             libs_path=_env_str("ANISETTE_LIBS_PATH", "data/ani_libs.bin"),
             remote_url=_env("ANISETTE_REMOTE_URL"),
         ),
-    )
-
-    polling = PollingConfig(interval_minutes=_env_int("POLLING_INTERVAL_MINUTES", 15))
-
-    movement = MovementConfig(
-        distance_threshold_meters=_env_float("MOVEMENT_DISTANCE_THRESHOLD_METERS", 100),
-        stillstand_hours=_env_float("MOVEMENT_STILLSTAND_HOURS", 24),
-        stillstand_movement_meters=_env_float("MOVEMENT_STILLSTAND_MOVEMENT_METERS", 15),
-        alert_on_backfill=_env_bool("MOVEMENT_ALERT_ON_BACKFILL", False),
     )
 
     web = WebConfig(host=_env_str("WEB_HOST", "0.0.0.0"), port=_env_int("WEB_PORT", 8000))
@@ -230,8 +196,6 @@ def load_config() -> Config:
 
     return Config(
         apple=apple,
-        polling=polling,
-        movement=movement,
         web=web,
         auth=auth,
         database_url=database_url,
