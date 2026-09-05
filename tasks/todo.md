@@ -323,8 +323,23 @@ were subtly broken, and focusing a form field zoomed the whole page in.
       (System/Hell/Dunkel) row to Settings using the existing segmented-
       control pattern from the key-upload form.
 
+- [x] Fixed a real bug surfaced after the above: the PWA app icon was
+      missing on the home screen. Root cause was `AuthMiddleware`
+      (`web/app.py`) gating *every* path behind a login session except
+      `/login`/`/auth/callback`/`/logout` - including
+      `/manifest.webmanifest`, `/icons/*`, and the service worker scripts.
+      The browser's "Add to Home Screen"/install-eligibility checks and
+      background service-worker update fetches request those outside the
+      page's own authenticated fetch context, so they got a 302 redirect to
+      the login HTML instead of the actual PNG/JSON/JS - which is what a
+      missing/broken install icon looks like. Added `_is_public()` so those
+      specific paths (not sensitive - no user data, just install plumbing)
+      are servable without a session; `/`, `/assets/*`, and all `/api/*`
+      routes are unaffected and still require login.
+
 ## Review (v7)
-- No backend changes; no breaking changes for existing deployments.
+- One backend change (see the app-icon fix above), otherwise UI-only; no
+  breaking changes for existing deployments.
 - Verified: `tsc -b && vite build` and `oxlint` (only pre-existing,
   untouched-by-this-change warnings remain - two `set-state-in-effect`
   notices on the original data-loading effects). Ran the actual app via
@@ -344,3 +359,8 @@ were subtly broken, and focusing a form field zoomed the whole page in.
   status bar are browser behaviors a headless desktop Chromium can't
   reproduce) - the font-size fix is the documented, standard root cause and
   fix for that behavior, but hasn't been confirmed against real hardware.
+- App-icon fix verified with a `TestClient` hitting the real `create_app()`
+  unauthenticated: `/manifest.webmanifest`, all three `/icons/*.png`,
+  `/registerSW.js`, and `/sw.js` now 200; `/`, `/assets/*`, and `/api/*`
+  still redirect to `/login` (302) or 401 exactly as before. Full `pytest`
+  (20 passed / 10 skipped - same DB-backed skips as always, no regression).
