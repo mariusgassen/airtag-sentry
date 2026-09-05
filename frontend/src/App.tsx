@@ -144,7 +144,7 @@ export default function App() {
   }
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[var(--bg)] md:flex">
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-[var(--bg)] md:flex">
       {/* isolate: Leaflet's internal panes use z-index up to 700 (markers,
           popups); without a stacking context scoped here, those values
           escape this wrapper and paint over the sheet below despite DOM
