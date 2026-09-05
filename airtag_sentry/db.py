@@ -56,6 +56,15 @@ class PushSubscription:
     auth: str
 
 
+@dataclasses.dataclass(frozen=True)
+class AppSettings:
+    polling_interval_minutes: int
+    movement_distance_threshold_meters: float
+    movement_stillstand_hours: float
+    movement_stillstand_movement_meters: float
+    movement_alert_on_backfill: bool
+
+
 @contextmanager
 def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
     with psycopg.connect(database_url) as conn:
@@ -247,3 +256,44 @@ def list_keyed_airtag_ids(conn: psycopg.Connection) -> set[str]:
     with conn.cursor() as cur:
         cur.execute("SELECT airtag_id FROM airtag_keys")
         return {row[0] for row in cur.fetchall()}
+
+
+_SETTINGS_COLUMNS = (
+    "polling_interval_minutes",
+    "movement_distance_threshold_meters",
+    "movement_stillstand_hours",
+    "movement_stillstand_movement_meters",
+    "movement_alert_on_backfill",
+)
+
+
+def get_settings(conn: psycopg.Connection) -> AppSettings:
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {', '.join(_SETTINGS_COLUMNS)} FROM settings WHERE id = 1")
+        row = cur.fetchone()
+        return AppSettings(*row)
+
+
+def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSettings:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE settings SET
+                polling_interval_minutes = %s,
+                movement_distance_threshold_meters = %s,
+                movement_stillstand_hours = %s,
+                movement_stillstand_movement_meters = %s,
+                movement_alert_on_backfill = %s,
+                updated_at = now()
+            WHERE id = 1
+            """,
+            (
+                settings.polling_interval_minutes,
+                settings.movement_distance_threshold_meters,
+                settings.movement_stillstand_hours,
+                settings.movement_stillstand_movement_meters,
+                settings.movement_alert_on_backfill,
+            ),
+        )
+    conn.commit()
+    return settings

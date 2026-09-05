@@ -9,10 +9,17 @@ import dataclasses
 import datetime as dt
 import math
 
-from airtag_sentry.config import MovementConfig
 from airtag_sentry.db import Report
 
 EARTH_RADIUS_METERS = 6_371_000.0
+
+
+@dataclasses.dataclass(frozen=True)
+class MovementConfig:
+    distance_threshold_meters: float
+    stillstand_hours: float
+    stillstand_movement_meters: float
+    alert_on_backfill: bool
 
 
 @dataclasses.dataclass(frozen=True)

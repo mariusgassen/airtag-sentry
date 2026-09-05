@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Airtag, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
-import { AirtagGlyph, BellIcon, ChevronRightIcon, LogoutIcon, PlusIcon } from './icons'
+import { AirtagGlyph, BellIcon, ChevronRightIcon, GearIcon, LogoutIcon, PlusIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -10,11 +10,21 @@ interface Props {
   currentId: string | null
   onSelect: (id: string) => void
   onCreate: (name: string) => Promise<void>
+  onOpenSettings: () => void
   pushStatus: 'idle' | 'active' | 'error'
   onEnablePush: () => void
 }
 
-export function AirtagList({ airtags, statuses, currentId, onSelect, onCreate, pushStatus, onEnablePush }: Props) {
+export function AirtagList({
+  airtags,
+  statuses,
+  currentId,
+  onSelect,
+  onCreate,
+  onOpenSettings,
+  pushStatus,
+  onEnablePush,
+}: Props) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -37,6 +47,15 @@ export function AirtagList({ airtags, statuses, currentId, onSelect, onCreate, p
       <div className="flex items-center justify-between px-4 pb-2 pt-[calc(0.9rem+env(safe-area-inset-top))]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">AirTags</h1>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Einstellungen"
+            title="Einstellungen"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--accent)] hover:bg-[var(--surface)]"
+          >
+            <GearIcon className="h-5 w-5" />
+          </button>
           <button
             type="button"
             onClick={onEnablePush}

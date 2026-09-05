@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Interactively log in to Apple ID and persist the session (needs a TTY and a live 2FA code).",
     )
     sub.add_parser("poll", help="Run a single poll immediately and exit.")
-    sub.add_parser("run", help="Run the scheduler forever (polling interval from POLLING_INTERVAL_MINUTES).")
+    sub.add_parser("run", help="Run the scheduler forever (polling interval set in the dashboard's Settings panel).")
     sub.add_parser("serve", help="Run the FastAPI dashboard.")
 
     args = parser.parse_args(argv)

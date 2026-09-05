@@ -1,8 +1,7 @@
 import datetime as dt
 
-from airtag_sentry.config import MovementConfig
 from airtag_sentry.db import Report
-from airtag_sentry.movement import evaluate_movement, haversine_distance
+from airtag_sentry.movement import MovementConfig, evaluate_movement, haversine_distance
 
 CFG = MovementConfig(
     distance_threshold_meters=100,

@@ -21,6 +21,14 @@ export interface Status {
   poll_interval_minutes: number
 }
 
+export interface AppSettings {
+  polling_interval_minutes: number
+  movement_distance_threshold_meters: number
+  movement_stillstand_hours: number
+  movement_stillstand_movement_meters: number
+  movement_alert_on_backfill: boolean
+}
+
 export class ApiError extends Error {}
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -87,6 +95,16 @@ export async function getReports(airtagId: string, limit = 500): Promise<Report[
 
 export async function getStatus(airtagId: string): Promise<Status> {
   return (await apiFetch(`/api/status?airtag_id=${encodeURIComponent(airtagId)}`)).json()
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  return (await apiFetch('/api/settings')).json()
+}
+
+export async function updateSettings(settings: AppSettings): Promise<AppSettings> {
+  return (
+    await apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(settings) })
+  ).json()
 }
 
 export async function getVapidPublicKey(): Promise<string | null> {

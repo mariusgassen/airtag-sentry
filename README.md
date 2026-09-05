@@ -10,10 +10,10 @@ timeline.
 
 ## How it fits together
 
-- **`app` service** — a scheduler (APScheduler) that polls every
-  `polling.interval_minutes`, fetches the last ~7 days of location reports,
-  dedupes them into Postgres, runs Haversine-distance movement detection, and
-  fires notifications.
+- **`app` service** — a scheduler (APScheduler) that polls at the
+  configured interval (Settings ⚙️ panel in the dashboard, default 15 min),
+  fetches the last ~7 days of location reports, dedupes them into Postgres,
+  runs Haversine-distance movement detection, and fires notifications.
 - **`dashboard` service** — a FastAPI app serving the reports/status API and
   a Vite + React PWA (map, timeline, AirTag management, "enable notifications"
   button).
@@ -41,10 +41,10 @@ timeline.
 ## AirTags: fully UI-managed, keys encrypted at rest
 
 AirTags are not configured in a file at all — there is nothing to edit for
-them. Add, rename, and remove them entirely through the dashboard's
-**AirTags verwalten** (⚙️) panel; each one is a row in Postgres. The actual
-secret key material is entered the same way (paste a base64 key or upload a
-JSON export) and stored encrypted, never in `.env`.
+them. Add one with the **+** button in the AirTags list; rename, delete, and
+manage its key from its detail view (tap the AirTag). The actual secret key
+material is entered the same way (paste a base64 key or upload a JSON
+export) and stored encrypted, never in `.env`.
 
 This needs one encryption key in `.env`, used to encrypt/decrypt that stored
 key material — it can't itself live in the database it protects:
@@ -54,9 +54,17 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 Paste the result into `.env` as `AIRTAG_KEY_ENCRYPTION_KEY`. Once the
-dashboard is running (see [Local setup](#local-setup)), open the ⚙️ panel,
-add an AirTag by name, and either paste its base64 key or upload the JSON
-file exported per the next section.
+dashboard is running (see [Local setup](#local-setup)), open an AirTag's
+detail view and either paste its base64 key or upload the JSON file exported
+per the next section.
+
+**This key cannot be rotated or regenerated without cost.** It never touches
+the database itself (see above), so losing it or overwriting it in `.env`
+with a different value makes every already-stored AirTag key permanently
+undecryptable — the app will fail to poll until you re-enter each AirTag's
+key from scratch via the dashboard. Back it up somewhere durable (a password
+manager, alongside your other `.env` secrets) before you store any real
+AirTag keys with it.
 
 ## Extracting your AirTag key
 
@@ -80,8 +88,8 @@ accessory records and writes one `<uuid>.json` file per paired accessory
 (AirTags, AirPods, paired Macs/iPhones, etc.) into `data/keys/`. Files are
 named by internal UUID, not by display name, so open each one and check its
 `"name"` field to find the AirTag you're after, then upload that file
-directly in the dashboard's AirTags-verwalten panel (see above) — no need to
-rename it or reference it anywhere else.
+directly in that AirTag's detail view in the dashboard (see above) — no need
+to rename it or reference it anywhere else.
 
 This only works for accessories already paired to your own Apple ID on that
 Mac — extract keys for your own property only.
@@ -145,7 +153,7 @@ docker compose up -d
 The dashboard is then at `http://localhost:8000` (with the override file from
 above — without it, plain `docker compose up` doesn't publish any host port,
 matching how Coolify runs it) — open it, log in with
-GitHub, and add each AirTag's key via the ⚙️ panel (see
+GitHub, and add each AirTag's key from its detail view (see
 [AirTags: fully UI-managed, keys encrypted at rest](#airtags-fully-ui-managed-keys-encrypted-at-rest)).
 Until a key is added, that tag's poll is skipped with a log line — it won't
 crash the scheduler.
@@ -176,8 +184,11 @@ Each backend is optional and independent — configure any combination in `.env`
 
 ## App behavior settings
 
-All optional — every one has a default and lives in `.env` alongside the
-secrets above:
+Two different kinds of "setting" here, deliberately not treated the same way:
+
+**Env vars** (`.env`, alongside the secrets above) — infra-shaped, need a
+redeploy to change anyway, so there's no benefit to making them
+runtime-editable:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
@@ -185,13 +196,14 @@ secrets above:
 | `ANISETTE_MODE` | `local` | `local` (generate anisette data in-process) or `remote` (use an `anisette-v3-server`). Docker Compose hardcodes this to `remote`. |
 | `ANISETTE_LIBS_PATH` | `data/ani_libs.bin` | Cache path for the local anisette provider's libraries. Only used when `ANISETTE_MODE=local`. |
 | `ANISETTE_REMOTE_URL` | unset | URL of the anisette server. Required when `ANISETTE_MODE=remote`. |
-| `POLLING_INTERVAL_MINUTES` | `15` | How often the scheduler polls Find My. |
-| `MOVEMENT_DISTANCE_THRESHOLD_METERS` | `100` | See [Movement detection](#movement-detection). |
-| `MOVEMENT_STILLSTAND_HOURS` | `24` | See [Movement detection](#movement-detection). |
-| `MOVEMENT_STILLSTAND_MOVEMENT_METERS` | `15` | See [Movement detection](#movement-detection). |
-| `MOVEMENT_ALERT_ON_BACKFILL` | `false` | Whether the first-ever ~7 day backfill poll should raise alerts. |
 | `WEB_HOST` | `0.0.0.0` | Dashboard bind address. |
 | `WEB_PORT` | `8000` | Dashboard bind port. |
+
+**Dashboard settings** (⚙️ panel in the UI, stored in Postgres) — behavior
+you might reasonably want to tune per-deployment without touching `.env` or
+redeploying: polling interval and the movement-alert thresholds. See
+[Movement detection](#movement-detection). A change takes effect starting
+with the `app` service's next poll — no restart needed.
 
 ## Installing the dashboard as an app (PWA)
 
@@ -229,16 +241,17 @@ notifications, even when the app isn't open.
 ## Movement detection
 
 Two alert conditions, both based on the Haversine distance between
-consecutive reports:
-- **`distance_threshold`**: the tag moved more than
-  `MOVEMENT_DISTANCE_THRESHOLD_METERS` (default 100 m) since the last report.
-- **`stillstand_movement`**: the tag had been stationary for at least
-  `MOVEMENT_STILLSTAND_HOURS` (default 24 h) and then moved more than
-  `MOVEMENT_STILLSTAND_MOVEMENT_METERS` (default 15 m) — catches "someone
-  finally rolled it away" moves too small to trip the main threshold.
+consecutive reports, all four tunables editable from the dashboard's ⚙️
+Settings panel:
+- **`distance_threshold`**: the tag moved more than the distance threshold
+  (default 100 m) since the last report.
+- **`stillstand_movement`**: the tag had been stationary for at least the
+  stillstand duration (default 24 h) and then moved more than the
+  stillstand-movement threshold (default 15 m) — catches "someone finally
+  rolled it away" moves too small to trip the main threshold.
 
-The very first poll backfills ~7 days of history; alerts for that backfill are
-suppressed unless you set `MOVEMENT_ALERT_ON_BACKFILL=true`.
+The very first poll backfills ~7 days of history; alerts for that backfill
+are suppressed unless you turn on "Alarm beim ersten Abruf" in Settings.
 
 ## Database migrations
 
@@ -290,7 +303,7 @@ npm run build   # production build - writes straight into
 - Single user (one allowed GitHub login), no native mobile app beyond the
   installable PWA — intentional per the original spec's non-goals. Multiple
   AirTags per Apple ID are supported, added/managed entirely via the
-  dashboard's ⚙️ panel.
+  dashboard.
 - **Upgrading from an earlier version of this project**: this is still early,
   pre-production software with no real deployed data to preserve, so schema
   changes have not carried a backward-compatible upgrade path so far (most
