@@ -42,7 +42,7 @@ function TabButton({
  * instead. */
 export function TabBar({ active, onChange }: Props) {
   return (
-    <nav className="flex shrink-0 border-t border-[var(--divider)] bg-[var(--bg)]">
+    <nav className="chrome-blur flex shrink-0 border-t border-[var(--divider)]">
       <TabButton
         label="Objekte"
         icon={<AirtagGlyph className="h-6 w-6" />}

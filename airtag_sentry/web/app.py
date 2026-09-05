@@ -57,6 +57,7 @@ _PUBLIC_PATHS = {
     "/manifest.webmanifest",
     "/registerSW.js",
     "/sw.js",
+    "/favicon.ico",
     "/health",
 }
 
@@ -70,8 +71,10 @@ def _is_public(path: str) -> bool:
     context. Gating those behind login redirected them to the login page's
     HTML instead of the actual asset - the browser then either shows a
     broken/missing app icon or, for sw.js, discards the "update" since it's
-    not valid JS. None of these are sensitive; only the app's data and the
-    app shell itself need a session.
+    not valid JS. Browsers and bookmark tools also request /favicon.ico
+    directly, independent of the page's own <link rel="icon">, so it needs
+    the same exemption. None of these are sensitive; only the app's data and
+    the app shell itself need a session.
 
     `/health` is the same story for a different caller: Coolify's Docker
     healthcheck probes it directly, with no session cookie to send.
@@ -222,13 +225,155 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             f"{_GITHUB_AUTHORIZE_URL}?client_id={cfg.auth.github_client_id}"
             f"&scope=read:user&state={state}"
         )
-        html = f"""<!doctype html><html lang="de"><head><meta charset="utf-8">
-<title>AirTagSentry - Login</title></head>
-<body style="font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;
-display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
-<a href="{authorize_url}" style="background:#238636;color:white;padding:0.75rem 1.25rem;
-border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a>
-</body></html>"""
+        html = f"""<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<title>AirTagSentry - Anmelden</title>
+<style>
+  :root {{
+    color-scheme: dark;
+    --bg: #000000;
+    --card: rgba(28, 28, 30, 0.72);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --accent: #0a84ff;
+    --accent-2: #5e5ce6;
+    --text: #ffffff;
+    --text-secondary: #8e8e93;
+  }}
+  @media (prefers-color-scheme: light) {{
+    :root:not([data-theme="dark"]) {{
+      color-scheme: light;
+      --bg: #f2f2f7;
+      --card: rgba(255, 255, 255, 0.72);
+      --card-border: rgba(0, 0, 0, 0.06);
+      --accent: #007aff;
+      --accent-2: #5856d6;
+      --text: #000000;
+      --text-secondary: #8e8e93;
+    }}
+  }}
+  :root[data-theme="light"] {{
+    color-scheme: light;
+    --bg: #f2f2f7;
+    --card: rgba(255, 255, 255, 0.72);
+    --card-border: rgba(0, 0, 0, 0.06);
+    --accent: #007aff;
+    --accent-2: #5856d6;
+    --text: #000000;
+    --text-secondary: #8e8e93;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ height: 100%; margin: 0; }}
+  body {{
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }}
+  .backdrop {{
+    position: fixed;
+    inset: -20%;
+    z-index: 0;
+    background:
+      radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 55%),
+      radial-gradient(circle at 80% 75%, color-mix(in srgb, var(--accent-2) 30%, transparent), transparent 55%);
+    filter: blur(60px);
+  }}
+  .card {{
+    position: relative;
+    z-index: 1;
+    width: min(340px, calc(100vw - 3rem));
+    padding: 2.25rem 1.75rem 1.75rem;
+    border-radius: 28px;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }}
+  .glyph {{
+    width: 64px;
+    height: 64px;
+    margin-bottom: 1rem;
+    color: var(--accent);
+  }}
+  h1 {{
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.4rem;
+  }}
+  p.tagline {{
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin: 0 0 1.75rem;
+  }}
+  .btn {{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    width: 100%;
+    background: var(--accent);
+    color: white;
+    padding: 0.85rem 1.25rem;
+    border-radius: 14px;
+    text-decoration: none;
+    font-size: 1rem;
+    font-weight: 600;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }}
+  .btn:active {{
+    transform: scale(0.97);
+    opacity: 0.85;
+  }}
+  .btn svg {{ width: 20px; height: 20px; flex-shrink: 0; }}
+</style>
+<script>
+  try {{
+    var t = localStorage.getItem('airtagsentry.theme')
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+  }} catch (e) {{}}
+</script>
+</head>
+<body>
+<div class="backdrop"></div>
+<div class="card">
+  <svg class="glyph" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="12" cy="12" r="10" fill="currentColor" fill-opacity="0.15"/>
+    <circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="1.6"/>
+    <circle cx="12" cy="12" r="2" fill="currentColor"/>
+  </svg>
+  <h1>AirTagSentry</h1>
+  <p class="tagline">Standort-Historie und Bewegungs-Alarm für deine AirTags.</p>
+  <a class="btn" href="{authorize_url}">
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+        -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66
+        .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15
+        -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0
+        1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
+        1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01
+        1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+    </svg>
+    Mit GitHub anmelden
+  </a>
+</div>
+</body>
+</html>"""
         # This page mints a fresh, single-use OAuth state every time it's
         # rendered. Without an explicit no-store, a browser (or intermediate
         # proxy) is free to cache this dynamic HTML and hand the *same*

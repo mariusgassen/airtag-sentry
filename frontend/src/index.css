@@ -92,6 +92,50 @@ body {
   color: var(--text-secondary) !important;
 }
 
+/* A pulsing "you are here" marker for the map's no-reports-yet fallback -
+   distinct from the default red AirTag pin so it's never mistaken for a
+   device location. */
+.current-location-marker {
+  position: relative;
+  width: 20px;
+  height: 20px;
+}
+.current-location-marker .dot {
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.current-location-marker .pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.35;
+  animation: current-location-pulse 2s ease-out infinite;
+}
+@keyframes current-location-pulse {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+/* iOS-style translucent "material" for floating chrome (tab bar, sheet grab
+   handle) that sits over the full-bleed map - vs. the sheet body itself,
+   which stays opaque so scrolling list/detail content stays readable. */
+.chrome-blur {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+}
+
 @media (max-width: 767px) {
   /* iOS/Android auto-zoom the viewport when a focused form control's
      computed font-size is under 16px. Tailwind's text-sm (14px) etc.
@@ -114,5 +158,18 @@ body {
   }
   .sheet[data-expanded="true"] {
     height: calc(100vh - env(safe-area-inset-top) - var(--tabbar-h) - 44px);
+  }
+
+  /* Live drag preview: JS sets --drag-delta (a signed px offset) on pointer-
+     move and clears it on release, so the transition below only ever
+     applies to the resolved snap, never fights the finger mid-drag. */
+  .sheet[data-dragging="true"] {
+    transition: none;
+  }
+  .sheet[data-dragging="true"][data-expanded="false"] {
+    height: calc(52vh + var(--drag-delta, 0px));
+  }
+  .sheet[data-dragging="true"][data-expanded="true"] {
+    height: calc(100vh - env(safe-area-inset-top) - var(--tabbar-h) - 44px + var(--drag-delta, 0px));
   }
 }

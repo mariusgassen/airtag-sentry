@@ -197,3 +197,16 @@ def test_health_reports_503_when_database_is_unreachable(cfg):
     resp = client.get("/health")
 
     assert resp.status_code == 503
+
+
+def test_favicon_is_servable_without_a_session(client):
+    # Browsers/bookmark tools request /favicon.ico directly, independent of
+    # the page's own <link rel="icon"> and outside any authenticated fetch
+    # context - it must not be redirected behind login like the app shell.
+    favicon = app_module.STATIC_DIR / "favicon.ico"
+    favicon.write_bytes(b"\x00\x00\x01\x00")
+    try:
+        resp = client.get("/favicon.ico", headers={"sec-fetch-mode": "navigate"})
+        assert resp.status_code == 200
+    finally:
+        favicon.unlink()

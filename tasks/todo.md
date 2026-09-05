@@ -337,6 +337,110 @@ were subtly broken, and focusing a form field zoomed the whole page in.
       are servable without a session; `/`, `/assets/*`, and all `/api/*`
       routes are unaffected and still require login.
 
+## v8: UI/UX polish (login page, favicon, auto-save settings, logout placement, map fallback, native chrome)
+Trigger: direct UI/UX feedback list - login page is a bare link, favicon/PWA
+icon isn't wired up correctly, settings needed a Save button instead of
+auto-saving, logout was in the AirTags tab instead of Settings, the map was
+blank for a brand-new AirTag, and the overall app still read as a styled web
+page rather than a native iOS app (including a sheet grab-handle that only
+supported tap, not the drag it visually implies).
+
+- [x] `web/app.py::login_page`: full redesign - theme-aware (reads the same
+      `localStorage` key as `index.html`'s early-theme script, falls back to
+      `prefers-color-scheme`), glass card, app glyph, matches the dashboard's
+      actual palette instead of hardcoded `#0d1117`/`#238636`.
+- [x] `vite.config.ts`: fix stale PWA manifest `background_color`/
+      `theme_color` (`#0d1117`/`#1f6feb`) to match the real palette
+      (`#000000`/`#0a84ff`).
+- [x] `scripts/generate_icons.py` + `frontend/public/favicon.ico` (new,
+      generated): multi-size favicon from the same glyph; `index.html` links
+      it plus a sized PNG variant; `web/app.py`: `/favicon.ico` added to
+      `_PUBLIC_PATHS` (same non-sensitive class as the existing manifest/icon
+      exemptions) so it isn't 302'd behind login.
+- [x] `AirtagList.tsx`: drop the bottom logout link. `SettingsPanel.tsx`: add
+      it at the bottom as a destructive `Row` (reusing `AirtagDetail.tsx`'s
+      `Row`/`Section`).
+- [x] `SettingsPanel.tsx`: auto-save - numeric fields debounce-PUT ~600ms
+      after the last keystroke (inline validation hint instead of blocking
+      `alert()`), checkbox/theme PUT immediately; Save button removed,
+      replaced by a small transient "Speichert…/Gespeichert" label.
+- [x] `MapCard.tsx`: no-reports-yet state now tries
+      `navigator.geolocation.getCurrentPosition` and renders a pulsing
+      "Aktueller Standort" dot marker centered there; unchanged text
+      fallback if geolocation is denied/unsupported.
+- [x] Native-chrome polish (focused scope, not a nav rewrite): translucent
+      `backdrop-filter` blur on the tab bar and sheet handle bar; real
+      pointer-drag-to-resize on the sheet's grab handle with snap-on-release
+      (tap-to-toggle kept as a fallback via a drag-distance threshold),
+      fixing the reported non-functional handle; minor spacing/typography
+      pass on settings rows/section headers toward iOS grouped-table
+      conventions.
+
+## Review (v8)
+- Found and fixed a real bug introduced while implementing auto-save: the
+  first version of `SettingsPanel.tsx`'s `update()` put side effects (the
+  debounce timer, calling `persist()`) inside a `setSettings` *functional*
+  updater. React StrictMode (enabled in `main.tsx`) deliberately
+  double-invokes functional updaters in dev to catch exactly this, which
+  fired two identical `PUT /api/settings` calls per checkbox click - caught
+  by the Playwright verification below, not by `tsc`/`oxlint`. Fixed by
+  deriving `next` from the `settings` closure directly and running the
+  side effects once, outside the updater - the correct pattern, not a
+  workaround.
+- The sheet's grab handle previously only supported tap
+  (`setSheetExpanded` toggle) despite looking like a drag handle - the
+  reported "handle does not work" bug. Real pointer-drag is now driven by a
+  `--drag-delta` CSS custom property set on the sheet element during
+  `pointermove` (see the `[data-dragging="true"]` rules in `index.css`),
+  resolved to a collapsed/expanded snap on `pointerup` via a
+  drag-distance threshold; a genuine `click` (no preceding `pointerup`,
+  i.e. keyboard/switch-control activation) still toggles directly. A
+  `dragHandledClick` ref swallows the synthetic click that follows a real
+  pointer interaction so it doesn't double-toggle.
+- `_is_public()`/`_PUBLIC_PATHS` (`web/app.py`) gained `/favicon.ico` for
+  the same reason the v7 fix added the manifest/icons/service-worker
+  exemptions: browsers request it directly, outside any authenticated
+  fetch context, independent of the page's `<link rel="icon">`.
+- Scope for "reinvent the layout as a native Apple app" was deliberately
+  narrowed to focused polish (translucency, real drag, spacing) rather than
+  a navigation rework, per explicit user choice when the plan was
+  presented - no collapsing large-title header, no iPad/desktop split-view,
+  no change to the tab-based navigation model.
+- Verified: `cd frontend && npm run build` (`tsc -b && vite build`) and
+  `npm run lint` (oxlint - only the two pre-existing `set-state-in-effect`
+  warnings from v7 remain, no new ones). Backend: full `pytest` (28
+  passed / 10 skipped - same real-Postgres skips as always; added
+  `test_favicon_is_servable_without_a_session` to `test_web_auth.py`,
+  covering the new `_PUBLIC_PATHS` entry). Rendered the actual
+  `login_page()` HTML via a `TestClient` (no mocking of that route) and
+  screenshotted it with headless Chromium in both light and dark - glass
+  card, gradient backdrop, and GitHub icon all render correctly, themed
+  from the stored `localStorage` preference exactly like the rest of the
+  app. Ran the real app via `vite dev` with the backend's API routes
+  mocked at the network layer (Playwright `page.route`, not a stub
+  component) and drove the actual UI end-to-end: confirmed no Save button
+  and no `alert()` remain in Settings; a numeric field's PUT fires once
+  ~600ms after the last keystroke with the typed value; an invalid value
+  (`0`) blocks the PUT and shows the inline German error text; the
+  checkbox PUTs immediately (and, after the StrictMode fix above, exactly
+  once); the logout row appears in Settings and not in the AirTags list;
+  a synthetic pointer-drag on the handle grows the sheet's live height and
+  snaps it to `data-expanded="true"` on release, and a plain click after
+  that collapses it again; the current-location dot marker renders when
+  `getCurrentPosition` (mocked via Playwright's geolocation context option)
+  resolves and `reports` is empty; the tab bar's computed
+  `backdrop-filter` is non-`none`. Also screenshotted the mobile app at
+  both themes and a 1400×900 desktop viewport for a visual pass.
+- Not verified: real iOS/Android Safari for the drag gesture's feel and the
+  translucency's actual look over live map tiles - this sandbox's outbound
+  proxy blocks the OpenStreetMap tile CDN (`ERR_TUNNEL_CONNECTION_FAILED`,
+  same known limitation noted in earlier reviews), so the map itself
+  renders blank/grey in every screenshot here; the blur/marker/drag
+  mechanics were still verified directly against the real DOM and CSS, not
+  a stand-in. The actual GitHub OAuth round-trip from the new login page
+  was not re-tested (unchanged since v2/v7 - only the HTML around the
+  existing `authorize_url` link changed).
+
 ## Review (v7)
 - One backend change (see the app-icon fix above), otherwise UI-only; no
   breaking changes for existing deployments.
