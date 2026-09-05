@@ -29,18 +29,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "login":
         interactive_login(cfg)
     elif args.command == "poll":
+        from airtag_sentry.migrate import upgrade_to_head
         from airtag_sentry.tracker import poll_once
 
+        upgrade_to_head()
         poll_once(cfg)
     elif args.command == "run":
+        from airtag_sentry.migrate import upgrade_to_head
         from airtag_sentry.scheduler import run_forever
 
+        upgrade_to_head()
         run_forever(cfg)
     elif args.command == "serve":
         import uvicorn
 
+        from airtag_sentry.migrate import upgrade_to_head
         from airtag_sentry.web.app import create_app
 
+        upgrade_to_head()
         uvicorn.run(
             create_app(cfg),
             host=cfg.web.host,

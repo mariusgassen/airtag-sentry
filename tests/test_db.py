@@ -7,31 +7,40 @@ import pytest
 from airtag_sentry.db import (
     Report,
     StoredKey,
+    create_airtag,
+    delete_airtag,
     delete_airtag_key,
     get_airtag_key,
     get_conn,
     insert_reports,
+    list_airtags,
     list_keyed_airtag_ids,
-    run_migrations,
+    rename_airtag,
     set_airtag_key,
 )
+from airtag_sentry.migrate import upgrade_to_head
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://airtag:airtag@localhost:5432/airtag_sentry_test"
 )
+os.environ.setdefault("TEST_DATABASE_URL", TEST_DATABASE_URL)
 
 
 @pytest.fixture()
 def conn():
     try:
         with get_conn(TEST_DATABASE_URL) as connection:
-            run_migrations(connection)
+            upgrade_to_head()
             with connection.cursor() as cur:
                 cur.execute(
-                    "TRUNCATE location_reports, alerts, push_subscriptions, airtag_keys "
+                    "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys "
                     "RESTART IDENTITY CASCADE"
                 )
             connection.commit()
+            # Most tests below reference these two ids as if they already exist
+            # (airtag_id is now a real FK to airtags.id).
+            create_airtag(connection, "bike", "Fahrrad")
+            create_airtag(connection, "backpack", "Rucksack")
             yield connection
     except psycopg.OperationalError:
         pytest.skip(f"Postgres not reachable at {TEST_DATABASE_URL}; start it to run this test.")
@@ -56,26 +65,64 @@ def test_schema_creates_tables(conn):
         )
         tables = {row[0] for row in cur.fetchall()}
     assert {
+        "airtags",
         "location_reports",
         "alerts",
         "push_subscriptions",
         "airtag_keys",
-        "schema_migrations",
+        "alembic_version",
     } <= tables
 
 
-def test_migrations_recorded_and_idempotent(conn):
+def test_migrations_idempotent(conn):
     with conn.cursor() as cur:
-        cur.execute("SELECT version FROM schema_migrations ORDER BY version")
-        versions = [row[0] for row in cur.fetchall()]
-    assert versions == ["0001_initial_schema", "0002_multi_airtag", "0003_airtag_keys"]
+        cur.execute("SELECT count(*) FROM alembic_version")
+        (count_before,) = cur.fetchone()
+    assert count_before == 1
 
-    # Re-running must not error and must not re-apply anything.
-    run_migrations(conn)
+    # Re-running must not error and must not change anything.
+    upgrade_to_head()
     with conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM schema_migrations")
-        (count,) = cur.fetchone()
-    assert count == 3
+        cur.execute("SELECT count(*) FROM alembic_version")
+        (count_after,) = cur.fetchone()
+    assert count_after == 1
+
+
+def test_create_list_rename_delete_airtag(conn):
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM airtags")  # start from a clean slate for this test
+    conn.commit()
+
+    assert list_airtags(conn) == []
+
+    created = create_airtag(conn, "trolley", "Einkaufswagen")
+    assert created.id == "trolley"
+    assert created.name == "Einkaufswagen"
+    assert [a.id for a in list_airtags(conn)] == ["trolley"]
+
+    renamed = rename_airtag(conn, "trolley", "Trolley 2")
+    assert renamed.name == "Trolley 2"
+    assert list_airtags(conn)[0].name == "Trolley 2"
+
+    delete_airtag(conn, "trolley")
+    assert list_airtags(conn) == []
+
+
+def test_delete_airtag_cascades_to_reports_alerts_and_key(conn):
+    insert_reports(conn, [_report("2026-01-01T10:00:00", 52.5, 13.4, airtag_id="bike")])
+    set_airtag_key(conn, StoredKey(airtag_id="bike", key_type="private_key_b64", encrypted_data="tok"))
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM location_reports WHERE airtag_id = 'bike'")
+        assert cur.fetchone()[0] == 1
+
+    delete_airtag(conn, "bike")
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM location_reports WHERE airtag_id = 'bike'")
+        assert cur.fetchone()[0] == 0
+    assert get_airtag_key(conn, "bike") is None
+    assert "bike" not in {a.id for a in list_airtags(conn)}
 
 
 def test_insert_reports_returns_only_new_rows(conn):

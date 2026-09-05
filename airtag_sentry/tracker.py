@@ -11,18 +11,19 @@ from findmy import FindMyAccessory, KeyPair
 
 from airtag_sentry import keystore
 from airtag_sentry.auth import restore_account
-from airtag_sentry.config import AirtagConfig, Config
+from airtag_sentry.config import Config
 from airtag_sentry.db import (
     Alert as DbAlert,
 )
 from airtag_sentry.db import (
+    AirtagRecord,
     Report,
     count_reports,
     fetch_reports_before,
     get_airtag_key,
     get_conn,
-    run_migrations,
     insert_reports,
+    list_airtags,
     record_alert,
 )
 from airtag_sentry.movement import evaluate_movement
@@ -53,9 +54,8 @@ def poll_once(cfg: Config) -> None:
     account = restore_account(cfg)
 
     with get_conn(cfg.database_url) as conn:
-        run_migrations(conn)
         notifiers = build_notifiers(cfg)
-        for airtag in cfg.airtags:
+        for airtag in list_airtags(conn):
             try:
                 _poll_airtag(cfg, account, airtag, conn, notifiers)
             except Exception:
@@ -64,7 +64,7 @@ def poll_once(cfg: Config) -> None:
                 account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
 
 
-def _poll_airtag(cfg: Config, account, airtag: AirtagConfig, conn, notifiers) -> None:
+def _poll_airtag(cfg: Config, account, airtag: AirtagRecord, conn, notifiers) -> None:
     key = _load_key(cfg, conn, airtag.id)
     location_reports = account.fetch_location_history(key)
 

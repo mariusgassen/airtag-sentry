@@ -15,6 +15,8 @@ dependencies = [
     "py-vapid>=1.9",
     "itsdangerous>=2.1",
     "cryptography>=42",
+    "alembic>=1.13",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -29,3 +31,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["airtag_sentry*"]
+
+[tool.setuptools.package-data]
+# Without this, `pip install .` (what Dockerfile runs) silently ships a wheel
+# with no dashboard assets at all - only `pip install -e .` happens to work,
+# since it just adds the source tree to sys.path instead of repackaging it.
+"airtag_sentry.web" = ["static/**/*"]

@@ -9,15 +9,16 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
-import logging
 from contextlib import contextmanager
 from typing import Iterator
 
 import psycopg
 
-from airtag_sentry.migrations import MIGRATIONS
 
-logger = logging.getLogger(__name__)
+@dataclasses.dataclass(frozen=True)
+class AirtagRecord:
+    id: str
+    name: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,30 +62,39 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
         yield conn
 
 
-def run_migrations(conn: psycopg.Connection) -> None:
-    """Apply every migration from airtag_sentry.migrations not yet recorded in
-    schema_migrations, in order, each in its own transaction."""
+def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord:
     with conn.cursor() as cur:
         cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version TEXT PRIMARY KEY,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            )
-            """
+            "INSERT INTO airtags (id, name) VALUES (%s, %s) RETURNING id, name",
+            (airtag_id, name),
         )
-        conn.commit()
-        cur.execute("SELECT version FROM schema_migrations")
-        applied = {row[0] for row in cur.fetchall()}
+        row = cur.fetchone()
+    conn.commit()
+    return AirtagRecord(*row)
 
-    for version, sql in MIGRATIONS:
-        if version in applied:
-            continue
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            cur.execute("INSERT INTO schema_migrations (version) VALUES (%s)", (version,))
-        conn.commit()
-        logger.info("Applied migration %s", version)
+
+def list_airtags(conn: psycopg.Connection) -> list[AirtagRecord]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, name FROM airtags ORDER BY created_at ASC")
+        return [AirtagRecord(*row) for row in cur.fetchall()]
+
+
+def rename_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name",
+            (name, airtag_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return AirtagRecord(*row) if row else None
+
+
+def delete_airtag(conn: psycopg.Connection, airtag_id: str) -> None:
+    # Cascades to location_reports/alerts/airtag_keys via their FK constraints.
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM airtags WHERE id = %s", (airtag_id,))
+    conn.commit()
 
 
 def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Report]:
