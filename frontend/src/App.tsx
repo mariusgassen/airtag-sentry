@@ -146,7 +146,13 @@ export default function App() {
   }
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-[var(--bg)] md:flex">
+    // fixed+inset-0 rather than h-[100dvh]: in an installed iOS home-screen
+    // PWA, 100dvh has not reliably spanned the true edge-to-edge screen
+    // across WebKit versions, leaving the bottom-pinned sheet/tab-bar column
+    // short of the real bottom and exposing a gap above the home indicator.
+    // A fixed element's viewport (with viewport-fit=cover, set in
+    // index.html) is spec-guaranteed to cover the true physical screen.
+    <div className="fixed inset-0 overflow-hidden bg-[var(--bg)] md:flex">
       {/* isolate: Leaflet's internal panes use z-index up to 700 (markers,
           popups); without a stacking context scoped here, those values
           escape this wrapper and paint over the sheet below despite DOM
