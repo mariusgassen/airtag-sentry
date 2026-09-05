@@ -47,7 +47,23 @@ from airtag_sentry.db import (
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-_PUBLIC_PATHS = {"/login", "/auth/callback", "/logout"}
+_PUBLIC_PATHS = {"/login", "/auth/callback", "/logout", "/manifest.webmanifest", "/registerSW.js", "/sw.js"}
+
+
+def _is_public(path: str) -> bool:
+    """Whether `path` may be served without a session.
+
+    PWA install/update machinery (the browser's "Add to Home Screen" checks,
+    background service-worker update fetches) requests the manifest, icons
+    and service worker script outside the page's own authenticated fetch
+    context. Gating those behind login redirected them to the login page's
+    HTML instead of the actual asset - the browser then either shows a
+    broken/missing app icon or, for sw.js, discards the "update" since it's
+    not valid JS. None of these are sensitive; only the app's data and the
+    app shell itself need a session.
+    """
+    return path in _PUBLIC_PATHS or path.startswith("/icons/")
+
 
 _GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
@@ -66,7 +82,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self._cfg = cfg
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in _PUBLIC_PATHS:
+        if _is_public(request.url.path):
             return await call_next(request)
         if request.session.get("user") != self._cfg.auth.allowed_login:
             if request.url.path.startswith("/api/"):

@@ -275,3 +275,92 @@ need to see the same live value without a restart).
   real browser (no browser available in this sandbox) — logic was verified
   via the API round-trip above and by reading the component against the
   existing `AirtagDetail`/`AirtagList` styling it reuses (`Section`/`Row`).
+
+## v7: UI polish (navigation, theming, icons, mobile sheet, input zoom)
+Trigger: direct UI feedback against a screenshot of the real Find My app -
+settings felt bolted onto the list instead of being real navigation, no way
+to see more than half the list on mobile, dark-only, two hand-drawn icons
+were subtly broken, and focusing a form field zoomed the whole page in.
+
+- [x] `components/icons.tsx`: `GearIcon` replaced with a properly
+      radially-symmetric path (the old one had ad-hoc tooth coordinates,
+      visibly lopsided); `TrashIcon`'s lid was actually a bug, not just
+      ad-hoc - its right corner's arc had the wrong sweep flag and bulged
+      up above the lid line instead of mirroring the smooth left corner;
+      rewrote the whole glyph as a verified rounded-rect-plus-lid path and
+      added the two rib lines real trash-can icons have.
+- [x] `theme.ts` (new) + `index.css`: dark stays the default, but the app
+      now has a real light palette too, applied via `prefers-color-scheme`
+      by default and overridable per-user via `data-theme="light"/"dark"`
+      on `<html>` (`useTheme()` hook, persisted to `localStorage`). An
+      inline script in `index.html` applies the stored override before
+      first paint so there's no flash of the wrong theme. `theme-color`
+      meta tag kept in sync so the PWA/browser chrome matches.
+- [x] `components/TabBar.tsx` (new): real persistent bottom tab bar
+      (Objekte / Einstellungen) replacing the old pattern where a gear icon
+      pushed a full-screen Settings view over the list with no visual
+      indication it was "open" - `App.tsx` now tracks `activeTab`
+      independently of the Objekte tab's own list/detail navigation, so
+      switching tabs and back preserves whichever screen was open, like a
+      real per-tab nav stack.
+- [x] `App.tsx`: mobile sheet can now expand near-fullscreen via its grab
+      handle (a real toggle button, not a gesture - deliberately simpler
+      than tracking a drag, and keeps working for keyboard/switch-control
+      users), matching Find My's fullscreen-the-list-sheet behavior. The
+      tab bar is grouped with the sheet in one bottom-pinned column so it
+      never moves regardless of the sheet's height; `--tabbar-h` in
+      `index.css` is shared between the two so the expanded-sheet height
+      calc doesn't need to measure the tab bar at runtime.
+- [x] `index.css`: `input`/`select`/`textarea` forced to a 16px minimum
+      font-size below the `md` breakpoint - the actual root cause of the
+      "typing in a field zooms the page" complaint (iOS/Android auto-zoom
+      any focused control computed under 16px; Tailwind's `text-sm` is
+      14px). No viewport `maximum-scale` lock added, since that would trade
+      the bug for taking away pinch-zoom entirely.
+- [x] `AirtagList.tsx`/`SettingsPanel.tsx`: dropped the gear button and the
+      Settings panel's back-to-AirTags button now that Settings is a
+      persistent tab, not a pushed view; added an "Erscheinungsbild"
+      (System/Hell/Dunkel) row to Settings using the existing segmented-
+      control pattern from the key-upload form.
+
+- [x] Fixed a real bug surfaced after the above: the PWA app icon was
+      missing on the home screen. Root cause was `AuthMiddleware`
+      (`web/app.py`) gating *every* path behind a login session except
+      `/login`/`/auth/callback`/`/logout` - including
+      `/manifest.webmanifest`, `/icons/*`, and the service worker scripts.
+      The browser's "Add to Home Screen"/install-eligibility checks and
+      background service-worker update fetches request those outside the
+      page's own authenticated fetch context, so they got a 302 redirect to
+      the login HTML instead of the actual PNG/JSON/JS - which is what a
+      missing/broken install icon looks like. Added `_is_public()` so those
+      specific paths (not sensitive - no user data, just install plumbing)
+      are servable without a session; `/`, `/assets/*`, and all `/api/*`
+      routes are unaffected and still require login.
+
+## Review (v7)
+- One backend change (see the app-icon fix above), otherwise UI-only; no
+  breaking changes for existing deployments.
+- Verified: `tsc -b && vite build` and `oxlint` (only pre-existing,
+  untouched-by-this-change warnings remain - two `set-state-in-effect`
+  notices on the original data-loading effects). Ran the actual app via
+  `vite dev` + a headless Chromium (Playwright, not a project dependency -
+  installed with `--no-save` for this check and removed again after) at
+  both a mobile (390×844) and desktop (1400×900) viewport: confirmed no
+  console/page errors beyond the expected `502`s from this sandbox having
+  no backend running; measured the sheet's collapsed/expanded heights
+  (438.875px / 751px at 844px viewport, matching the `52vh` /
+  `calc(100vh - tabbar-h - 44px)` rules exactly) and confirmed the tab bar's
+  bottom edge stays flush with the window bottom in both states; forced
+  each theme via the new toggle and read `getComputedStyle` back
+  (`rgb(242,242,247)` light, `rgb(0,0,0)` dark); confirmed the add-AirTag
+  input computes to exactly `16px` on the mobile viewport; confirmed the
+  gear button no longer renders in the AirTags list header.
+- Not verified: real iOS/Android Safari (auto-zoom-on-focus and the PWA
+  status bar are browser behaviors a headless desktop Chromium can't
+  reproduce) - the font-size fix is the documented, standard root cause and
+  fix for that behavior, but hasn't been confirmed against real hardware.
+- App-icon fix verified with a `TestClient` hitting the real `create_app()`
+  unauthenticated: `/manifest.webmanifest`, all three `/icons/*.png`,
+  `/registerSW.js`, and `/sw.js` now 200; `/`, `/assets/*`, and `/api/*`
+  still redirect to `/login` (302) or 401 exactly as before. Full `pytest`
+  (20 passed / 10 skipped - same DB-backed skips as always, no regression).

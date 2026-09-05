@@ -12,6 +12,54 @@
   --text: #ffffff;
   --text-secondary: #8e8e93;
   --divider: #38383a;
+
+  /* Height reserved for the bottom tab bar (content + home-indicator safe
+     area) - shared between the tab bar itself and the sheet above it, so
+     the sheet's height calculations never need to know the tab bar's
+     rendered size. */
+  --tabbar-h: calc(49px + env(safe-area-inset-bottom));
+}
+
+/* iOS/macOS system light-mode palette - applied when the OS is in light
+   mode (and the user hasn't forced dark via the in-app toggle), or when
+   the user has forced light via the toggle regardless of the OS setting. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f2f2f7;
+    --surface: #ffffff;
+    --surface-2: #e5e5ea;
+    --accent: #007aff;
+    --destructive: #ff3b30;
+    --success: #34c759;
+    --text: #000000;
+    --text-secondary: #8e8e93;
+    --divider: #d1d1d6;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f2f7;
+  --surface: #ffffff;
+  --surface-2: #e5e5ea;
+  --accent: #007aff;
+  --destructive: #ff3b30;
+  --success: #34c759;
+  --text: #000000;
+  --text-secondary: #8e8e93;
+  --divider: #d1d1d6;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #1c1c1e;
+  --surface-2: #2c2c2e;
+  --accent: #0a84ff;
+  --destructive: #ff453a;
+  --success: #32d74b;
+  --text: #ffffff;
+  --text-secondary: #8e8e93;
+  --divider: #38383a;
 }
 
 body {
@@ -42,4 +90,29 @@ body {
 }
 .leaflet-control-attribution a {
   color: var(--text-secondary) !important;
+}
+
+@media (max-width: 767px) {
+  /* iOS/Android auto-zoom the viewport when a focused form control's
+     computed font-size is under 16px. Tailwind's text-sm (14px) etc.
+     trigger it; keep inputs at the native minimum so focusing one never
+     zooms the page. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* The devices/objects sheet: a fixed half-height panel by default, that
+     the grab handle can expand to near-fullscreen - same idea as Find My's
+     bottom sheet. Sits above the tab bar rather than the screen edge, so
+     the tab bar stays reachable in both states. */
+  .sheet {
+    height: 52vh;
+    min-height: 280px;
+    transition: height 0.25s ease;
+  }
+  .sheet[data-expanded="true"] {
+    height: calc(100vh - env(safe-area-inset-top) - var(--tabbar-h) - 44px);
+  }
 }

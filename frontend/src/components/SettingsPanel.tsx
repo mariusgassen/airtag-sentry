@@ -1,11 +1,37 @@
 import { useEffect, useState } from 'react'
 import type { AppSettings } from '../api'
 import { getSettings, updateSettings } from '../api'
-import { ChevronLeftIcon } from './icons'
+import type { ThemePreference } from '../theme'
+import { useTheme } from '../theme'
 import { Section } from './AirtagDetail'
 
-interface Props {
-  onBack: () => void
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Hell' },
+  { value: 'dark', label: 'Dunkel' },
+]
+
+function ThemeField() {
+  const { theme, setTheme } = useTheme()
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <span className="flex-1 text-[0.95rem]">Erscheinungsbild</span>
+      <div className="inline-flex shrink-0 rounded-lg bg-[var(--surface-2)] p-0.5">
+        {THEME_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => setTheme(opt.value)}
+            className={`rounded-md px-2.5 py-1 text-[0.78rem] ${
+              theme === opt.value ? 'bg-[var(--surface)]' : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function Field({
@@ -37,7 +63,7 @@ function Field({
   )
 }
 
-export function SettingsPanel({ onBack }: Props) {
+export function SettingsPanel() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -79,17 +105,15 @@ export function SettingsPanel({ onBack }: Props) {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.6rem+env(safe-area-inset-top))]">
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-2 flex items-center gap-0.5 px-3 py-1 text-[0.95rem] text-[var(--accent)]"
-      >
-        <ChevronLeftIcon className="h-5 w-5" />
-        AirTags
-      </button>
+    <div className="flex h-full flex-col overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.9rem+env(safe-area-inset-top))]">
+      <h1 className="mb-4 px-4 text-[1.7rem] font-bold tracking-tight">Einstellungen</h1>
 
-      <h2 className="mb-4 px-4 text-xl font-semibold">Einstellungen</h2>
+      <div className="px-3">
+        <p className="mb-2 px-1 text-[0.8rem] text-[var(--text-secondary)]">Darstellung</p>
+        <Section>
+          <ThemeField />
+        </Section>
+      </div>
 
       {!settings ? (
         <p className="px-4 text-sm text-[var(--text-secondary)]">Lädt…</p>
