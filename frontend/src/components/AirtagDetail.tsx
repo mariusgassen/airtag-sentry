@@ -3,15 +3,8 @@ import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, Report, Status } from '../api'
 import { deleteAirtag, deleteAirtagKey, renameAirtag, setAirtagKeyB64, setAirtagKeyJson } from '../api'
 import { formatRelative } from '../format'
-import {
-  AirtagGlyph,
-  BellIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  KeyIcon,
-  PencilIcon,
-  TrashIcon,
-} from './icons'
+import { AirtagAvatar } from './AirtagAvatar'
+import { BellIcon, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PencilIcon, TrashIcon } from './icons'
 
 interface Props {
   airtag: Airtag
@@ -90,9 +83,7 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         <div className="mb-6 flex flex-col items-center px-4 text-center">
-          <span className="mb-3 flex h-20 w-20 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--accent)]">
-            <AirtagGlyph className="h-12 w-12" />
-          </span>
+          <AirtagAvatar airtagId={airtag.id} size={80} className="mb-3" />
           <h2 className="text-xl font-semibold">{airtag.name}</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {status?.last_report ? `Zuletzt gesehen ${formatRelative(status.last_report.timestamp)}` : 'Kein Standort verfügbar'}

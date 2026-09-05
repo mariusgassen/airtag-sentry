@@ -96,6 +96,13 @@ body {
   color: var(--text) !important;
   border-color: var(--divider) !important;
 }
+/* Leaflet's top-anchored controls (the zoom buttons) default to top: 0,
+   which sits under the status bar/notch on an edge-to-edge mobile map.
+   env() resolves to 0px where there's no inset, so this is a no-op
+   everywhere else. */
+.leaflet-top {
+  top: env(safe-area-inset-top);
+}
 .leaflet-control-attribution {
   background: rgba(28, 28, 30, 0.8) !important;
   color: var(--text-secondary) !important;
@@ -137,6 +144,33 @@ body {
     transform: scale(1.4);
     opacity: 0;
   }
+}
+
+/* Per-AirTag map pin: a colored badge (matching the list/detail avatar's
+   color, see airtagColor.ts) with a small tail so it points at the exact
+   coordinate, classic map-pin silhouette. Color comes from an inline style
+   per marker instance (mapIcons.ts), not a class, since it varies per tag. */
+.airtag-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+}
+.airtag-pin__badge {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2.5px solid white;
+}
+.airtag-pin__tail {
+  width: 0;
+  height: 0;
+  margin-top: -2px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid;
 }
 
 /* iOS-style translucent "material" for floating chrome (tab bar, sheet grab

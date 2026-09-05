@@ -5,6 +5,7 @@ import { createAirtag, getAirtags, getReports, getStatus } from './api'
 import { AirtagList } from './components/AirtagList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { MapCard } from './components/MapCard'
+import { OverviewMap } from './components/OverviewMap'
 import { SettingsPanel } from './components/SettingsPanel'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
@@ -73,6 +74,7 @@ export default function App() {
   function handleSelect(id: string) {
     setCurrentId(id)
     setShowDetail(true)
+    setActiveTab('objects')
   }
 
   async function handleCreate(name: string) {
@@ -144,13 +146,23 @@ export default function App() {
   }
 
   return (
-    <div className="relative h-[100dvh] w-full overflow-hidden bg-[var(--bg)] md:flex">
+    // fixed+inset-0 rather than h-[100dvh]: in an installed iOS home-screen
+    // PWA, 100dvh has not reliably spanned the true edge-to-edge screen
+    // across WebKit versions, leaving the bottom-pinned sheet/tab-bar column
+    // short of the real bottom and exposing a gap above the home indicator.
+    // A fixed element's viewport (with viewport-fit=cover, set in
+    // index.html) is spec-guaranteed to cover the true physical screen.
+    <div className="fixed inset-0 overflow-hidden bg-[var(--bg)] md:flex">
       {/* isolate: Leaflet's internal panes use z-index up to 700 (markers,
           popups); without a stacking context scoped here, those values
           escape this wrapper and paint over the sheet below despite DOM
           order and the sheet's own z-10. */}
       <div className="absolute inset-0 isolate md:relative md:flex-1">
-        <MapCard reports={reports} />
+        {activeTab === 'objects' && showDetail && currentAirtag ? (
+          <MapCard reports={reports} airtagId={currentAirtag.id} />
+        ) : (
+          <OverviewMap airtags={airtags} statuses={statuses} onSelect={handleSelect} />
+        )}
       </div>
 
       {/* Sheet + tab bar, grouped so the tab bar always sits directly below
