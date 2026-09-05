@@ -27,6 +27,10 @@ services:
         condition: service_healthy
       anisette:
         condition: service_started
+    # No healthcheck here: this process has no HTTP surface to probe (it's the
+    # scheduler loop, see scheduler.py), so Docker/Coolify's own "is the
+    # container still running" state is what tracks its health - the same
+    # signal `restart: unless-stopped` already acts on.
     # env_file for plain `docker compose up`; the explicit environment: block
     # below is what makes each variable show up individually in Coolify's UI.
     env_file: .env
@@ -60,6 +64,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # The image is python:3.14-slim (no curl/wget), so probe with the
+    # interpreter that's already there. Hardcodes WEB_PORT's fixed default
+    # (see the README's Coolify section for why WEB_PORT isn't overridable)
+    # and hits it from inside the container, so it's unaffected by
+    # SERVICE_FQDN_DASHBOARD_8000/TLS termination at Coolify's edge.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     env_file: .env
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
