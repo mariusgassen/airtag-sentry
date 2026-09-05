@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 import re
 import secrets
 from pathlib import Path
@@ -46,6 +47,8 @@ from airtag_sentry.db import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+logger = logging.getLogger(__name__)
 
 _PUBLIC_PATHS = {"/login", "/auth/callback", "/logout", "/manifest.webmanifest", "/registerSW.js", "/sw.js"}
 
@@ -175,6 +178,13 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         pending_states = request.session.get("oauth_states", [])
         pending_states.append(state)
         request.session["oauth_states"] = pending_states[-5:]
+        logger.info(
+            "oauth login: minted state=%s… (pending now %d) sec-fetch-mode=%s ua=%s",
+            state[:8],
+            len(request.session["oauth_states"]),
+            request.headers.get("sec-fetch-mode"),
+            request.headers.get("user-agent"),
+        )
         authorize_url = (
             f"{_GITHUB_AUTHORIZE_URL}?client_id={cfg.auth.github_client_id}"
             f"&scope=read:user&state={state}"
@@ -191,9 +201,18 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     def auth_callback(request: Request, code: str | None = None, state: str | None = None):
         pending_states = request.session.get("oauth_states", [])
         if not code or not state or state not in pending_states:
+            logger.warning(
+                "oauth callback rejected: code_present=%s state=%s… pending=%s referer=%s ua=%s",
+                bool(code),
+                (state or "")[:8],
+                [s[:8] for s in pending_states],
+                request.headers.get("referer"),
+                request.headers.get("user-agent"),
+            )
             raise HTTPException(status_code=403, detail="Invalid OAuth state")
         pending_states.remove(state)
         request.session["oauth_states"] = pending_states
+        logger.info("oauth callback: accepted state=%s…", state[:8])
 
         token_res = requests.post(
             _GITHUB_TOKEN_URL,
