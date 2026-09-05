@@ -1,6 +1,7 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import type { Airtag, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
+import { airtagPinIcon } from '../mapIcons'
 import { FitBounds, InvalidateSizeOnResize, NoReportsView } from './MapCard'
 
 interface Props {
@@ -32,7 +33,7 @@ export function OverviewMap({ airtags, statuses, onSelect }: Props) {
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {located.map(({ airtag, lastReport }) => (
-        <Marker key={airtag.id} position={[lastReport.lat, lastReport.lon]}>
+        <Marker key={airtag.id} position={[lastReport.lat, lastReport.lon]} icon={airtagPinIcon(airtag.id)}>
           <Popup>
             <div className="text-sm">
               <p className="mb-1 font-medium">{airtag.name}</p>

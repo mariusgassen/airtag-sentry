@@ -153,7 +153,7 @@ export default function App() {
           order and the sheet's own z-10. */}
       <div className="absolute inset-0 isolate md:relative md:flex-1">
         {activeTab === 'objects' && showDetail && currentAirtag ? (
-          <MapCard reports={reports} />
+          <MapCard reports={reports} airtagId={currentAirtag.id} />
         ) : (
           <OverviewMap airtags={airtags} statuses={statuses} onSelect={handleSelect} />
         )}

@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Airtag, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
-import { AirtagGlyph, BellIcon, ChevronRightIcon, PlusIcon } from './icons'
+import { AirtagAvatar } from './AirtagAvatar'
+import { BellIcon, ChevronRightIcon, PlusIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -110,9 +111,7 @@ export function AirtagList({
                     selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
                   } ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
                 >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--accent)]">
-                    <AirtagGlyph className="h-6 w-6" />
-                  </span>
+                  <AirtagAvatar airtagId={a.id} size={40} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[0.95rem] font-medium">{a.name}</span>
                     <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">{subtitle}</span>
