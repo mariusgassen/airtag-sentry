@@ -87,6 +87,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.session.get("user") != self._cfg.auth.allowed_login:
             if request.url.path.startswith("/api/"):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            # The PWA service worker precaches the app shell ("/", "/assets/*")
+            # in the background, independent of whatever page is open. A tab
+            # that was logged in before keeps that worker installed and
+            # running its own update/precache fetches even while logged out
+            # in this tab. Redirecting THOSE to /login re-ran the login route
+            # as if the user had clicked it, repeatedly regenerating the
+            # OAuth state and evicting the one a real, in-progress login was
+            # waiting on - which is why login only failed in tabs that had
+            # previously installed the service worker. Browsers only ever
+            # send Sec-Fetch-Mode: navigate for an actual top-level
+            # navigation (never from fetch()/a service worker), so use it to
+            # 401 those background requests without touching the session or
+            # ever reaching /login; a real navigation still redirects there.
+            if request.headers.get("sec-fetch-mode") not in (None, "navigate"):
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             return RedirectResponse(url="/login", status_code=302)
         return await call_next(request)
 

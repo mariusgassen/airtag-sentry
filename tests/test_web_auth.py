@@ -103,3 +103,34 @@ def test_callback_state_is_single_use(client, monkeypatch):
 
     replay = client.get(f"/auth/callback?code=abc&state={state}")
     assert replay.status_code == 403
+
+
+def test_background_fetch_to_protected_path_gets_401_not_login_redirect(client):
+    # A service worker's precache fetch sends Sec-Fetch-Mode other than
+    # "navigate". It must never be redirected to /login (which would
+    # regenerate the OAuth state), just rejected outright.
+    resp = client.get("/", headers={"sec-fetch-mode": "cors"})
+
+    assert resp.status_code == 401
+
+
+def test_repeated_background_fetches_do_not_evict_in_flight_state(client, monkeypatch):
+    # fetch() follows redirects by default, so a real service worker's
+    # background hit to a protected path would previously chase the 302
+    # all the way to /login and regenerate the state there too.
+    _mock_github(monkeypatch)
+    state = _extract_state(client.get("/login").text)
+
+    for _ in range(10):
+        client.get("/", headers={"sec-fetch-mode": "cors"}, follow_redirects=True)
+
+    resp = client.get(f"/auth/callback?code=abc&state={state}")
+
+    assert resp.status_code == 302
+
+
+def test_real_navigation_to_protected_path_still_redirects_to_login(client):
+    resp = client.get("/", headers={"sec-fetch-mode": "navigate"})
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/login"
