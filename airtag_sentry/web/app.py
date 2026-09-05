@@ -148,8 +148,18 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
+        # A single overwritten slot breaks whenever something other than the
+        # user's own click reaches this route while a login is in flight -
+        # e.g. the PWA service worker's Workbox precache fetching "/" while
+        # logged out, which AuthMiddleware redirects here. That silently
+        # replaced the state the user was about to come back with, so
+        # /auth/callback rejected an otherwise valid login. Keeping a capped
+        # list of pending states tolerates that without weakening the check:
+        # each one is still random, single-use, and tied to this session.
         state = secrets.token_urlsafe(24)
-        request.session["oauth_state"] = state
+        pending_states = request.session.get("oauth_states", [])
+        pending_states.append(state)
+        request.session["oauth_states"] = pending_states[-5:]
         authorize_url = (
             f"{_GITHUB_AUTHORIZE_URL}?client_id={cfg.auth.github_client_id}"
             f"&scope=read:user&state={state}"
@@ -164,9 +174,11 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
 
     @app.get("/auth/callback")
     def auth_callback(request: Request, code: str | None = None, state: str | None = None):
-        expected_state = request.session.pop("oauth_state", None)
-        if not code or not state or state != expected_state:
+        pending_states = request.session.get("oauth_states", [])
+        if not code or not state or state not in pending_states:
             raise HTTPException(status_code=403, detail="Invalid OAuth state")
+        pending_states.remove(state)
+        request.session["oauth_states"] = pending_states
 
         token_res = requests.post(
             _GITHUB_TOKEN_URL,
