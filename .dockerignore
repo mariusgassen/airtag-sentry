@@ -13,7 +13,6 @@ dist
 
 # secrets & local state - never send these into an image build
 .env
-config.yaml
 data
 *.db
 

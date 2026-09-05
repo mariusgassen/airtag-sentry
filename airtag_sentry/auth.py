@@ -29,7 +29,7 @@ def _build_anisette_provider(cfg: Config):
     anisette_cfg = cfg.apple.anisette
     if anisette_cfg.mode == "remote":
         if not anisette_cfg.remote_url:
-            raise ValueError("apple.anisette.remote_url must be set in config.yaml when mode is 'remote'")
+            raise ValueError("ANISETTE_REMOTE_URL must be set when ANISETTE_MODE=remote")
         return RemoteAnisetteProvider(anisette_cfg.remote_url)
     return LocalAnisetteProvider(libs_path=anisette_cfg.libs_path)
 

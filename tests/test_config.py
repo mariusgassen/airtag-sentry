@@ -1,6 +1,6 @@
 import pytest
 
-from airtag_sentry.config import ConfigError, database_url_from_env
+from airtag_sentry.config import ConfigError, database_url_from_env, load_config
 
 
 @pytest.fixture()
@@ -40,3 +40,61 @@ def test_database_url_requires_postgres_vars(monkeypatch):
     monkeypatch.delenv("POSTGRES_DB", raising=False)
     with pytest.raises(ConfigError, match="POSTGRES_USER"):
         database_url_from_env()
+
+
+@pytest.fixture()
+def required_env(postgres_env, monkeypatch):
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "client-id")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("GITHUB_ALLOWED_LOGIN", "octocat")
+    monkeypatch.setenv("SESSION_SECRET_KEY", "session-secret")
+    monkeypatch.setenv(
+        "AIRTAG_KEY_ENCRYPTION_KEY",
+        "PTx2A3nrHR9wKR_hqK0YtxHZgHqEeZOo8VvV3XwZjxA=",
+    )
+    for name in (
+        "APPLE_STORE_PATH",
+        "ANISETTE_MODE",
+        "ANISETTE_LIBS_PATH",
+        "ANISETTE_REMOTE_URL",
+        "POLLING_INTERVAL_MINUTES",
+        "MOVEMENT_DISTANCE_THRESHOLD_METERS",
+        "MOVEMENT_STILLSTAND_HOURS",
+        "MOVEMENT_STILLSTAND_MOVEMENT_METERS",
+        "MOVEMENT_ALERT_ON_BACKFILL",
+        "WEB_HOST",
+        "WEB_PORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_load_config_defaults(required_env):
+    cfg = load_config()
+
+    assert cfg.apple.store_path == "data/account.json"
+    assert cfg.apple.anisette.mode == "local"
+    assert cfg.apple.anisette.libs_path == "data/ani_libs.bin"
+    assert cfg.apple.anisette.remote_url is None
+    assert cfg.polling.interval_minutes == 15
+    assert cfg.movement.distance_threshold_meters == 100
+    assert cfg.movement.stillstand_hours == 24
+    assert cfg.movement.stillstand_movement_meters == 15
+    assert cfg.movement.alert_on_backfill is False
+    assert cfg.web.host == "0.0.0.0"
+    assert cfg.web.port == 8000
+
+
+def test_load_config_honors_overrides(required_env, monkeypatch):
+    monkeypatch.setenv("ANISETTE_MODE", "remote")
+    monkeypatch.setenv("ANISETTE_REMOTE_URL", "http://anisette:6969")
+    monkeypatch.setenv("POLLING_INTERVAL_MINUTES", "30")
+    monkeypatch.setenv("MOVEMENT_ALERT_ON_BACKFILL", "true")
+    monkeypatch.setenv("WEB_PORT", "9000")
+
+    cfg = load_config()
+
+    assert cfg.apple.anisette.mode == "remote"
+    assert cfg.apple.anisette.remote_url == "http://anisette:6969"
+    assert cfg.polling.interval_minutes == 30
+    assert cfg.movement.alert_on_backfill is True
+    assert cfg.web.port == 9000

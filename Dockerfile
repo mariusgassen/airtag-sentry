@@ -21,7 +21,5 @@ COPY alembic ./alembic
 
 RUN pip install --no-cache-dir .
 
-COPY config.example.yaml ./
-
 ENTRYPOINT ["python", "-m", "airtag_sentry"]
 CMD ["run"]

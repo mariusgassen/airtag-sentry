@@ -9,7 +9,6 @@ dependencies = [
     "apscheduler>=3.10",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "pyyaml>=6.0",
     "requests>=2.32",
     "pywebpush>=2.0",
     "py-vapid>=1.9",
