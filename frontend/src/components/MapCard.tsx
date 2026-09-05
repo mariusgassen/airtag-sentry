@@ -21,7 +21,7 @@ const CURRENT_LOCATION_ICON = L.divIcon({
   iconAnchor: [10, 10],
 })
 
-function FitBounds({ positions }: { positions: [number, number][] }) {
+export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
   useEffect(() => {
     if (positions.length > 0) {
@@ -38,7 +38,7 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
  * resizing, which otherwise leaves the map rendering into a stale-size box
  * (grey bands / misaligned tiles) - watch the container directly instead.
  */
-function InvalidateSizeOnResize() {
+export function InvalidateSizeOnResize() {
   const map = useMap()
   useEffect(() => {
     const container = map.getContainer()
@@ -67,7 +67,7 @@ function useCurrentPosition() {
   return position
 }
 
-function NoReportsView() {
+export function NoReportsView() {
   const here = useCurrentPosition()
 
   if (!here) {
