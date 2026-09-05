@@ -8,15 +8,9 @@ apple:
     libs_path: "data/ani_libs.bin"
     remote_url: null # e.g. http://anisette:6969, used when mode: remote
 
-airtags:
-  # One entry per AirTag: just its identity (id + display name). The actual
-  # key material is entered separately through the dashboard's "AirTags
-  # verwalten" panel, encrypted, and stored in Postgres - not here. `id` must
-  # be unique. See README: "Extracting your AirTag key".
-  - id: "bike"
-    name: "Fahrrad"
-  # - id: "backpack"
-  #   name: "Rucksack"
+# AirTags themselves (name, key) are not configured here at all - add, rename,
+# and remove them entirely through the dashboard's "AirTags verwalten" panel.
+# See README: "AirTag key storage" / "Extracting your AirTag key".
 
 polling:
   interval_minutes: 15

@@ -6,6 +6,7 @@ import dataclasses
 import logging
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from cryptography.fernet import Fernet
 import yaml
@@ -28,12 +29,6 @@ class AnisetteConfig:
 class AppleConfig:
     store_path: str
     anisette: AnisetteConfig
-
-
-@dataclasses.dataclass
-class AirtagConfig:
-    id: str
-    name: str
 
 
 @dataclasses.dataclass
@@ -91,7 +86,6 @@ class NotificationsConfig:
 @dataclasses.dataclass
 class Config:
     apple: AppleConfig
-    airtags: list[AirtagConfig]
     polling: PollingConfig
     movement: MovementConfig
     web: WebConfig
@@ -104,6 +98,35 @@ class Config:
 def _env(name: str) -> str | None:
     value = os.environ.get(name)
     return value if value else None
+
+
+def database_url_from_env() -> str:
+    """Build the Postgres connection URL from POSTGRES_* env vars.
+
+    Standalone (not folded into load_config) so alembic/env.py can call it
+    without needing the rest of the app's config (GitHub OAuth, encryption
+    key) just to run a migration.
+    """
+    postgres_user = _env("POSTGRES_USER")
+    postgres_password = _env("POSTGRES_PASSWORD")
+    postgres_db = _env("POSTGRES_DB")
+    missing_postgres = [
+        name
+        for name, value in [
+            ("POSTGRES_USER", postgres_user),
+            ("POSTGRES_PASSWORD", postgres_password),
+            ("POSTGRES_DB", postgres_db),
+        ]
+        if not value
+    ]
+    if missing_postgres:
+        raise ConfigError("Missing required Postgres env var(s): " + ", ".join(missing_postgres))
+    postgres_host = _env("POSTGRES_HOST") or "localhost"
+    postgres_port = _env("POSTGRES_PORT") or "5432"
+    return (
+        f"postgresql://{quote(postgres_user, safe='')}:{quote(postgres_password, safe='')}"
+        f"@{postgres_host}:{postgres_port}/{quote(postgres_db, safe='')}"
+    )
 
 
 def load_config(path: str | Path = "config.yaml") -> Config:
@@ -122,21 +145,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
             remote_url=anisette_raw.get("remote_url"),
         ),
     )
-
-    airtags_raw = raw.get("airtags") or []
-    if not airtags_raw:
-        raise ConfigError("config.yaml must define at least one entry under 'airtags:'.")
-
-    airtags: list[AirtagConfig] = []
-    seen_ids: set[str] = set()
-    for entry in airtags_raw:
-        airtag_id = str((entry or {}).get("id") or "").strip()
-        if not airtag_id:
-            raise ConfigError("Every entry in airtags: must have a non-empty 'id'.")
-        if airtag_id in seen_ids:
-            raise ConfigError(f"Duplicate airtag id '{airtag_id}' in airtags:.")
-        seen_ids.add(airtag_id)
-        airtags.append(AirtagConfig(id=airtag_id, name=entry.get("name", airtag_id)))
 
     polling_raw = raw.get("polling", {}) or {}
     polling = PollingConfig(interval_minutes=int(polling_raw.get("interval_minutes", 15)))
@@ -177,9 +185,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         session_secret_key=session_secret_key,
     )
 
-    database_url = _env("DATABASE_URL")
-    if not database_url:
-        raise ConfigError("DATABASE_URL is not set. Copy .env.example to .env and adjust it.")
+    database_url = database_url_from_env()
 
     key_encryption_key = _env("AIRTAG_KEY_ENCRYPTION_KEY")
     if not key_encryption_key:
@@ -217,7 +223,6 @@ def load_config(path: str | Path = "config.yaml") -> Config:
 
     return Config(
         apple=apple,
-        airtags=airtags,
         polling=polling,
         movement=movement,
         web=web,

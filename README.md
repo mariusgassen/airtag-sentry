@@ -15,7 +15,8 @@ timeline.
   dedupes them into Postgres, runs Haversine-distance movement detection, and
   fires notifications.
 - **`dashboard` service** — a FastAPI app serving the reports/status API and
-  the static PWA (map, timeline, "enable notifications" button).
+  a Vite + React PWA (map, timeline, AirTag management, "enable notifications"
+  button).
 - **`anisette` service** — [`anisette-v3-server`](https://github.com/Dadoum/anisette-v3-server),
   required for Apple's authentication flow.
 - **`postgres` service** — stores `location_reports`, `alerts`, and
@@ -27,7 +28,7 @@ timeline.
   dashboard once it's running. See
   [Extracting your AirTag key](#extracting-your-airtag-key) below.
 - **An encryption key for storing those AirTag keys at rest.** See
-  [AirTag key storage](#airtag-key-storage-config-first-encrypted-at-rest)
+  [AirTags: fully UI-managed, keys encrypted at rest](#airtags-fully-ui-managed-keys-encrypted-at-rest)
   below.
 - **Your own Apple ID**, with 2FA you can complete interactively once.
 - **A GitHub OAuth App**, so the dashboard can require you to log in with your
@@ -37,12 +38,13 @@ timeline.
   Apple's Terms of Service, is on you — this is for tracking your own
   property.
 
-## AirTag key storage (config-first, encrypted at rest)
+## AirTags: fully UI-managed, keys encrypted at rest
 
-`config.yaml`'s `airtags:` list only declares each AirTag's identity — `id`
-and display `name`. The actual secret key material never goes in
-`config.yaml` or `.env`; instead it's entered through the dashboard's
-**AirTags verwalten** (⚙️) panel, encrypted, and stored in Postgres.
+AirTags are not configured in `config.yaml` at all — there is nothing to edit
+in a file. Add, rename, and remove them entirely through the dashboard's
+**AirTags verwalten** (⚙️) panel; each one is a row in Postgres. The actual
+secret key material is entered the same way (paste a base64 key or upload a
+JSON export) and stored encrypted, never in `config.yaml` or `.env`.
 
 This needs one encryption key in `.env`, used to encrypt/decrypt that stored
 key material — it can't itself live in the database it protects:
@@ -53,8 +55,8 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 Paste the result into `.env` as `AIRTAG_KEY_ENCRYPTION_KEY`. Once the
 dashboard is running (see [Local setup](#local-setup)), open the ⚙️ panel,
-pick the AirTag, and either paste its base64 key or upload the JSON file
-exported per the next section.
+add an AirTag by name, and either paste its base64 key or upload the JSON
+file exported per the next section.
 
 ## Extracting your AirTag key
 
@@ -121,19 +123,19 @@ For that case, set `https_only=False` on the `SessionMiddleware` call in
 ## Local setup
 
 ```bash
-cp config.example.yaml config.yaml   # adjust thresholds, airtag name, key source
-cp .env.example .env                 # fill in DATABASE_URL, notifier creds, etc.
+cp config.example.yaml config.yaml   # adjust polling/movement thresholds
+cp .env.example .env                 # fill in POSTGRES_* creds, GitHub OAuth, encryption key, etc.
 python scripts/generate_vapid_keys.py   # paste the output into .env for Web Push
 
 # Local (non-Coolify) only: publish the dashboard on localhost.
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-Edit `config.yaml`:
-- Add one entry (`id` + `name`) per AirTag under `airtags:`.
-- For Docker Compose, set `apple.anisette.mode: remote` and
-  `apple.anisette.remote_url: http://anisette:6969` so polling uses the
-  bundled anisette container instead of generating anisette data in-process.
+`config.yaml` only has Apple/polling/movement/web settings — AirTags
+themselves are added later, through the dashboard. For Docker Compose, set
+`apple.anisette.mode: remote` and `apple.anisette.remote_url: http://anisette:6969`
+so polling uses the bundled anisette container instead of generating anisette
+data in-process.
 
 ```bash
 docker compose up -d postgres anisette
@@ -145,7 +147,7 @@ The dashboard is then at `http://localhost:8000` (with the override file from
 above — without it, plain `docker compose up` doesn't publish any host port,
 matching how Coolify runs it) — open it, log in with
 GitHub, and add each AirTag's key via the ⚙️ panel (see
-[AirTag key storage](#airtag-key-storage-config-first-encrypted-at-rest)).
+[AirTags: fully UI-managed, keys encrypted at rest](#airtags-fully-ui-managed-keys-encrypted-at-rest)).
 Until a key is added, that tag's poll is skipped with a log line — it won't
 crash the scheduler.
 
@@ -216,23 +218,42 @@ suppressed unless you set `movement.alert_on_backfill: true`.
 
 ## Database migrations
 
-Schema changes live as an ordered list of one-time SQL migrations in
-`airtag_sentry/migrations.py`, each recorded in a `schema_migrations` table
-once applied (`SELECT * FROM schema_migrations ORDER BY applied_at` shows the
-history). Both `poll`/`run` and `serve` call `run_migrations()` on startup, so
-there's no separate migration step to remember — a fresh database and an
-upgraded one both replay the same history and end up in the same state.
-Never edit a migration that has already shipped; add a new entry to the list
-instead.
+Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/)
+(`alembic/versions/`). `poll`/`run`/`serve` all call `airtag_sentry.migrate.upgrade_to_head()`
+once at startup, so there's no separate migration step to remember. The
+connection URL comes from the same `POSTGRES_*` env vars the rest of the app
+uses (see `alembic/env.py`) — nothing to configure separately in `alembic.ini`.
+
+To add a schema change: `alembic revision -m "description"`, fill in
+`upgrade()`/`downgrade()` in the generated file under `alembic/versions/`, and
+never edit a migration that has already shipped — add a new one instead.
+
+Run migrations manually (e.g. to inspect what would happen) with:
+```bash
+alembic upgrade head    # apply
+alembic downgrade -1    # roll back one step
+alembic history         # see the chain
+```
 
 ## Development
 
+Backend:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest   # movement math + notifier payloads run standalone;
          # DB tests need a reachable Postgres at $TEST_DATABASE_URL
          # (defaults to postgresql://airtag:airtag@localhost:5432/airtag_sentry_test)
+```
+
+Frontend (Vite + React + TypeScript, in `frontend/`):
+```bash
+cd frontend
+npm install
+npm run dev     # dev server on :5173, proxies /api, /login, /logout, /auth
+                 # to a separately-running `python -m airtag_sentry serve` on :8000
+npm run build   # production build - writes straight into
+                 # airtag_sentry/web/static (same command Docker's build stage runs)
 ```
 
 ## Known limitations
@@ -242,13 +263,16 @@ pytest   # movement math + notifier payloads run standalone;
   real credentials/devices and were **not** exercised end-to-end by whoever
   built this — only unit/integration-tested against a real local Postgres and
   a hand-seeded dashboard. Verify these yourself after setup.
-- Single user (one allowed GitHub login), no mobile app beyond the installable
-  PWA — intentional per the original spec's non-goals. Multiple AirTags per
-  Apple ID are supported via `config.yaml`'s `airtags:` list.
-- **Upgrading from a version that used `accessory_json_path` or
-  `AIRTAG_PRIVATE_KEY_B64_<ID>`**: those config/env fields are gone. Remove
-  them from `config.yaml`/`.env`, set `AIRTAG_KEY_ENCRYPTION_KEY`, and
-  re-enter each AirTag's key (the same base64 string or JSON file you already
-  have) once via the dashboard's ⚙️ panel.
+- Single user (one allowed GitHub login), no native mobile app beyond the
+  installable PWA — intentional per the original spec's non-goals. Multiple
+  AirTags per Apple ID are supported, added/managed entirely via the
+  dashboard's ⚙️ panel.
+- **Upgrading from an earlier version of this project**: this is still early,
+  pre-production software with no real deployed data to preserve, so schema
+  changes have not carried a backward-compatible upgrade path so far (most
+  recently: AirTags moving from `config.yaml` entries to a real `airtags`
+  table, and the hand-rolled migration tracker being replaced by Alembic). If
+  you deployed an earlier version, the simplest path is to drop and recreate
+  the database, then re-enter each AirTag and its key via the dashboard.
 - If Apple changes the Find My protocol, `FindMy.py` (and therefore this app)
   can break without warning — keep an eye on its upstream repo.

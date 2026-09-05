@@ -8,6 +8,7 @@ in its threadpool automatically - no async DB driver needed at this scale.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -27,13 +28,16 @@ from airtag_sentry.db import (
     PushSubscription,
     StoredKey,
     add_push_subscription,
+    create_airtag,
+    delete_airtag,
     delete_airtag_key,
     fetch_reports,
     get_conn,
-    run_migrations,
     latest_alert,
+    list_airtags,
     list_keyed_airtag_ids,
     remove_push_subscription,
+    rename_airtag,
     set_airtag_key,
 )
 
@@ -86,19 +90,33 @@ class AirtagKeyIn(BaseModel):
     accessory_json: dict[str, Any] | None = None
 
 
+class AirtagIn(BaseModel):
+    name: str
+
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or "airtag"
+
+
 def create_app(cfg: Config | None = None) -> FastAPI:
     cfg = cfg or load_config()
     app = FastAPI(title="AirTagSentry")
 
-    def _resolve_airtag_id(airtag_id: str | None) -> str:
+    def _resolve_airtag_id(conn, airtag_id: str | None) -> str:
+        airtags = list_airtags(conn)
+        if not airtags:
+            raise HTTPException(
+                status_code=404, detail="No AirTags configured yet - add one via the dashboard."
+            )
         if airtag_id is None:
-            return cfg.airtags[0].id
-        if airtag_id not in {a.id for a in cfg.airtags}:
+            return airtags[0].id
+        if airtag_id not in {a.id for a in airtags}:
             raise HTTPException(status_code=404, detail=f"Unknown airtag_id '{airtag_id}'")
         return airtag_id
 
-    def _airtag_name(airtag_id: str) -> str:
-        return next(a.name for a in cfg.airtags if a.id == airtag_id)
+    def _airtag_name(conn, airtag_id: str) -> str:
+        return next(a.name for a in list_airtags(conn) if a.id == airtag_id)
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
@@ -161,13 +179,45 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     @app.get("/api/airtags")
     def get_airtags():
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
+            airtags = list_airtags(conn)
             keyed_ids = list_keyed_airtag_ids(conn)
-        return [{"id": a.id, "name": a.name, "has_key": a.id in keyed_ids} for a in cfg.airtags]
+        return [{"id": a.id, "name": a.name, "has_key": a.id in keyed_ids} for a in airtags]
+
+    @app.post("/api/airtags")
+    def create_airtag_route(body: AirtagIn):
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name must not be empty.")
+        base_slug = _slugify(name)
+        with get_conn(cfg.database_url) as conn:
+            existing_ids = {a.id for a in list_airtags(conn)}
+            slug = base_slug
+            suffix = 2
+            while slug in existing_ids:
+                slug = f"{base_slug}-{suffix}"
+                suffix += 1
+            record = create_airtag(conn, slug, name)
+        return {"id": record.id, "name": record.name, "has_key": False}
+
+    @app.patch("/api/airtags/{airtag_id}")
+    def rename_airtag_route(airtag_id: str, body: AirtagIn):
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name must not be empty.")
+        with get_conn(cfg.database_url) as conn:
+            _resolve_airtag_id(conn, airtag_id)
+            record = rename_airtag(conn, airtag_id, name)
+        return {"id": record.id, "name": record.name}
+
+    @app.delete("/api/airtags/{airtag_id}")
+    def delete_airtag_route(airtag_id: str):
+        with get_conn(cfg.database_url) as conn:
+            _resolve_airtag_id(conn, airtag_id)
+            delete_airtag(conn, airtag_id)
+        return {"ok": True}
 
     @app.post("/api/airtags/{airtag_id}/key")
     def set_airtag_key_route(airtag_id: str, body: AirtagKeyIn):
-        _resolve_airtag_id(airtag_id)
         if bool(body.private_key_b64) == bool(body.accessory_json):
             raise HTTPException(
                 status_code=400,
@@ -191,7 +241,7 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
 
         encrypted = keystore.encrypt(cfg.key_encryption_key, plaintext)
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
+            _resolve_airtag_id(conn, airtag_id)
             set_airtag_key(
                 conn, StoredKey(airtag_id=airtag_id, key_type=key_type, encrypted_data=encrypted)
             )
@@ -199,17 +249,15 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
 
     @app.delete("/api/airtags/{airtag_id}/key")
     def delete_airtag_key_route(airtag_id: str):
-        _resolve_airtag_id(airtag_id)
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
+            _resolve_airtag_id(conn, airtag_id)
             delete_airtag_key(conn, airtag_id)
         return {"ok": True}
 
     @app.get("/api/reports")
     def get_reports(airtag_id: str | None = None, limit: int | None = None):
-        resolved = _resolve_airtag_id(airtag_id)
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
+            resolved = _resolve_airtag_id(conn, airtag_id)
             reports = fetch_reports(conn, resolved, limit=limit)
         return [
             {
@@ -225,14 +273,14 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
 
     @app.get("/api/status")
     def get_status(airtag_id: str | None = None):
-        resolved = _resolve_airtag_id(airtag_id)
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
+            resolved = _resolve_airtag_id(conn, airtag_id)
             reports = fetch_reports(conn, resolved, limit=1)
             alert = latest_alert(conn, resolved)
+            airtag_name = _airtag_name(conn, resolved)
         return {
             "airtag_id": resolved,
-            "airtag_name": _airtag_name(resolved),
+            "airtag_name": airtag_name,
             "last_report": (
                 {
                     "timestamp": reports[0].timestamp.isoformat(),
@@ -255,7 +303,6 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     @app.post("/api/push/subscribe")
     def subscribe(sub: SubscriptionIn):
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
             add_push_subscription(
                 conn,
                 PushSubscription(endpoint=sub.endpoint, p256dh=sub.keys.p256dh, auth=sub.keys.auth),
@@ -265,7 +312,6 @@ border-radius:6px;text-decoration:none;font-size:1.1rem;">Mit GitHub anmelden</a
     @app.post("/api/push/unsubscribe")
     def unsubscribe(body: UnsubscribeIn):
         with get_conn(cfg.database_url) as conn:
-            run_migrations(conn)
             remove_push_subscription(conn, body.endpoint)
         return {"ok": True}
 

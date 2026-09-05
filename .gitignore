@@ -6,6 +6,10 @@ venv/
 build/
 dist/
 
+# frontend build output - `npm run build` (frontend/) writes here; not committed
+# (frontend/'s own .gitignore covers frontend/node_modules)
+airtag_sentry/web/static/
+
 # secrets & local state
 .env
 config.yaml
