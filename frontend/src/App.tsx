@@ -195,11 +195,22 @@ export default function App() {
           the sheet: on mobile this column is pinned to the screen's bottom
           edge and only the sheet's height changes (collapsed/expanded), so
           the tab bar never moves; on desktop it's simply the static
-          sidebar column. */}
-      <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col md:static md:h-full md:w-[360px] md:shrink-0 md:border-r md:border-[var(--divider)]">
+          sidebar column.
+          inset-0 (not bottom-0 + intrinsic height) so this column's own box
+          is pinned to the fixed root exactly like the map pane above - the
+          same guarantee that made the root itself fixed+inset-0 rather than
+          h-[100dvh] (see that comment). A bottom-0-and-auto-height column
+          only reaches the map's true edge if the browser's dynamic-viewport
+          math for an intrinsic-height box agrees with the math it used for
+          the map's own inset-0 box; on some WebKit/PWA combinations it
+          doesn't, leaving a sliver of raw map exposed below the tab bar
+          with no glass. pointer-events-none + justify-end so the empty
+          space this now reserves above the sheet still passes clicks
+          through to the map, restored to auto on the two real children. */}
+      <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-end md:pointer-events-auto md:static md:h-full md:w-[360px] md:shrink-0 md:border-r md:border-[var(--divider)]">
         <div
           ref={sheetRef}
-          className="sheet flex flex-col overflow-hidden rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
+          className="sheet pointer-events-auto flex flex-col overflow-hidden rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
           data-state={sheetState}
         >
           <button
