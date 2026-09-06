@@ -27,6 +27,18 @@ function applyTheme(pref: ThemePreference) {
   // sync so it never mismatches the app's own background.
   const meta = document.querySelector('meta[name="theme-color"]')
   if (meta) meta.setAttribute('content', effectiveScheme(pref) === 'dark' ? '#000000' : '#f2f2f7')
+
+  // apple-mobile-web-app-status-bar-style can't be "black-translucent" (see
+  // index.html's comment - it breaks the installed WebView's height on
+  // iOS), so the status bar is always opaque there. "default" is a light
+  // opaque bar and "black" a dark one; matching it to the current theme at
+  // least keeps that opaque bar from reading as a mismatched black band on
+  // top of the light theme's --bg (#f2f2f7). Best-effort only: like other
+  // apple-mobile-web-app-* tags, iOS freezes whatever this held at
+  // "Add to Home Screen" time, so a later theme switch won't reach an
+  // already-installed icon until it's re-added.
+  const statusBar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')
+  if (statusBar) statusBar.setAttribute('content', effectiveScheme(pref) === 'dark' ? 'black' : 'default')
 }
 
 /** Persists the user's theme choice and applies it as `data-theme` on <html>,
