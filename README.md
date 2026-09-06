@@ -232,6 +232,12 @@ installed, click **Benachrichtigungen aktivieren** ("Enable notifications") to
 subscribe that device to Web Push alerts — they'll arrive as real OS
 notifications, even when the app isn't open.
 
+If you installed the app to an iOS home screen before this fix, delete it
+and re-add it once: the `apple-mobile-web-app-*` meta tags in `index.html`
+are frozen by iOS at install time, so a background service-worker update
+alone won't apply the corrected status-bar style — only a fresh install
+picks it up automatically.
+
 ## Deploying with Coolify
 
 1. Create a new **Docker Compose** resource in Coolify pointed at this repo
