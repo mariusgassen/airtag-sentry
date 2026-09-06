@@ -57,6 +57,12 @@ class PushSubscription:
 
 
 @dataclasses.dataclass(frozen=True)
+class OwnerAppleCredentials:
+    apple_id: str
+    encrypted_password: str
+
+
+@dataclasses.dataclass(frozen=True)
 class OwnerLocation:
     id: int | None
     recorded_at: dt.datetime
@@ -267,6 +273,35 @@ def list_keyed_airtag_ids(conn: psycopg.Connection) -> set[str]:
     with conn.cursor() as cur:
         cur.execute("SELECT airtag_id FROM airtag_keys")
         return {row[0] for row in cur.fetchall()}
+
+
+def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypted_password: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO owner_apple_credentials (id, apple_id, encrypted_password, updated_at)
+            VALUES (1, %s, %s, now())
+            ON CONFLICT (id) DO UPDATE
+                SET apple_id = EXCLUDED.apple_id,
+                    encrypted_password = EXCLUDED.encrypted_password,
+                    updated_at = now()
+            """,
+            (apple_id, encrypted_password),
+        )
+    conn.commit()
+
+
+def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT apple_id, encrypted_password FROM owner_apple_credentials WHERE id = 1")
+        row = cur.fetchone()
+        return OwnerAppleCredentials(*row) if row else None
+
+
+def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM owner_apple_credentials WHERE id = 1")
+    conn.commit()
 
 
 _SETTINGS_COLUMNS = (

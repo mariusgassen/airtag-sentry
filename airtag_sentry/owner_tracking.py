@@ -9,8 +9,15 @@ devices instead, which is what "did the tag move without me" correlation needs. 
 is a second, independent Apple session from the one `auth.py` manages for AirTags -
 its own login, its own 2FA, its own persisted session.
 
-Entirely optional: every function here is a no-op (or returns None) when
-`cfg.apple.owner` isn't configured, so the rest of the app is unaffected if unset.
+Unlike FindMy.py's AppleAccount, pyicloud has no "resume from a session token alone"
+mode - the password must be supplied on every PyiCloudService construction, i.e. on
+every poll, indefinitely. So (unlike auth.py, where the password is only needed
+transiently for the one login request) it's encrypted and stored in Postgres
+(owner_apple_credentials, via keystore.py) exactly like AirTag keys already are,
+entered through the dashboard's login flow rather than an env var.
+
+Entirely optional: every function here is a no-op (or returns None) when no
+credentials are stored, so the rest of the app is unaffected if it's never connected.
 """
 
 from __future__ import annotations
@@ -18,55 +25,89 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
+from airtag_sentry import keystore
 from airtag_sentry.config import Config
-from airtag_sentry.db import OwnerLocation
+from airtag_sentry.db import (
+    OwnerAppleCredentials,
+    OwnerLocation,
+    delete_owner_apple_credentials,
+    get_owner_apple_credentials,
+    set_owner_apple_credentials,
+)
 
 logger = logging.getLogger(__name__)
 
+_pending_api = None
+_pending_apple_id: str | None = None
+_pending_password: str | None = None
 
-def _build_api(cfg: Config):
+
+def _build_api(apple_id: str, password: str, session_dir: str):
     from pyicloud import PyiCloudService
 
-    owner = cfg.apple.owner
-    if owner is None:
-        raise RuntimeError(
-            "Owner device tracking is not configured - set APPLE_OWNER_ID and "
-            "APPLE_OWNER_PASSWORD to enable it."
-        )
-    return PyiCloudService(owner.apple_id, owner.password, cookie_directory=owner.session_dir)
+    return PyiCloudService(apple_id, password, cookie_directory=session_dir)
 
 
-def interactive_owner_login(cfg: Config) -> None:
-    """Log in to the owner's Apple ID and persist a trusted session, so later polls
-    don't need interactive 2FA again (~2 months per pyicloud's session lifetime).
+def _persist(cfg: Config, conn, apple_id: str, password: str) -> None:
+    encrypted = keystore.encrypt(cfg.key_encryption_key, password)
+    set_owner_apple_credentials(conn, apple_id, encrypted)
 
-    MUST be run by a human with a TTY and a live 2FA code - same constraint as
-    `auth.interactive_login()`. Run it once (`python -m airtag_sentry login-owner`).
-    """
-    api = _build_api(cfg)
 
+def start_owner_login(cfg: Config, conn, apple_id: str, password: str) -> dict:
+    """Submit the owner's Apple ID credentials. Persists them immediately (encrypted)
+    if no 2FA is required, otherwise stashes the in-progress session for
+    submit_owner_2fa_code()."""
+    global _pending_api, _pending_apple_id, _pending_password
+
+    api = _build_api(apple_id, password, cfg.apple.owner_session_dir)
     if api.requires_2fa:
-        code = input("Enter the 2FA code sent to your Apple devices: ")
-        if not api.validate_2fa_code(code):
-            raise RuntimeError("Failed to verify the 2FA code.")
-        if not api.is_trusted_session:
-            if not api.trust_session():
-                logger.warning(
-                    "Could not mark this session as trusted - you may be prompted "
-                    "for a 2FA code again sooner than usual."
-                )
+        _pending_api = api
+        _pending_apple_id = apple_id
+        _pending_password = password
+        return {"requires_2fa": True}
 
-    print(f"Logged in as {cfg.apple.owner.apple_id}.")
-    print(f"Session saved to {cfg.apple.owner.session_dir} - future polls will reuse it.")
+    _persist(cfg, conn, apple_id, password)
+    return {"requires_2fa": False}
 
 
-def fetch_owner_location(cfg: Config) -> OwnerLocation | None:
-    """Fetch the owner's current device location, or None if the feature isn't
-    configured or no device returned a location this call."""
-    if cfg.apple.owner is None:
+def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
+    """Complete the login with the received code and persist the encrypted credentials."""
+    global _pending_api, _pending_apple_id, _pending_password
+    if _pending_api is None:
+        raise RuntimeError("No owner Apple login in progress.")
+
+    if not _pending_api.validate_2fa_code(code):
+        raise RuntimeError("Invalid 2FA code.")
+    if not _pending_api.is_trusted_session:
+        if not _pending_api.trust_session():
+            logger.warning(
+                "Could not mark the owner-tracking session as trusted - a 2FA code "
+                "may be required again sooner than usual."
+            )
+
+    _persist(cfg, conn, _pending_apple_id, _pending_password)
+    _pending_api = None
+    _pending_apple_id = None
+    _pending_password = None
+
+
+def is_connected(conn) -> bool:
+    return get_owner_apple_credentials(conn) is not None
+
+
+def disconnect(conn) -> None:
+    delete_owner_apple_credentials(conn)
+
+
+def fetch_owner_location(cfg: Config, conn) -> OwnerLocation | None:
+    """Fetch the owner's current device location, or None if it isn't connected or
+    no device returned a location this call."""
+    creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
+    if creds is None:
         return None
 
-    api = _build_api(cfg)
+    password = keystore.decrypt(cfg.key_encryption_key, creds.encrypted_password)
+    api = _build_api(creds.apple_id, password, cfg.apple.owner_session_dir)
     for device in api.devices:
         location = device.location()
         if location is None:

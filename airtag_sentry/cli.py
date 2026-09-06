@@ -1,13 +1,16 @@
-"""CLI entrypoints: `python -m airtag_sentry {login,poll,run,serve}`."""
+"""CLI entrypoints: `python -m airtag_sentry {poll,run,serve}`.
+
+Apple ID login (AirTag tracking and optional owner device tracking) is a
+dashboard UI flow (Settings panel), not a CLI command - see
+web/app.py's /api/apple/* routes, auth.py, and owner_tracking.py.
+"""
 
 from __future__ import annotations
 
 import argparse
 import logging
 
-from airtag_sentry.auth import interactive_login
 from airtag_sentry.config import load_config
-from airtag_sentry.owner_tracking import interactive_owner_login
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -15,18 +18,6 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="airtag_sentry")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser(
-        "login",
-        help="Interactively log in to Apple ID and persist the session (needs a TTY and a live 2FA code).",
-    )
-    sub.add_parser(
-        "login-owner",
-        help=(
-            "Interactively log in to the owner-tracking Apple ID and persist a trusted "
-            "session (needs APPLE_OWNER_ID/APPLE_OWNER_PASSWORD set, a TTY, and a live "
-            "2FA code). Optional - only needed to enable 'moved without you' alerts."
-        ),
-    )
     sub.add_parser("poll", help="Run a single poll immediately and exit.")
     sub.add_parser("run", help="Run the scheduler forever (polling interval set in the dashboard's Settings panel).")
     sub.add_parser("serve", help="Run the FastAPI dashboard.")
@@ -34,11 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     cfg = load_config()
 
-    if args.command == "login":
-        interactive_login(cfg)
-    elif args.command == "login-owner":
-        interactive_owner_login(cfg)
-    elif args.command == "poll":
+    if args.command == "poll":
         from airtag_sentry.migrate import upgrade_to_head
         from airtag_sentry.tracker import poll_once
 

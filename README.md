@@ -96,28 +96,24 @@ in that AirTag's detail view in the dashboard.
 ### 3. Start it up
 
 ```bash
-docker compose up -d postgres anisette
-docker compose run --rm app python -m airtag_sentry login   # interactive Apple ID + 2FA, once
 docker compose up -d
 ```
 
-Open `http://localhost:8000`, log in with GitHub, and add each AirTag's key
-from its detail view. A tag without a key yet is simply skipped each poll
-(logged, not fatal) until you add one.
-
-The `login` step needs your real Apple ID password and a live 2FA code, so
-it can't run in CI — run it once per deployment. The resulting session
-token (`data/account.json`) is reused by the scheduler and dashboard after
-that.
+Open `http://localhost:8000`, log in with GitHub, then in Settings ⚙️ →
+**Apple-Konten** connect your Apple ID (email, password, then a 2FA code if
+prompted) — this replaces the old CLI login step, and needs a live 2FA code
+from your phone the same way. The resulting session (`data/account.json`)
+is reused by the scheduler and dashboard after that, no redeploy or
+container access needed to reconnect. Then add each AirTag's key from its
+detail view. A tag without a key yet is simply skipped each poll (logged,
+not fatal) until you add one.
 
 ### CLI reference
 
 ```
-python -m airtag_sentry login         # interactive Apple ID login + 2FA, persists the session
-python -m airtag_sentry login-owner   # optional: same, for owner device tracking - see below
-python -m airtag_sentry poll          # run a single poll immediately and exit
-python -m airtag_sentry run           # run the scheduler forever (used by the `app` service)
-python -m airtag_sentry serve         # run the dashboard (used by the `dashboard` service)
+python -m airtag_sentry poll    # run a single poll immediately and exit
+python -m airtag_sentry run     # run the scheduler forever (used by the `app` service)
+python -m airtag_sentry serve   # run the dashboard (used by the `dashboard` service)
 ```
 
 ## Owner device tracking (optional): "moved without you" alerts
@@ -137,28 +133,25 @@ near-real-time location for your own signed-in devices. This is a second,
 independent Apple session from the AirTag one above - its own login, its own
 2FA, its own persisted session - and it's entirely optional.
 
-To enable it:
+To enable it, in the dashboard's Settings ⚙️ → **Apple-Konten**, connect
+"Eigener Standort (optional)":
 
 1. Generate an **app-specific password** for your Apple ID at
    [appleid.apple.com](https://appleid.apple.com) -> Sign-In and Security ->
    App-Specific Passwords. Use this, not your real Apple ID password - it can
    be revoked independently if you ever need to.
-2. Set `APPLE_OWNER_ID` and `APPLE_OWNER_PASSWORD` in `.env`.
-3. Run the login step once (same TTY/2FA constraint as `login`):
-   ```bash
-   docker compose run --rm app python -m airtag_sentry login-owner
-   ```
-   This persists a trusted session to `APPLE_OWNER_SESSION_PATH` (default
-   `data/pyicloud_session`, inside the same `app_data` volume as
-   `APPLE_STORE_PATH`) - re-authentication is only needed roughly every two
-   months, per `pyicloud`'s session lifetime, not on every poll.
+2. Enter your Apple ID and that app-specific password, then a 2FA code if
+   prompted. The password is encrypted and stored in Postgres (never in
+   `.env`) - pyicloud has no "resume from a session token alone" mode like
+   `FindMy.py` does, so it needs to stay available for every poll, not just
+   this one login.
 
-Once configured, every poll also records your device's current location and,
+Once connected, every poll also records your device's current location and,
 when a normal movement alert fires *and* the tag's new position is far from
 your last-known location, additionally fires a `moved_without_owner` alert -
 see [Movement detection](#movement-detection) for the two tunable settings
-this adds. Leaving `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` unset disables the
-feature entirely; everything else works exactly as without it.
+this adds. Leaving it disconnected means the feature never runs; everything
+else works exactly as without it. Disconnect any time from the same panel.
 
 ## Notifications
 
@@ -205,7 +198,8 @@ third, additional alert — it never replaces the other two:
 
 | Variable             | Default              | Meaning                                                                          |
 |-----------------------|----------------------|-----------------------------------------------------------------------------------|
-| `APPLE_STORE_PATH`    | `data/account.json`  | Where the Apple session token from `login` is persisted.                        |
+| `APPLE_STORE_PATH`    | `data/account.json`  | Where the AirTag-tracking Apple session (connected via Settings) is persisted. |
+| `APPLE_OWNER_SESSION_PATH` | `data/pyicloud_session` | Where the owner-tracking Apple session cache lives, if connected.          |
 | `ANISETTE_MODE`       | `local`               | `local` (in-process) or `remote` (use `anisette-v3-server`). Docker Compose sets this to `remote`. |
 | `ANISETTE_LIBS_PATH`  | `data/ani_libs.bin`   | Cache path for the local anisette provider's libraries.                          |
 | `ANISETTE_REMOTE_URL` | unset                 | URL of the anisette server. Required when `ANISETTE_MODE=remote`.               |
@@ -235,9 +229,9 @@ then arrive as real OS notifications, even when the app isn't open.
    domain + TLS to the `dashboard` service.
 4. Deploy. Coolify persists the `postgres_data` and `app_data` volumes
    across redeploys.
-5. Run the login step once against the deployed stack: open the `app`
-   service's container terminal in Coolify and run
-   `python -m airtag_sentry login`.
+5. Open the deployed dashboard, log in with GitHub, and connect your Apple
+   ID(s) from Settings ⚙️ → Apple-Konten (see [Getting started](#3-start-it-up)) -
+   no container terminal access needed.
 
 The `dashboard` service exposes `GET /health` (round-trips to Postgres) as
 its Docker healthcheck, so Coolify's health indicator and zero-downtime
@@ -289,4 +283,4 @@ managed entirely via the dashboard. Use this only on AirTags you own.
 Both AirTag tracking (`FindMy.py`) and owner device tracking (`pyicloud`,
 optional) talk to unofficial Apple APIs and can break without warning —
 keep an eye on their upstream repos. Owner tracking is entirely opt-in:
-leaving `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` unset means it never runs.
+leaving it disconnected in Settings means it never runs.

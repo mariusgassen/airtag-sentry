@@ -12,8 +12,10 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    delete_owner_apple_credentials,
     get_airtag_key,
     get_conn,
+    get_owner_apple_credentials,
     get_settings,
     insert_reports,
     latest_owner_location,
@@ -22,6 +24,7 @@ from airtag_sentry.db import (
     record_owner_location,
     rename_airtag,
     set_airtag_key,
+    set_owner_apple_credentials,
     update_settings,
 )
 from airtag_sentry.migrate import upgrade_to_head
@@ -40,7 +43,7 @@ def conn():
             with connection.cursor() as cur:
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
-                    "owner_locations RESTART IDENTITY CASCADE"
+                    "owner_locations, owner_apple_credentials RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
                 # reset it to defaults in place rather than truncating it away.
@@ -93,6 +96,7 @@ def test_schema_creates_tables(conn):
         "airtag_keys",
         "settings",
         "owner_locations",
+        "owner_apple_credentials",
         "alembic_version",
     } <= tables
 
@@ -257,6 +261,23 @@ def test_owner_location_record_and_latest_round_trip(conn):
         ),
     )
     assert latest_owner_location(conn) == second
+
+
+def test_owner_apple_credentials_set_get_delete_round_trip(conn):
+    assert get_owner_apple_credentials(conn) is None
+
+    set_owner_apple_credentials(conn, "owner@example.com", "enc1")
+    stored = get_owner_apple_credentials(conn)
+    assert stored.apple_id == "owner@example.com"
+    assert stored.encrypted_password == "enc1"
+
+    # Setting again replaces rather than duplicating (single-row table).
+    set_owner_apple_credentials(conn, "owner@example.com", "enc2")
+    stored = get_owner_apple_credentials(conn)
+    assert stored.encrypted_password == "enc2"
+
+    delete_owner_apple_credentials(conn)
+    assert get_owner_apple_credentials(conn) is None
 
 
 def test_settings_table_stays_single_row(conn):

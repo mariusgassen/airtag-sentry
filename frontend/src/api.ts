@@ -38,6 +38,17 @@ export interface OwnerLocation {
   horizontal_accuracy: number | null
 }
 
+export interface AppleTwoFactorMethod {
+  index: number
+  kind: 'trusted_device' | 'sms' | 'unknown'
+  phone_number: string | null
+}
+
+export interface AppleLoginResult {
+  requires_2fa: boolean
+  methods: AppleTwoFactorMethod[]
+}
+
 export class ApiError extends Error {}
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -118,6 +129,52 @@ export async function updateSettings(settings: AppSettings): Promise<AppSettings
 
 export async function getOwnerLocation(): Promise<OwnerLocation | null> {
   return (await apiFetch('/api/owner-location')).json()
+}
+
+export async function getAppleStatus(): Promise<{ connected: boolean }> {
+  return (await apiFetch('/api/apple/status')).json()
+}
+
+export async function appleLogin(email: string, password: string): Promise<AppleLoginResult> {
+  return (
+    await apiFetch('/api/apple/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+  ).json()
+}
+
+export async function appleSelectTwoFactorMethod(methodIndex: number): Promise<void> {
+  await apiFetch('/api/apple/2fa/select', {
+    method: 'POST',
+    body: JSON.stringify({ method_index: methodIndex }),
+  })
+}
+
+export async function appleSubmitTwoFactorCode(code: string): Promise<void> {
+  await apiFetch('/api/apple/2fa/submit', { method: 'POST', body: JSON.stringify({ code }) })
+}
+
+export async function appleDisconnect(): Promise<void> {
+  await apiFetch('/api/apple', { method: 'DELETE' })
+}
+
+export async function getOwnerAppleStatus(): Promise<{ connected: boolean }> {
+  return (await apiFetch('/api/apple/owner/status')).json()
+}
+
+export async function ownerAppleLogin(appleId: string, password: string): Promise<AppleLoginResult> {
+  return (
+    await apiFetch('/api/apple/owner/login', {
+      method: 'POST',
+      body: JSON.stringify({ apple_id: appleId, password }),
+    })
+  ).json()
+}
+
+export async function ownerAppleSubmitTwoFactorCode(code: string): Promise<void> {
+  await apiFetch('/api/apple/owner/2fa/submit', { method: 'POST', body: JSON.stringify({ code }) })
+}
+
+export async function ownerAppleDisconnect(): Promise<void> {
+  await apiFetch('/api/apple/owner', { method: 'DELETE' })
 }
 
 export async function getVapidPublicKey(): Promise<string | null> {
