@@ -585,3 +585,79 @@ shared sheet/map-pane pair in `App.tsx`).
   the genuine WebKit safe-area-inset resolution path); map tiles (this
   sandbox's proxy still blocks the OpenStreetMap tile CDN, a pre-existing,
   previously-noted limitation - screenshots show grey/blank map).
+
+## v10: Bottom safe-area dead space in the installed PWA
+Trigger: real-device screenshot from the installed PWA after v9 shipped -
+"the nav bar and icons seem to have the perfect size now but there is still
+a dead space below in the PWA that should have the same glass effect." The
+tab bar itself now looked right, but on the real device a strip of raw,
+un-glassed map was visible below it, down to the true screen edge.
+
+Root cause: the sheet+tab-bar column was `absolute inset-x-0 bottom-0` with
+otherwise-intrinsic height (sized by its own content, not pinned to the
+parent on all four sides) - unlike the map pane right above it in the JSX,
+which is `absolute inset-0` and therefore always exactly matches the fixed
+root regardless of any viewport-height quirk. `App.tsx`'s own root-level
+comment already documents this exact class of bug once before (`fixed
+inset-0` over `h-[100dvh]` on the *root*, because "100dvh has not reliably
+spanned the true edge-to-edge screen across WebKit versions" on an installed
+PWA) - the column one level down had the same intrinsic-height exposure the
+root fix didn't cover, and on this device it fell short of the true bottom
+edge, exposing raw map below the (correctly-sized) tab bar with no glass.
+
+- [x] `App.tsx`: changed the sheet+tab-bar column from
+      `absolute inset-x-0 bottom-0 ... flex flex-col` to
+      `absolute inset-0 ... flex flex-col justify-end`, i.e. pinned to the
+      fixed root on all four sides exactly like the map pane, with the
+      sheet+tab-bar pushed to the bottom via `justify-end` instead of via
+      the column's own intrinsic height + `bottom-0`. This makes the tab
+      bar's bottom edge mathematically equal to the true viewport bottom -
+      not just usually equal to it. The column is `pointer-events-none`
+      (it now also covers the transparent area above the sheet, where taps
+      must still reach the map underneath) with `pointer-events-auto`
+      restored on the two real children (`.sheet` and `TabBar`'s `<nav>`,
+      in `TabBar.tsx`) and on the whole column again at `md:` (desktop has
+      no transparent gap to pass through - the sidebar is opaque top to
+      bottom).
+- [x] `TabBar.tsx`: added `pointer-events-auto` to the `<nav>` so it stays
+      clickable under the now-pointer-events-none column.
+
+## Review (v10)
+- Two files touched (`App.tsx`, `TabBar.tsx`), no CSS/dependency changes,
+  no backend changes.
+- Verified: `npx tsc -b && npx vite build` clean; `npx oxlint` shows only
+  the two pre-existing `set-state-in-effect` warnings (unchanged).
+- Drove the real app via `vite dev` + headless Chromium (Playwright,
+  `--no-save`, removed after), CDP `Emulation.setSafeAreaInsetsOverride`
+  (top 47/bottom 34) at 390×844:
+  - Measured the column's `getBoundingClientRect()`: exactly `{x:0, y:0,
+    width:390, height:844}`, i.e. pixel-identical to `window.innerHeight` -
+    proving the fix is mathematically guaranteed, not just visually
+    plausible in this one test. The tab bar's own rect bottom is exactly
+    `844` (= viewport height, zero gap) and the sheet's rect bottom exactly
+    equals the tab bar's top (contiguous, no gap between them either).
+  - Regression-checked every interaction the restructuring could plausibly
+    break: `elementFromPoint` in the transparent area above the sheet (both
+    at `default` sheet height and after minimizing, where that transparent
+    area is much larger) resolves to the map's own div, not the now
+    full-screen column - confirming clicks still pass through to Leaflet
+    instead of being swallowed by the enlarged column box. Tab bar buttons
+    still switch tabs (`Objekte`↔`Einstellungen`, content changes both
+    ways). The handle drag-to-minimize gesture from v9 still resolves to
+    `data-state="minimized"` correctly.
+  - Desktop (1400×900): column computes to `position: static`,
+    `pointer-events: auto`, `height: 900px` (i.e. `md:pointer-events-auto`
+    correctly overrides the mobile default) and the settings tab is still
+    clickable - confirming zero behavior change on the sidebar layout.
+  - Screenshotted the mobile default state: the tab bar row sits flush
+    against the screenshot's bottom edge with no visible gap beneath it.
+- Not verified: the actual real device that reported the bug (this sandbox
+  cannot reproduce genuine WebKit/Android viewport-height computation
+  quirks - CDP's safe-area override emulates the *value* of
+  `env(safe-area-inset-bottom)`, not the specific rendering discrepancy
+  between an intrinsic-height `bottom-0` box and an `inset-0` box that this
+  fix targets). The fix is structurally guaranteed correct by construction
+  (an `inset-0` box cannot end up shorter than its containing block,
+  regardless of viewport quirks) rather than confirmed to match the
+  original bug 1:1, since the original couldn't be reproduced here to
+  compare against directly.
