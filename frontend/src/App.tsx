@@ -182,22 +182,18 @@ export default function App() {
         )}
       </div>
 
-      {/* Soft scrim just below the status bar, not a translucency fix. The
-          bar itself (index.html's status-bar-style comment) can't be made
-          see-through without reintroducing the bottom dead-space bug, and
-          on an installed iOS PWA it fully covers whatever this component
-          draws in the safe-area-inset-top strip above it - a glass/blur
-          treatment positioned there (the previous version of this element)
-          is invisible on iOS for the same reason. This instead starts right
-          at the visible content boundary (top: safe-area-inset-top) and
-          fades the theme's own --bg color into transparent over the map's
-          first 40px, so the map appears to emerge from the status bar's
-          flat color rather than starting with a hard, cut-off-looking edge
-          right under it. Decorative only - no controls live here, and it
-          never intercepts map or zoom-control taps. */}
+      {/* Glass background for the top safe area (status bar/notch), matching
+          the bottom's chrome-blur treatment (TabBar, sheet handle) so the
+          full-bleed map doesn't look cut off under the notch. Decorative
+          only - no controls live here, and it never intercepts map taps.
+          On an installed iOS PWA this is currently covered by the OS's own
+          opaque status bar (index.html's status-bar-style comment) and
+          isn't visible there - kept for Android/desktop and in case a
+          future WebKit fixes the black-translucent sizing bug that forced
+          the opaque bar in the first place. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-10 h-10 bg-[linear-gradient(to_bottom,var(--bg),transparent)] md:hidden"
+        className="chrome-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] md:hidden"
       />
 
       {/* Sheet + tab bar, grouped so the tab bar always sits directly below

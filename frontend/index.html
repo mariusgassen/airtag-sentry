@@ -15,18 +15,14 @@
          WebKit lay out the WebView edge-to-edge and paint an opaque status
          bar on top instead, which is what actually fixes the dead-space gap
          above the home indicator that App.tsx's fixed+inset-0 comment
-         describes chasing. Trade-off: the opaque bar also covers whatever
-         App.tsx draws in that strip, so the map can no longer bleed through
-         translucently the way it did under black-translucent - there's no
-         third mode that gets edge-to-edge sizing AND see-through content on
-         the affected WebKit versions. src/theme.ts overwrites this content
-         value at runtime (default for light, black for dark) so at least
-         the opaque bar's color matches the current theme's background
-         instead of showing a jarring black band on the light theme;
-         App.tsx additionally fades the map's top edge into that same color
-         so the now-unavoidable bar reads as a deliberate scrim rather than
-         a hard cut - see its comment for why that's the practical ceiling
-         here, not full translucency. -->
+         describes chasing. Trade-off: the opaque bar also covers the
+         App.tsx glass panel that used to let the map bleed through
+         translucently under black-translucent - there's no third mode that
+         gets edge-to-edge sizing AND see-through content on the affected
+         WebKit versions. src/theme.ts overwrites this content value at
+         runtime (default for light, black for dark) so at least the opaque
+         bar's color matches the current theme's background instead of
+         showing a jarring black band on the light theme. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
