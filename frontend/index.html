@@ -5,7 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#1f6feb" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- "black" (opaque), not "black-translucent": on an installed iOS
+         home-screen PWA, black-translucent makes WebKit size the WebView to
+         screen.height minus only the top safe-area inset, anchored at the
+         top - the bottom safe-area strip is then physical OS-black outside
+         the WebView entirely, unreachable by any CSS/JS (100dvh, fixed
+         inset-0, safe-area-inset-bottom padding all measure the WebView
+         itself and can't fill a gap that lies outside it). "black" makes
+         WebKit lay out the WebView edge-to-edge and paint an opaque status
+         bar on top instead, which is what actually fixes the dead-space gap
+         above the home indicator that App.tsx's fixed+inset-0 comment
+         describes chasing. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
