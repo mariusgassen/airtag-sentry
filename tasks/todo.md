@@ -861,3 +861,38 @@ the dashboard.
   `AppleConnectPanel` UI/UX in a real browser, and the true Apple
   login/2FA round-trip for either session - same category of "not verified
   here" as the CLI flows it replaces already were.
+
+## v12.1: fix "Login failed: No module named 'rich'" on owner tracking
+Trigger: real-user bug report immediately after v12 shipped, hit by
+actually using the new "Eigener Standort" login panel.
+
+Root cause: `pyicloud`'s own `__init__.py` unconditionally imports
+`pyicloud.services.notes.rendering.exporter` (a Notes-service module,
+unrelated to Find My iPhone device location), which does `from
+rich.console import Console` at module load time - but `pyicloud` doesn't
+declare `rich` as a dependency itself. `owner_tracking.py` only imports
+`pyicloud` lazily inside `_build_api()`, so this was invisible to every
+existing test (none of them actually trigger an owner-tracking login) and
+to `pip install -e ".[dev]"` succeeding cleanly - the missing package only
+surfaced the first time `start_owner_login`/`fetch_owner_location` actually
+ran and tried `from pyicloud import PyiCloudService`.
+
+- [x] `pyproject.toml`: added `rich>=13` as an explicit dependency, with a
+      comment explaining it's a stand-in for `pyicloud`'s own incomplete
+      dependency declaration, not something this app uses directly.
+- [x] `tests/test_owner_tracking.py`: new regression test that just
+      `import pyicloud`s - the cheapest test that would have caught this
+      before it shipped.
+
+## Review (v12.1)
+- Verified against a truly clean install (fresh venv, not just the one
+  already carrying `rich` from debugging this): `pip install -e ".[dev]"`
+  then `import pyicloud` / `from pyicloud import PyiCloudService` /
+  `import airtag_sentry.owner_tracking` all succeed. Full `pytest` (57
+  passed) against real local Postgres. Confirmed no *further* missing
+  transitive dependencies beyond `rich` by completing the same clean-install
+  import chain end to end.
+- Not re-verified: an actual owner-tracking login against real Apple
+  servers (same sandbox limitation as v12) - but the specific reported
+  failure (import-time `ModuleNotFoundError`) is fully reproduced and fixed
+  independent of reaching Apple's servers at all.

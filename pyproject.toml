@@ -17,6 +17,13 @@ dependencies = [
     "alembic>=1.13",
     "sqlalchemy>=2.0",
     "pyicloud>=1.0",
+    # pyicloud imports pyicloud.services.notes.rendering.exporter unconditionally
+    # (via its own __init__ chain) even though only the Notes service uses it,
+    # and that module does `from rich.console import Console` at load time -
+    # but pyicloud doesn't declare rich as a dependency itself. Without this,
+    # `import pyicloud` (and therefore every owner-tracking login attempt)
+    # fails with ModuleNotFoundError: No module named 'rich'.
+    "rich>=13",
 ]
 
 [project.optional-dependencies]

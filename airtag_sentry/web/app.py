@@ -652,6 +652,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         try:
             result = auth.start_login(cfg, body.email, body.password)
         except Exception as exc:
+            logger.exception("Apple login failed.")
             raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
         return dataclasses.asdict(result)
 
@@ -660,6 +661,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         try:
             auth.request_2fa_code(body.method_index)
         except Exception as exc:
+            logger.exception("Apple 2FA method selection failed.")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True}
 
@@ -668,6 +670,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         try:
             auth.submit_2fa_code(cfg, body.code)
         except Exception as exc:
+            logger.exception("Apple 2FA code submission failed.")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True}
 
@@ -688,6 +691,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             try:
                 result = owner_tracking.start_owner_login(cfg, conn, body.apple_id, body.password)
             except Exception as exc:
+                logger.exception("Owner Apple login failed.")
                 raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
         return result
 
@@ -697,6 +701,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             try:
                 owner_tracking.submit_owner_2fa_code(cfg, conn, body.code)
             except Exception as exc:
+                logger.exception("Owner Apple 2FA code submission failed.")
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True}
 
