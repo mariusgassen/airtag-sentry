@@ -514,3 +514,74 @@ the dashboard was actually serving.
   container run (no Docker daemon available here) - the healthcheck command
   itself was verified directly against `uvicorn`, which is what runs inside
   the container either way.
+
+## v9: Consistent safe-area glass + full-screen map
+Trigger: "Can we use the same glass/background in all the safe areas but
+just not put controls there? It looks cut off otherwise" - the bottom safe
+area (home indicator) already gets the app's translucent `chrome-blur`
+material via `TabBar`/the sheet handle, but the top safe area (status
+bar/notch) got nothing - the full-bleed map bled raw right up under it.
+Also clarified an earlier ambiguous "minimize the panel" ask: it means a way
+to collapse the bottom sheet down to just its handle so the map becomes
+genuinely full-screen, for both the all-AirTags overview map and a single
+AirTag's detail/history + route map (both already render through the same
+shared sheet/map-pane pair in `App.tsx`).
+
+- [x] `App.tsx`: added a decorative, `pointer-events-none`, `aria-hidden`
+      glass bar (`h-[env(safe-area-inset-top)]`, reuses the existing
+      `.chrome-blur` class, `md:hidden`) sitting over the top safe area -
+      pure background, no controls, never intercepts map taps. No change
+      needed to `.leaflet-top`'s existing `env(safe-area-inset-top)` offset,
+      which already clears it.
+- [x] `App.tsx` / `index.css`: replaced the boolean `sheetExpanded` with a
+      3-value `SheetState` (`'minimized' | 'default' | 'expanded'`) plus a
+      pure `resolveNextSheetState(start, delta)` transition function. Tap
+      always resolves to one deterministic step (`default → expanded`,
+      anything else `→ default`); a drag past the existing
+      `SNAP_THRESHOLD_PX` moves exactly one level - `expanded` and
+      `minimized` are never reached directly from each other, only through
+      `default`. New `.sheet[data-state="minimized"]` CSS shrinks the sheet
+      to a `--sheet-handle-h: 40px` strip (with `min-height: 0` to override
+      the base rule's `280px` floor), leaving the map full-screen behind it;
+      matching `[data-dragging="true"]` variant added for the live preview.
+      `aria-expanded`/`aria-label` updated for the third state (new German
+      label: "Ansicht einblenden"). No changes needed in `AirtagDetail.tsx`,
+      `MapCard.tsx`, `OverviewMap.tsx`, `AirtagList.tsx`, or `TabBar.tsx` -
+      minimizing clips the shared sheet body via its pre-existing
+      `overflow-hidden` + `min-h-0 flex-1` wrapper.
+
+## Review (v9)
+- Two files touched (`App.tsx`, `index.css`), no new dependencies, no
+  backend/schema changes.
+- Verified: `npx tsc -b && npx vite build` clean; `npx oxlint` shows only
+  the two pre-existing `set-state-in-effect` warnings on the untouched
+  data-loading effects (same as every prior review).
+- Drove the real app via `vite dev` + headless Chromium (Playwright,
+  `--no-save`, removed after) at a mobile viewport (390×844), using Chrome
+  DevTools Protocol's `Emulation.setSafeAreaInsetsOverride` to simulate a
+  real notch/home-indicator device (`env(safe-area-inset-top)` confirmed to
+  resolve to the overridden `47px`, not `0`, so this wasn't testing a no-op).
+  Confirmed: the new top bar's computed height exactly matches
+  `env(safe-area-inset-top)` with a non-`none` `backdrop-filter` and
+  `pointer-events: none`; every transition in the design's table fires
+  exactly as specified via simulated tap and drag (`default↔expanded` by
+  tap; `default→minimized`, `minimized→default`, `default→expanded`,
+  `expanded→default` by drag, with no direct `expanded↔minimized` jump
+  reachable by either gesture); `aria-expanded`/`aria-label` correct in all
+  three states; minimized sheet height is exactly `40px`. Screenshotted
+  default and minimized states - minimized shows the map filling the screen
+  down to a thin handle strip above the tab bar, for both the AirTags list
+  (`showDetail=false`) view used in this check. Also checked a desktop
+  viewport (1400×900): both the new top bar and the grab handle compute to
+  `display: none` there, confirming the change is a no-op on the sidebar
+  layout.
+- Not verified: the single-AirTag detail/history map in the minimized state
+  specifically (only the overview/list flow was screenshotted, since both
+  share the identical sheet mechanism and no per-view code changed - the
+  logic covering both was confirmed by reading `App.tsx`, not by driving an
+  actual AirTag through the UI, since this sandbox has no backend running to
+  create one against); real iOS/Android Safari rendering of the glass
+  bar/notch interplay (CDP's safe-area override is a DevTools emulation, not
+  the genuine WebKit safe-area-inset resolution path); map tiles (this
+  sandbox's proxy still blocks the OpenStreetMap tile CDN, a pre-existing,
+  previously-noted limitation - screenshots show grey/blank map).

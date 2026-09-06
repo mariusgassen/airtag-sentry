@@ -11,6 +11,34 @@ import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
 import { usePushNotifications } from './hooks/usePushNotifications'
 
+// 'default' is the normal half-height sheet; 'expanded' is near-fullscreen
+// (leaving a peek of map above, see index.css); 'minimized' shrinks the
+// sheet to just its grab handle so the map behind it is fully visible.
+// Transitions only ever move one step at a time - see resolveNextSheetState.
+type SheetState = 'minimized' | 'default' | 'expanded'
+
+const CLICK_THRESHOLD_PX = 6
+const SNAP_THRESHOLD_PX = 40
+
+// Drag/tap gesture resolution for the sheet's grab handle, kept pure and
+// outside the component so the transition table is easy to read/test in
+// isolation. `delta` is dragStartY - pointerUp.clientY (positive = dragged
+// up/toward expand). A tap (tiny delta) always resolves to a single
+// deterministic step; a drag past the threshold moves exactly one level -
+// expanded and minimized are never reached directly from one another.
+function resolveNextSheetState(start: SheetState, delta: number): SheetState {
+  if (Math.abs(delta) < CLICK_THRESHOLD_PX) {
+    return start === 'default' ? 'expanded' : 'default'
+  }
+  if (delta > SNAP_THRESHOLD_PX) {
+    return start === 'minimized' ? 'default' : 'expanded'
+  }
+  if (delta < -SNAP_THRESHOLD_PX) {
+    return start === 'expanded' ? 'default' : 'minimized'
+  }
+  return start
+}
+
 export default function App() {
   const [airtags, setAirtags] = useState<Airtag[]>([])
   const [currentId, setCurrentId] = useState<string | null>(null)
@@ -18,11 +46,11 @@ export default function App() {
   const [reports, setReports] = useState<Report[]>([])
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   const [showDetail, setShowDetail] = useState(false)
-  const [sheetExpanded, setSheetExpanded] = useState(false)
+  const [sheetState, setSheetState] = useState<SheetState>('default')
   const push = usePushNotifications()
   const sheetRef = useRef<HTMLDivElement>(null)
   const dragStartY = useRef(0)
-  const dragStartExpanded = useRef(false)
+  const dragStartState = useRef<SheetState>('default')
   const dragHandledClick = useRef(false)
 
   const refreshAirtags = useCallback(async () => {
@@ -83,18 +111,16 @@ export default function App() {
     handleSelect(created.id)
   }
 
-  // The grab handle used to only support a tap (setSheetExpanded toggle) -
-  // it looked draggable but wasn't. This drives a live height preview via
-  // the --drag-delta CSS var (see index.css) while dragging, and resolves
-  // to a collapsed/expanded snap on release; a real click (e.g. keyboard
-  // activation, which never fires these pointer events) still just toggles.
-  const CLICK_THRESHOLD_PX = 6
-  const SNAP_THRESHOLD_PX = 40
-
+  // The grab handle used to only support a tap (setSheetState toggle) - it
+  // looked draggable but wasn't. This drives a live height preview via the
+  // --drag-delta CSS var (see index.css) while dragging, and resolves to a
+  // minimized/default/expanded snap on release (see resolveNextSheetState);
+  // a real click (e.g. keyboard activation, which never fires these pointer
+  // events) still just resolves the same tap rule directly.
   function handleHandlePointerDown(e: ReactPointerEvent<HTMLButtonElement>) {
     e.currentTarget.setPointerCapture(e.pointerId)
     dragStartY.current = e.clientY
-    dragStartExpanded.current = sheetExpanded
+    dragStartState.current = sheetState
     if (sheetRef.current) sheetRef.current.dataset.dragging = 'true'
   }
 
@@ -113,17 +139,8 @@ export default function App() {
     sheet.dataset.dragging = 'false'
     sheet.style.removeProperty('--drag-delta')
 
-    const wasExpanded = dragStartExpanded.current
-    let nextExpanded = wasExpanded
-    if (Math.abs(delta) < CLICK_THRESHOLD_PX) {
-      nextExpanded = !wasExpanded
-    } else if (!wasExpanded && delta > SNAP_THRESHOLD_PX) {
-      nextExpanded = true
-    } else if (wasExpanded && -delta > SNAP_THRESHOLD_PX) {
-      nextExpanded = false
-    }
     dragHandledClick.current = true
-    setSheetExpanded(nextExpanded)
+    setSheetState(resolveNextSheetState(dragStartState.current, delta))
   }
 
   function handleHandlePointerCancel() {
@@ -142,7 +159,7 @@ export default function App() {
       dragHandledClick.current = false
       return
     }
-    setSheetExpanded((v) => !v)
+    setSheetState((s) => (s === 'default' ? 'expanded' : 'default'))
   }
 
   return (
@@ -165,6 +182,15 @@ export default function App() {
         )}
       </div>
 
+      {/* Glass background for the top safe area (status bar/notch), matching
+          the bottom's chrome-blur treatment (TabBar, sheet handle) so the
+          full-bleed map doesn't look cut off under the notch. Decorative
+          only - no controls live here, and it never intercepts map taps. */}
+      <div
+        aria-hidden="true"
+        className="chrome-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] md:hidden"
+      />
+
       {/* Sheet + tab bar, grouped so the tab bar always sits directly below
           the sheet: on mobile this column is pinned to the screen's bottom
           edge and only the sheet's height changes (collapsed/expanded), so
@@ -174,7 +200,7 @@ export default function App() {
         <div
           ref={sheetRef}
           className="sheet flex flex-col overflow-hidden rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
-          data-expanded={sheetExpanded}
+          data-state={sheetState}
         >
           <button
             type="button"
@@ -183,8 +209,14 @@ export default function App() {
             onPointerUp={handleHandlePointerUp}
             onPointerCancel={handleHandlePointerCancel}
             onClick={handleHandleClick}
-            aria-expanded={sheetExpanded}
-            aria-label={sheetExpanded ? 'Ansicht verkleinern' : 'Ansicht auf Vollbild vergrößern'}
+            aria-expanded={sheetState === 'expanded'}
+            aria-label={
+              sheetState === 'expanded'
+                ? 'Ansicht verkleinern'
+                : sheetState === 'minimized'
+                  ? 'Ansicht einblenden'
+                  : 'Ansicht auf Vollbild vergrößern'
+            }
             className="chrome-blur flex shrink-0 touch-none justify-center py-2 md:hidden"
           >
             <span className="h-1 w-9 rounded-full bg-[var(--divider)]" />

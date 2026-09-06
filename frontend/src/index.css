@@ -194,16 +194,25 @@ body {
   }
 
   /* The devices/objects sheet: a fixed half-height panel by default, that
-     the grab handle can expand to near-fullscreen - same idea as Find My's
-     bottom sheet. Sits above the tab bar rather than the screen edge, so
-     the tab bar stays reachable in both states. */
+     the grab handle can expand to near-fullscreen, or shrink to just its
+     own handle (data-state="minimized") for a genuinely full-screen map -
+     same idea as Find My's bottom sheet. Sits above the tab bar rather than
+     the screen edge, so the tab bar stays reachable in every state. */
   .sheet {
     height: 52vh;
     min-height: 280px;
+    /* Minimized target height: the grab handle button's own content box
+       (py-2 padding + the h-1 pill). */
+    --sheet-handle-h: 40px;
     transition: height 0.25s ease;
   }
-  .sheet[data-expanded="true"] {
+  .sheet[data-state="expanded"] {
     height: calc(100dvh - env(safe-area-inset-top) - var(--tabbar-h) - 44px);
+  }
+  .sheet[data-state="minimized"] {
+    height: var(--sheet-handle-h);
+    /* Overrides the base 280px floor above - wins on specificity. */
+    min-height: 0;
   }
 
   /* Live drag preview: JS sets --drag-delta (a signed px offset) on pointer-
@@ -212,10 +221,13 @@ body {
   .sheet[data-dragging="true"] {
     transition: none;
   }
-  .sheet[data-dragging="true"][data-expanded="false"] {
+  .sheet[data-dragging="true"][data-state="default"] {
     height: calc(52vh + var(--drag-delta, 0px));
   }
-  .sheet[data-dragging="true"][data-expanded="true"] {
+  .sheet[data-dragging="true"][data-state="expanded"] {
     height: calc(100dvh - env(safe-area-inset-top) - var(--tabbar-h) - 44px + var(--drag-delta, 0px));
+  }
+  .sheet[data-dragging="true"][data-state="minimized"] {
+    height: calc(var(--sheet-handle-h) + var(--drag-delta, 0px));
   }
 }
