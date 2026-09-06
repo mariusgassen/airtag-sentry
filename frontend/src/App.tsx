@@ -185,7 +185,12 @@ export default function App() {
       {/* Glass background for the top safe area (status bar/notch), matching
           the bottom's chrome-blur treatment (TabBar, sheet handle) so the
           full-bleed map doesn't look cut off under the notch. Decorative
-          only - no controls live here, and it never intercepts map taps. */}
+          only - no controls live here, and it never intercepts map taps.
+          On an installed iOS PWA this is currently covered by the OS's own
+          opaque status bar (index.html's status-bar-style comment) and
+          isn't visible there - kept for Android/desktop and in case a
+          future WebKit fixes the black-translucent sizing bug that forced
+          the opaque bar in the first place. */}
       <div
         aria-hidden="true"
         className="chrome-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] md:hidden"

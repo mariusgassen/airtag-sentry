@@ -1,167 +1,114 @@
-# airtag-sentry
+<p align="center">
+  <img src="frontend/public/icons/icon-192.png" width="96" height="96" alt="AirTag Sentry logo">
+</p>
 
-Self-hosted location history and movement alerts for a single AirTag, built for
-one scenario: a stolen bike with an AirTag on it. It polls Apple's Find My
-network via [`FindMy.py`](https://github.com/malmeloo/FindMy.py), stores a
-location time series in Postgres, alerts you (ntfy.sh, Telegram, and/or Web
-Push) when the tag moves further than expected or moves at all after a long
-stillstand, and shows an installable PWA dashboard with a Leaflet map and
+<h1 align="center">AirTag Sentry</h1>
+
+<p align="center">
+  <a href="https://github.com/mariusgassen/airtag-sentry/actions/workflows/ci.yml">
+    <img src="https://github.com/mariusgassen/airtag-sentry/actions/workflows/ci.yml/badge.svg" alt="CI build status">
+  </a>
+</p>
+
+Self-hosted location history and movement alerts for a single AirTag, built
+for one scenario: a stolen bike with an AirTag on it. It polls Apple's Find
+My network, stores a location time series in Postgres, alerts you when the
+tag moves, and shows an installable PWA dashboard with a map and timeline.
+
+## How it works
+
+AirTag Sentry polls Apple's Find My network via
+[`FindMy.py`](https://github.com/malmeloo/FindMy.py) on a schedule, dedupes
+new location reports into Postgres, and runs Haversine-distance movement
+detection on each new report. A move that's bigger than expected — or any
+move at all after a long stillstand — triggers a notification through
+whichever backends you've enabled, and shows up on the dashboard's map and
 timeline.
 
-## How it fits together
+| Service     | Role                                                                                                  |
+|-------------|-------------------------------------------------------------------------------------------------------|
+| `app`       | APScheduler polling loop (default every 15 min): fetch → dedupe → movement check → notify             |
+| `dashboard` | FastAPI API + installable Vite/React PWA — map, timeline, AirTag management, notification opt-in      |
+| `anisette`  | [`anisette-v3-server`](https://github.com/Dadoum/anisette-v3-server), Apple's authentication handshake |
+| `postgres`  | Stores location reports, alerts, and push subscriptions                                               |
 
-- **`app` service** — a scheduler (APScheduler) that polls at the
-  configured interval (Settings ⚙️ panel in the dashboard, default 15 min),
-  fetches the last ~7 days of location reports, dedupes them into Postgres,
-  runs Haversine-distance movement detection, and fires notifications.
-- **`dashboard` service** — a FastAPI app serving the reports/status API and
-  a Vite + React PWA (map, timeline, AirTag management, "enable notifications"
-  button).
-- **`anisette` service** — [`anisette-v3-server`](https://github.com/Dadoum/anisette-v3-server),
-  required for Apple's authentication flow.
-- **`postgres` service** — stores `location_reports`, `alerts`, and
-  `push_subscriptions`.
+AirTags themselves are fully UI-managed — add, rename, and remove them from
+the dashboard's AirTags list. Their key material is entered the same way
+(paste a base64 key or upload a JSON export) and stored encrypted, never in
+`.env`.
 
-## ⚠️ What you must already have
+## Getting started
 
-- **An AirTag key for each AirTag you want to track**, entered through the
-  dashboard once it's running. See
-  [Extracting your AirTag key](#extracting-your-airtag-key) below.
-- **An encryption key for storing those AirTag keys at rest.** See
-  [AirTags: fully UI-managed, keys encrypted at rest](#airtags-fully-ui-managed-keys-encrypted-at-rest)
-  below.
-- **Your own Apple ID**, with 2FA you can complete interactively once.
-- **A GitHub OAuth App**, so the dashboard can require you to log in with your
-  own GitHub account. See [Dashboard login](#dashboard-login-github-oauth)
-  below.
-- Using this against an AirTag you don't own, or in a way that violates
-  Apple's Terms of Service, is on you — this is for tracking your own
-  property.
+**Prerequisites**
+- Your own Apple ID, with 2FA you can complete interactively once.
+- A Mac with the AirTag paired in Find My, to extract its key (see below).
+- A GitHub OAuth App, so the dashboard can require your GitHub login (see below).
 
-## AirTags: fully UI-managed, keys encrypted at rest
-
-AirTags are not configured in a file at all — there is nothing to edit for
-them. Add one with the **+** button in the AirTags list; rename, delete, and
-manage its key from its detail view (tap the AirTag). The actual secret key
-material is entered the same way (paste a base64 key or upload a JSON
-export) and stored encrypted, never in `.env`.
-
-This needs one encryption key in `.env`, used to encrypt/decrypt that stored
-key material — it can't itself live in the database it protects:
+### 1. Configure secrets
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+cp .env.example .env
 ```
 
-Paste the result into `.env` as `AIRTAG_KEY_ENCRYPTION_KEY`. Once the
-dashboard is running (see [Local setup](#local-setup)), open an AirTag's
-detail view and either paste its base64 key or upload the JSON file exported
-per the next section.
+Generate the two keys the app needs and paste them into `.env`:
 
-**This key cannot be rotated or regenerated without cost.** It never touches
-the database itself (see above), so losing it or overwriting it in `.env`
-with a different value makes every already-stored AirTag key permanently
-undecryptable — the app will fail to poll until you re-enter each AirTag's
-key from scratch via the dashboard. Back it up somewhere durable (a password
-manager, alongside your other `.env` secrets) before you store any real
-AirTag keys with it.
+```bash
+# AIRTAG_KEY_ENCRYPTION_KEY — encrypts AirTag keys at rest. Back it up: losing
+# it makes every stored AirTag key permanently undecryptable.
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
-## Extracting your AirTag key
+# VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY — for Web Push notifications.
+python scripts/generate_vapid_keys.py
+```
 
-This app does not need the AirTag physically present to get its key — the key
-material is generated at pairing time and synced via iCloud to any Mac signed
-into the same Apple ID, as a local encrypted record. You just need **a Mac
-that has the AirTag paired in the Find My app** (the AirTag itself can be
-anywhere, as long as it still shows up as an owned item in Find My).
+Then create a [GitHub OAuth App](https://github.com/settings/applications/new)
+(callback URL `https://<your-domain>/auth/callback`) and add its credentials:
 
-On that Mac, with `findmy` installed (it's already a project dependency —
-`pip install -e ".[dev]"`, or just `pip install findmy` if you don't want the
-whole project there):
+```
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+GITHUB_ALLOWED_LOGIN=your-github-username
+SESSION_SECRET_KEY=...   # e.g. `openssl rand -hex 32`
+```
+
+For local development, publish the dashboard on `localhost`:
+
+```bash
+cp docker-compose.override.yml.example docker-compose.override.yml
+```
+
+### 2. Extract your AirTag's key
+
+The key material is generated at pairing time and synced via iCloud to any
+Mac signed into the same Apple ID — the AirTag itself doesn't need to be
+present. On that Mac, with `findmy` installed (`pip install -e ".[dev]"`,
+or just `pip install findmy`):
 
 ```bash
 python -m findmy decrypt --out-dir data/keys
 ```
 
-This will prompt for your macOS login keychain password / Touch ID (possibly
-twice) to read the `BeaconStore` Keychain item, then decrypts the local Find My
-accessory records and writes one `<uuid>.json` file per paired accessory
-(AirTags, AirPods, paired Macs/iPhones, etc.) into `data/keys/`. Files are
-named by internal UUID, not by display name, so open each one and check its
-`"name"` field to find the AirTag you're after, then upload that file
-directly in that AirTag's detail view in the dashboard (see above) — no need
-to rename it or reference it anywhere else.
+This prompts for your macOS keychain password/Touch ID and writes one
+`<uuid>.json` file per paired accessory into `data/keys/`. Open each file
+and check its `"name"` field to find your AirTag, then upload it directly
+in that AirTag's detail view in the dashboard.
 
-This only works for accessories already paired to your own Apple ID on that
-Mac — extract keys for your own property only.
-
-## Dashboard login (GitHub OAuth)
-
-The dashboard requires logging in with a specific GitHub account before
-showing any data. To set it up:
-
-1. Create a GitHub OAuth App at
-   [github.com/settings/applications/new](https://github.com/settings/applications/new).
-   - Homepage URL: anything (GitHub requires a value).
-   - Authorization callback URL: `https://<your-domain>/auth/callback`.
-2. Put the resulting Client ID/Secret, your own GitHub username, and a random
-   session secret into `.env`:
-   ```
-   GITHUB_CLIENT_ID=...
-   GITHUB_CLIENT_SECRET=...
-   GITHUB_ALLOWED_LOGIN=your-github-username
-   SESSION_SECRET_KEY=...   # e.g. `openssl rand -hex 32`
-   ```
-
-Note: a GitHub OAuth App supports only **one** callback URL. If you want to
-test the login flow locally as well as in production, create a second OAuth
-App for local development (`http://localhost:8000/auth/callback`) with its
-own `.env.local`-style credentials — otherwise just test everything except the
-login flow itself locally, and verify login against the deployed instance.
-
-The session cookie is always marked `Secure`/HTTPS-only, which browsers will
-only ever send back over an HTTPS connection. This matches the deployment
-model this repo assumes (Coolify terminates TLS at the edge, so the browser
-always talks to the dashboard over `https://`). **If you access the dashboard
-over plain HTTP** — e.g. running it directly on `http://localhost:8000` with
-no TLS-terminating proxy in front — the browser will silently refuse to send
-the cookie back, and login will loop back to `/login` with no clear error.
-For that case, set `https_only=False` on the `SessionMiddleware` call in
-`airtag_sentry/web/app.py`.
-
-## Local setup
-
-```bash
-cp .env.example .env   # fill in POSTGRES_* creds, GitHub OAuth, encryption key, etc.
-python scripts/generate_vapid_keys.py   # paste the output into .env for Web Push
-
-# Local (non-Coolify) only: publish the dashboard on localhost.
-cp docker-compose.override.yml.example docker-compose.override.yml
-```
-
-Every setting lives in `.env` — AirTags themselves are added later, through
-the dashboard. `docker-compose.yml` already points the `app` service at the
-bundled anisette container (`ANISETTE_MODE=remote`,
-`ANISETTE_REMOTE_URL=http://anisette:6969`), so there's nothing to set for
-that when using Docker Compose.
+### 3. Start it up
 
 ```bash
 docker compose up -d postgres anisette
-docker compose run --rm app python -m airtag_sentry login   # interactive, needs your real 2FA code
+docker compose run --rm app python -m airtag_sentry login   # interactive Apple ID + 2FA, once
 docker compose up -d
 ```
 
-The dashboard is then at `http://localhost:8000` (with the override file from
-above — without it, plain `docker compose up` doesn't publish any host port,
-matching how Coolify runs it) — open it, log in with
-GitHub, and add each AirTag's key from its detail view (see
-[AirTags: fully UI-managed, keys encrypted at rest](#airtags-fully-ui-managed-keys-encrypted-at-rest)).
-Until a key is added, that tag's poll is skipped with a log line — it won't
-crash the scheduler.
+Open `http://localhost:8000`, log in with GitHub, and add each AirTag's key
+from its detail view. A tag without a key yet is simply skipped each poll
+(logged, not fatal) until you add one.
 
-**The `login` step cannot be automated or run in CI** — it needs your Apple ID
-password and a live 2FA code from your phone. Run it once; the resulting
-session token (`data/account.json`, in the `app_data` volume) is reused by the
-scheduler and dashboard afterwards.
+The `login` step needs your real Apple ID password and a live 2FA code, so
+it can't run in CI — run it once per deployment. The resulting session
+token (`data/account.json`) is reused by the scheduler and dashboard after
+that.
 
 ### CLI reference
 
@@ -215,134 +162,97 @@ feature entirely; everything else works exactly as without it.
 
 ## Notifications
 
-Each backend is optional and independent — configure any combination in `.env`:
+Each backend is optional and independent — enable any combination in `.env`:
 
-| Backend  | Enable by setting                                          |
-|----------|-------------------------------------------------------------|
-| ntfy.sh  | `NTFY_TOPIC_URL` (e.g. `https://ntfy.sh/your-secret-topic`) |
-| Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`                    |
+| Backend  | Enable by setting                                                                                             |
+|----------|-----------------------------------------------------------------------------------------------------------------|
+| ntfy.sh  | `NTFY_TOPIC_URL` (e.g. `https://ntfy.sh/your-secret-topic`)                                                     |
+| Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`                                                                       |
 | Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT`, then click "Enable notifications" on the dashboard |
 
-**The VAPID keypair has the same rotation problem as `AIRTAG_KEY_ENCRYPTION_KEY`.**
-`VAPID_PUBLIC_KEY` is baked into each browser's push subscription at the
-moment it clicks "Enable notifications" (it's the `applicationServerKey`
-passed to the browser's Push API). If you regenerate the keypair with
-`scripts/generate_vapid_keys.py` and change `.env`, every device subscribed
-under the old key stops receiving pushes — the server now signs with a key
-the push service no longer associates with that subscription, and nothing
-surfaces an error for it; alerts just silently stop arriving on that device.
-Worse, clicking "Enable notifications" again does *not* fix it: the browser
-already holds a subscription for this origin under the old key, and
-`pushManager.subscribe()` with a different key throws instead of replacing
-it (this app has no unsubscribe button in the UI, though the server API
-supports it at `/api/push/unsubscribe`). The only reliable per-device fix
-today is clearing that subscription from outside the app — e.g. the
-browser's site settings, resetting the Notifications permission for the
-dashboard's origin, or removing the installed PWA — and then re-enabling.
-Generate the keypair once, back it up with your other `.env` secrets, and
-only regenerate it if you have a reason to.
-
-## App behavior settings
-
-Two different kinds of "setting" here, deliberately not treated the same way:
-
-**Env vars** (`.env`, alongside the secrets above) — infra-shaped, need a
-redeploy to change anyway, so there's no benefit to making them
-runtime-editable:
-
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `APPLE_STORE_PATH` | `data/account.json` | Where the Apple session token (from `login`) is persisted. |
-| `ANISETTE_MODE` | `local` | `local` (generate anisette data in-process) or `remote` (use an `anisette-v3-server`). Docker Compose hardcodes this to `remote`. |
-| `ANISETTE_LIBS_PATH` | `data/ani_libs.bin` | Cache path for the local anisette provider's libraries. Only used when `ANISETTE_MODE=local`. |
-| `ANISETTE_REMOTE_URL` | unset | URL of the anisette server. Required when `ANISETTE_MODE=remote`. |
-| `WEB_HOST` | `0.0.0.0` | Dashboard bind address. |
-| `WEB_PORT` | `8000` | Dashboard bind port. |
-
-**Dashboard settings** (⚙️ panel in the UI, stored in Postgres) — behavior
-you might reasonably want to tune per-deployment without touching `.env` or
-redeploying: polling interval and the movement-alert thresholds. See
-[Movement detection](#movement-detection). A change takes effect starting
-with the `app` service's next poll — no restart needed.
-
-## Installing the dashboard as an app (PWA)
-
-Open the dashboard in a browser (Chrome/Edge on desktop or Android, Safari
-16.4+ on iOS/iPadOS), then "Install app" / "Add to Home Screen". Once
-installed, click **Benachrichtigungen aktivieren** ("Enable notifications") to
-subscribe that device to Web Push alerts — they'll arrive as real OS
-notifications, even when the app isn't open.
-
-## Deploying with Coolify
-
-1. Create a new **Docker Compose** resource in Coolify pointed at this repo
-   (`docker-compose.yml` at the root).
-2. Every secret and tunable setting from `.env.example` is declared
-   explicitly in `docker-compose.yml`'s `environment:` blocks, so Coolify's
-   environment tab lists each one individually — fill them in there. A few
-   settings (`APPLE_STORE_PATH`, `ANISETTE_LIBS_PATH`, `ANISETTE_MODE`/
-   `ANISETTE_REMOTE_URL`, `WEB_HOST`/`WEB_PORT`) are deliberately *not*
-   wired into Coolify's UI — they're either fixed by this compose topology
-   (anisette) or would break the container's volume mount or the
-   `SERVICE_FQDN_DASHBOARD_8000` routing below if changed, so their defaults
-   are left alone under Docker.
-3. Uncomment `SERVICE_FQDN_DASHBOARD_8000` in your env — Coolify auto-assigns
-   a public domain + TLS to the `dashboard` service's port 8000. It's the
-   only `SERVICE_FQDN_*` variable in the stack, so the whole deployment sits
-   behind a single domain — the `dashboard` service isn't given a host port
-   mapping in `docker-compose.yml`; Coolify's proxy reaches it directly over
-   the internal Docker network.
-4. Deploy. Coolify persists the `postgres_data` and `app_data` named volumes
-   across redeploys automatically.
-5. Run the login step once against the deployed stack: open the `app`
-   service's container terminal in Coolify (or SSH to the host) and run
-   `python -m airtag_sentry login` interactively.
-
-The `dashboard` service has a `GET /health` endpoint (round-trips to Postgres,
-returns 503 if the database is unreachable) wired up as its Docker
-`healthcheck:` in `docker-compose.yml`, so Coolify's health indicator and
-zero-downtime deploys reflect whether the dashboard is actually serving, not
-just whether the container process is running. The `app` service has no HTTP
-surface to probe, so it's left to Coolify/Docker's own container-running
-state — the same signal `restart: unless-stopped` already acts on.
+Treat the VAPID keypair like the encryption key above — generate it once and
+back it up. Every device's push subscription is tied to the public key that
+was active when it subscribed, so devices re-subscribe after a key change.
 
 ## Movement detection
 
 Two alert conditions, both based on the Haversine distance between
-consecutive reports, all four tunables editable from the dashboard's ⚙️
-Settings panel:
-- **`distance_threshold`**: the tag moved more than the distance threshold
-  (default 100 m) since the last report.
-- **`stillstand_movement`**: the tag had been stationary for at least the
-  stillstand duration (default 24 h) and then moved more than the
-  stillstand-movement threshold (default 15 m) — catches "someone finally
-  rolled it away" moves too small to trip the main threshold.
+consecutive reports, tunable from the dashboard's ⚙️ Settings panel:
 
-The very first poll backfills ~7 days of history; alerts for that backfill
-are suppressed unless you turn on "Alarm beim ersten Abruf" in Settings.
+- **`distance_threshold`** — the tag moved more than this distance
+  (default 100 m) since the last report.
+- **`stillstand_movement`** — the tag was stationary for at least
+  `stillstand_duration` (default 24 h) and then moved more than this
+  threshold (default 15 m) — catches slow moves too small to trip the main
+  threshold.
+
+The first poll backfills ~7 days of history; alerts from that backfill are
+suppressed unless "Alarm beim ersten Abruf" is enabled in Settings.
 
 If [owner device tracking](#owner-device-tracking-optional-moved-without-you-alerts)
-is configured, either of the above alerts also triggers a check for a third,
-additional alert - it never replaces the other two:
-- **`moved_without_owner`**: one of the alerts above just fired, *and* the
+is configured, either of the alerts above also triggers a check for a
+third, additional alert — it never replaces the other two:
+
+- **`moved_without_owner`** — one of the alerts above just fired, *and* the
   tag's new position is more than the away-distance threshold (default
   150 m) from your device's last-known location. If that location reading
   is older than the max-age setting (default 60 min), this check is skipped
   entirely for that alert rather than guessing off stale data.
 
+## Configuration reference
+
+**Env vars** (`.env`) — infra-shaped settings that need a redeploy anyway:
+
+| Variable             | Default              | Meaning                                                                          |
+|-----------------------|----------------------|-----------------------------------------------------------------------------------|
+| `APPLE_STORE_PATH`    | `data/account.json`  | Where the Apple session token from `login` is persisted.                        |
+| `ANISETTE_MODE`       | `local`               | `local` (in-process) or `remote` (use `anisette-v3-server`). Docker Compose sets this to `remote`. |
+| `ANISETTE_LIBS_PATH`  | `data/ani_libs.bin`   | Cache path for the local anisette provider's libraries.                          |
+| `ANISETTE_REMOTE_URL` | unset                 | URL of the anisette server. Required when `ANISETTE_MODE=remote`.               |
+| `WEB_HOST`            | `0.0.0.0`             | Dashboard bind address.                                                          |
+| `WEB_PORT`            | `8000`                | Dashboard bind port.                                                             |
+
+**Dashboard settings** (⚙️ panel, stored in Postgres) — polling interval,
+the movement thresholds above, and (if owner device tracking is configured)
+the away-distance/max-age thresholds. Changes apply on the `app` service's
+next poll, no restart needed.
+
+## Installing the dashboard as an app (PWA)
+
+Open the dashboard in Chrome/Edge (desktop or Android) or Safari 16.4+
+(iOS/iPadOS), then "Install app" / "Add to Home Screen". Once installed,
+click "Enable notifications" to subscribe that device to Web Push — alerts
+then arrive as real OS notifications, even when the app isn't open.
+
+## Deploying with Coolify
+
+1. Create a **Docker Compose** resource in Coolify pointed at this repo's
+   `docker-compose.yml`.
+2. Every setting from `.env.example` is declared in `docker-compose.yml`'s
+   `environment:` blocks, so Coolify's environment tab lists each one —
+   fill them in there.
+3. Uncomment `SERVICE_FQDN_DASHBOARD_8000` — Coolify assigns a public
+   domain + TLS to the `dashboard` service.
+4. Deploy. Coolify persists the `postgres_data` and `app_data` volumes
+   across redeploys.
+5. Run the login step once against the deployed stack: open the `app`
+   service's container terminal in Coolify and run
+   `python -m airtag_sentry login`.
+
+The `dashboard` service exposes `GET /health` (round-trips to Postgres) as
+its Docker healthcheck, so Coolify's health indicator and zero-downtime
+deploys reflect whether it's actually serving.
+
 ## Database migrations
 
-Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/)
-(`alembic/versions/`). `poll`/`run`/`serve` all call `airtag_sentry.migrate.upgrade_to_head()`
-once at startup, so there's no separate migration step to remember. The
-connection URL comes from the same `POSTGRES_*` env vars the rest of the app
-uses (see `alembic/env.py`) — nothing to configure separately in `alembic.ini`.
+Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/).
+`poll`/`run`/`serve` all apply pending migrations automatically at startup,
+so there's no separate migration step in normal operation.
 
 To add a schema change: `alembic revision -m "description"`, fill in
-`upgrade()`/`downgrade()` in the generated file under `alembic/versions/`, and
-never edit a migration that has already shipped — add a new one instead.
+`upgrade()`/`downgrade()` in the generated file, and add a new migration
+rather than editing one that's already shipped.
 
-Run migrations manually (e.g. to inspect what would happen) with:
 ```bash
 alembic upgrade head    # apply
 alembic downgrade -1    # roll back one step
@@ -366,31 +276,17 @@ cd frontend
 npm install
 npm run dev     # dev server on :5173, proxies /api, /login, /logout, /auth
                  # to a separately-running `python -m airtag_sentry serve` on :8000
-npm run build   # production build - writes straight into
-                 # airtag_sentry/web/static (same command Docker's build stage runs)
+npm run build   # production build, writes into airtag_sentry/web/static
+                 # (same command Docker's build stage runs)
 ```
 
-## Known limitations
+## Scope
 
-- The Apple login/2FA flow, a live poll against the real Find My network, and
-  an actual Web Push round-trip to a browser's push service all require
-  real credentials/devices and were **not** exercised end-to-end by whoever
-  built this — only unit/integration-tested against a real local Postgres and
-  a hand-seeded dashboard. Verify these yourself after setup.
-- Single user (one allowed GitHub login), no native mobile app beyond the
-  installable PWA — intentional per the original spec's non-goals. Multiple
-  AirTags per Apple ID are supported, added/managed entirely via the
-  dashboard.
-- **Upgrading from an earlier version of this project**: this is still early,
-  pre-production software with no real deployed data to preserve, so schema
-  changes have not carried a backward-compatible upgrade path so far (most
-  recently: AirTags moving from `config.yaml` entries to a real `airtags`
-  table, and the hand-rolled migration tracker being replaced by Alembic). If
-  you deployed an earlier version, the simplest path is to drop and recreate
-  the database, then re-enter each AirTag and its key via the dashboard.
-- If Apple changes the Find My protocol, `FindMy.py` (and therefore this app)
-  can break without warning — keep an eye on its upstream repo.
-- Owner device tracking (optional) uses `pyicloud`, which talks to an
-  unofficial, reverse-engineered Apple API - same "can break without
-  warning" caveat as `FindMy.py` above. It's entirely opt-in; leaving
-  `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` unset means it never runs.
+Single user (one allowed GitHub login), no native mobile app beyond the
+installable PWA — by design. Multiple AirTags per Apple ID are supported,
+managed entirely via the dashboard. Use this only on AirTags you own.
+
+Both AirTag tracking (`FindMy.py`) and owner device tracking (`pyicloud`,
+optional) talk to unofficial Apple APIs and can break without warning —
+keep an eye on their upstream repos. Owner tracking is entirely opt-in:
+leaving `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` unset means it never runs.
