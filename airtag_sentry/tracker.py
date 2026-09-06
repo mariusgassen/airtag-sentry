@@ -4,6 +4,7 @@ movement check -> notify.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 
@@ -25,17 +26,21 @@ from airtag_sentry.db import (
     get_conn,
     get_settings,
     insert_reports,
+    latest_owner_location,
     list_airtags,
     record_alert,
+    record_owner_location,
 )
-from airtag_sentry.movement import MovementConfig, evaluate_movement
+from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
 from airtag_sentry.notifiers import build_notifiers, notify_all
+from airtag_sentry.owner_tracking import fetch_owner_location
 
 logger = logging.getLogger(__name__)
 
 _ALERT_TITLES = {
     "distance_threshold": "AirTagSentry: unerwartete Bewegung",
     "stillstand_movement": "AirTagSentry: Bewegung nach Stillstand",
+    "moved_without_owner": "AirTagSentry: Bewegung ohne dich",
 }
 
 
@@ -52,12 +57,30 @@ def _load_key(cfg: Config, conn, airtag_id: str):
     return KeyPair.from_b64(plaintext)
 
 
+def _update_owner_location(cfg: Config, conn) -> None:
+    """Best-effort refresh of the owner's device location. Never allowed to break
+    AirTag polling - a failure here just means this poll's away-correlation falls
+    back to whatever was recorded last time (or skips it, if nothing ever was)."""
+    if cfg.apple.owner is None:
+        return
+    try:
+        location = fetch_owner_location(cfg)
+    except Exception:
+        logger.exception("Failed to fetch owner device location this poll.")
+        return
+    if location is None:
+        logger.info("Owner tracking configured but no device location returned this poll.")
+        return
+    record_owner_location(conn, location)
+
+
 def poll_once(cfg: Config) -> None:
     account = restore_account(cfg)
 
     with get_conn(cfg.database_url) as conn:
         settings = get_settings(conn)
         notifiers = build_notifiers(cfg)
+        _update_owner_location(cfg, conn)
         for airtag in list_airtags(conn):
             try:
                 _poll_airtag(cfg, account, airtag, conn, notifiers, settings)
@@ -112,6 +135,8 @@ def _poll_airtag(
         stillstand_hours=settings.movement_stillstand_hours,
         stillstand_movement_meters=settings.movement_stillstand_movement_meters,
         alert_on_backfill=settings.movement_alert_on_backfill,
+        away_distance_threshold_meters=settings.movement_away_distance_meters,
+        owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
     )
     for report in newly_inserted:
         prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
@@ -133,3 +158,22 @@ def _poll_airtag(
             f"(Report {report.timestamp.isoformat()})."
         )
         notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+
+        away_distance = evaluate_away(
+            report, latest_owner_location(conn), dt.datetime.now(dt.timezone.utc), movement_cfg
+        )
+        if away_distance is not None:
+            record_alert(
+                conn,
+                DbAlert(
+                    airtag_id=airtag.id,
+                    reason="moved_without_owner",
+                    distance_meters=away_distance,
+                    report_id=report.id,
+                ),
+            )
+            away_message = (
+                f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt "
+                f"(Report {report.timestamp.isoformat()})."
+            )
+            notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)

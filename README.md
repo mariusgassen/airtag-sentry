@@ -166,11 +166,52 @@ scheduler and dashboard afterwards.
 ### CLI reference
 
 ```
-python -m airtag_sentry login   # interactive Apple ID login + 2FA, persists the session
-python -m airtag_sentry poll    # run a single poll immediately and exit
-python -m airtag_sentry run     # run the scheduler forever (used by the `app` service)
-python -m airtag_sentry serve   # run the dashboard (used by the `dashboard` service)
+python -m airtag_sentry login         # interactive Apple ID login + 2FA, persists the session
+python -m airtag_sentry login-owner   # optional: same, for owner device tracking - see below
+python -m airtag_sentry poll          # run a single poll immediately and exit
+python -m airtag_sentry run           # run the scheduler forever (used by the `app` service)
+python -m airtag_sentry serve         # run the dashboard (used by the `dashboard` service)
 ```
+
+## Owner device tracking (optional): "moved without you" alerts
+
+Ordinary movement alerts only look at the AirTag's own history - they can't
+tell "you rode your bike to the store" apart from "someone took it while you
+were at work." Doing that needs a second signal: where *you* were when the
+tag moved.
+
+`FindMy.py`'s AirTag lookups (above) use Apple's offline-finding/crowd-sourced
+network, which mostly only produces reports for a device that's off, dead, or
+in airplane mode - not useful for tracking a phone that's normally on and
+connected. Instead, this feature uses Apple's separate, classic **Find My
+iPhone web service** (the same one behind `icloud.com/find`) via the
+[`pyicloud`](https://github.com/picklepete/pyicloud) library, which gives a
+near-real-time location for your own signed-in devices. This is a second,
+independent Apple session from the AirTag one above - its own login, its own
+2FA, its own persisted session - and it's entirely optional.
+
+To enable it:
+
+1. Generate an **app-specific password** for your Apple ID at
+   [appleid.apple.com](https://appleid.apple.com) -> Sign-In and Security ->
+   App-Specific Passwords. Use this, not your real Apple ID password - it can
+   be revoked independently if you ever need to.
+2. Set `APPLE_OWNER_ID` and `APPLE_OWNER_PASSWORD` in `.env`.
+3. Run the login step once (same TTY/2FA constraint as `login`):
+   ```bash
+   docker compose run --rm app python -m airtag_sentry login-owner
+   ```
+   This persists a trusted session to `APPLE_OWNER_SESSION_PATH` (default
+   `data/pyicloud_session`, inside the same `app_data` volume as
+   `APPLE_STORE_PATH`) - re-authentication is only needed roughly every two
+   months, per `pyicloud`'s session lifetime, not on every poll.
+
+Once configured, every poll also records your device's current location and,
+when a normal movement alert fires *and* the tag's new position is far from
+your last-known location, additionally fires a `moved_without_owner` alert -
+see [Movement detection](#movement-detection) for the two tunable settings
+this adds. Leaving `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` unset disables the
+feature entirely; everything else works exactly as without it.
 
 ## Notifications
 
@@ -280,6 +321,15 @@ Settings panel:
 The very first poll backfills ~7 days of history; alerts for that backfill
 are suppressed unless you turn on "Alarm beim ersten Abruf" in Settings.
 
+If [owner device tracking](#owner-device-tracking-optional-moved-without-you-alerts)
+is configured, either of the above alerts also triggers a check for a third,
+additional alert - it never replaces the other two:
+- **`moved_without_owner`**: one of the alerts above just fired, *and* the
+  tag's new position is more than the away-distance threshold (default
+  150 m) from your device's last-known location. If that location reading
+  is older than the max-age setting (default 60 min), this check is skipped
+  entirely for that alert rather than guessing off stale data.
+
 ## Database migrations
 
 Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/)
@@ -340,3 +390,7 @@ npm run build   # production build - writes straight into
   the database, then re-enter each AirTag and its key via the dashboard.
 - If Apple changes the Find My protocol, `FindMy.py` (and therefore this app)
   can break without warning — keep an eye on its upstream repo.
+- Owner device tracking (optional) uses `pyicloud`, which talks to an
+  unofficial, reverse-engineered Apple API - same "can break without
+  warning" caveat as `FindMy.py` above. It's entirely opt-in; leaving
+  `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` unset means it never runs.

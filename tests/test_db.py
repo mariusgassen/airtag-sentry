@@ -6,6 +6,7 @@ import pytest
 
 from airtag_sentry.db import (
     AppSettings,
+    OwnerLocation,
     Report,
     StoredKey,
     create_airtag,
@@ -15,8 +16,10 @@ from airtag_sentry.db import (
     get_conn,
     get_settings,
     insert_reports,
+    latest_owner_location,
     list_airtags,
     list_keyed_airtag_ids,
+    record_owner_location,
     rename_airtag,
     set_airtag_key,
     update_settings,
@@ -36,8 +39,8 @@ def conn():
             upgrade_to_head()
             with connection.cursor() as cur:
                 cur.execute(
-                    "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys "
-                    "RESTART IDENTITY CASCADE"
+                    "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
+                    "owner_locations RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
                 # reset it to defaults in place rather than truncating it away.
@@ -48,7 +51,9 @@ def conn():
                         movement_distance_threshold_meters = 100,
                         movement_stillstand_hours = 24,
                         movement_stillstand_movement_meters = 15,
-                        movement_alert_on_backfill = false
+                        movement_alert_on_backfill = false,
+                        movement_away_distance_meters = 150,
+                        owner_location_max_age_minutes = 60
                     WHERE id = 1
                     """
                 )
@@ -87,6 +92,7 @@ def test_schema_creates_tables(conn):
         "push_subscriptions",
         "airtag_keys",
         "settings",
+        "owner_locations",
         "alembic_version",
     } <= tables
 
@@ -200,6 +206,8 @@ def test_get_settings_returns_seeded_defaults(conn):
         movement_stillstand_hours=24,
         movement_stillstand_movement_meters=15,
         movement_alert_on_backfill=False,
+        movement_away_distance_meters=150,
+        owner_location_max_age_minutes=60,
     )
 
 
@@ -212,10 +220,43 @@ def test_update_settings_round_trips(conn):
             movement_stillstand_hours=12,
             movement_stillstand_movement_meters=5,
             movement_alert_on_backfill=True,
+            movement_away_distance_meters=250,
+            owner_location_max_age_minutes=30,
         ),
     )
     assert updated.polling_interval_minutes == 30
+    assert updated.movement_away_distance_meters == 250
     assert get_settings(conn) == updated
+
+
+def test_owner_location_record_and_latest_round_trip(conn):
+    assert latest_owner_location(conn) is None
+
+    first = record_owner_location(
+        conn,
+        OwnerLocation(
+            id=None,
+            recorded_at=dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc),
+            lat=52.5,
+            lon=13.4,
+            horizontal_accuracy=10.0,
+        ),
+    )
+    assert first.id is not None
+    assert latest_owner_location(conn) == first
+
+    # A later reading becomes the new "latest" one.
+    second = record_owner_location(
+        conn,
+        OwnerLocation(
+            id=None,
+            recorded_at=dt.datetime(2026, 1, 1, 10, 15, tzinfo=dt.timezone.utc),
+            lat=52.51,
+            lon=13.41,
+            horizontal_accuracy=8.0,
+        ),
+    )
+    assert latest_owner_location(conn) == second
 
 
 def test_settings_table_stays_single_row(conn):

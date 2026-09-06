@@ -57,12 +57,23 @@ class PushSubscription:
 
 
 @dataclasses.dataclass(frozen=True)
+class OwnerLocation:
+    id: int | None
+    recorded_at: dt.datetime
+    lat: float
+    lon: float
+    horizontal_accuracy: float | None
+
+
+@dataclasses.dataclass(frozen=True)
 class AppSettings:
     polling_interval_minutes: int
     movement_distance_threshold_meters: float
     movement_stillstand_hours: float
     movement_stillstand_movement_meters: float
     movement_alert_on_backfill: bool
+    movement_away_distance_meters: float
+    owner_location_max_age_minutes: float
 
 
 @contextmanager
@@ -264,6 +275,8 @@ _SETTINGS_COLUMNS = (
     "movement_stillstand_hours",
     "movement_stillstand_movement_meters",
     "movement_alert_on_backfill",
+    "movement_away_distance_meters",
+    "owner_location_max_age_minutes",
 )
 
 
@@ -284,6 +297,8 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 movement_stillstand_hours = %s,
                 movement_stillstand_movement_meters = %s,
                 movement_alert_on_backfill = %s,
+                movement_away_distance_meters = %s,
+                owner_location_max_age_minutes = %s,
                 updated_at = now()
             WHERE id = 1
             """,
@@ -293,7 +308,34 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.movement_stillstand_hours,
                 settings.movement_stillstand_movement_meters,
                 settings.movement_alert_on_backfill,
+                settings.movement_away_distance_meters,
+                settings.owner_location_max_age_minutes,
             ),
         )
     conn.commit()
     return settings
+
+
+def record_owner_location(conn: psycopg.Connection, location: OwnerLocation) -> OwnerLocation:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO owner_locations (recorded_at, lat, lon, horizontal_accuracy)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, recorded_at, lat, lon, horizontal_accuracy
+            """,
+            (location.recorded_at, location.lat, location.lon, location.horizontal_accuracy),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerLocation(*row)
+
+
+def latest_owner_location(conn: psycopg.Connection) -> OwnerLocation | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, recorded_at, lat, lon, horizontal_accuracy FROM owner_locations "
+            "ORDER BY recorded_at DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        return OwnerLocation(*row) if row else None

@@ -16,6 +16,7 @@ dependencies = [
     "cryptography>=42",
     "alembic>=1.13",
     "sqlalchemy>=2.0",
+    "pyicloud>=1.0",
 ]
 
 [project.optional-dependencies]

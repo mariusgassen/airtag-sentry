@@ -7,6 +7,7 @@ import logging
 
 from airtag_sentry.auth import interactive_login
 from airtag_sentry.config import load_config
+from airtag_sentry.owner_tracking import interactive_owner_login
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -18,6 +19,14 @@ def main(argv: list[str] | None = None) -> int:
         "login",
         help="Interactively log in to Apple ID and persist the session (needs a TTY and a live 2FA code).",
     )
+    sub.add_parser(
+        "login-owner",
+        help=(
+            "Interactively log in to the owner-tracking Apple ID and persist a trusted "
+            "session (needs APPLE_OWNER_ID/APPLE_OWNER_PASSWORD set, a TTY, and a live "
+            "2FA code). Optional - only needed to enable 'moved without you' alerts."
+        ),
+    )
     sub.add_parser("poll", help="Run a single poll immediately and exit.")
     sub.add_parser("run", help="Run the scheduler forever (polling interval set in the dashboard's Settings panel).")
     sub.add_parser("serve", help="Run the FastAPI dashboard.")
@@ -27,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "login":
         interactive_login(cfg)
+    elif args.command == "login-owner":
+        interactive_owner_login(cfg)
     elif args.command == "poll":
         from airtag_sentry.migrate import upgrade_to_head
         from airtag_sentry.tracker import poll_once

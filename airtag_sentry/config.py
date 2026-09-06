@@ -24,9 +24,17 @@ class AnisetteConfig:
 
 
 @dataclasses.dataclass
+class OwnerTrackingConfig:
+    apple_id: str
+    password: str
+    session_dir: str
+
+
+@dataclasses.dataclass
 class AppleConfig:
     store_path: str
     anisette: AnisetteConfig
+    owner: OwnerTrackingConfig | None
 
 
 @dataclasses.dataclass
@@ -122,6 +130,18 @@ def database_url_from_env() -> str:
 
 
 def load_config() -> Config:
+    owner_id = _env("APPLE_OWNER_ID")
+    owner_password = _env("APPLE_OWNER_PASSWORD")
+    owner = (
+        OwnerTrackingConfig(
+            apple_id=owner_id,
+            password=owner_password,
+            session_dir=_env_str("APPLE_OWNER_SESSION_PATH", "data/pyicloud_session"),
+        )
+        if owner_id and owner_password
+        else None
+    )
+
     apple = AppleConfig(
         store_path=_env_str("APPLE_STORE_PATH", "data/account.json"),
         anisette=AnisetteConfig(
@@ -129,6 +149,7 @@ def load_config() -> Config:
             libs_path=_env_str("ANISETTE_LIBS_PATH", "data/ani_libs.bin"),
             remote_url=_env("ANISETTE_REMOTE_URL"),
         ),
+        owner=owner,
     )
 
     web = WebConfig(host=_env_str("WEB_HOST", "0.0.0.0"), port=_env_int("WEB_PORT", 8000))
