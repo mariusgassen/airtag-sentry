@@ -896,3 +896,66 @@ ran and tried `from pyicloud import PyiCloudService`.
   servers (same sandbox limitation as v12) - but the specific reported
   failure (import-time `ModuleNotFoundError`) is fully reproduced and fixed
   independent of reaching Apple's servers at all.
+
+## v13: Top safe-area title bar (replaces dead decorative panel)
+
+Trigger: a follow-up round on v10's fix, done in a separate session and not
+previously logged here. Real-device screenshots showed the fix's necessary
+trade-off - switching `apple-mobile-web-app-status-bar-style` from
+`black-translucent` to `black`/`default` to get the correct full-height
+render surface (v10's actual bug) also means the status bar can no longer
+be translucent, so the map can't bleed through it the way it used to. Two
+follow-up attempts at softening that - a decorative "glass" panel under the
+status bar (invisible there, since iOS paints an opaque bar on top
+regardless of what the page draws), then a gradient fade at the map's top
+edge - were both real-device-tested and rejected ("looks bad"/"weird").
+
+Root cause of *why* neither worked: `apple-mobile-web-app-status-bar-style`
+only has 3 values, and they split into two mutually exclusive behaviors -
+either the status bar is translucent (but the render surface is buggy on
+affected iOS versions, which is the v10 bug itself) or the render surface
+is correct (but the status bar is opaque, no exceptions). There's no
+in-between; see the new "Hard constraint" section in `CLAUDE.md` for the
+full explanation, added specifically so this isn't relitigated.
+
+Given that, decided to stop trying to fake translucency and lean into a
+real title bar instead - the same pattern almost every non-immersive iOS
+app already uses instead of edge-to-edge content.
+
+- [x] `App.tsx`: replaced the dead decorative panel with a real title bar
+      positioned at `top: env(safe-area-inset-top)` (right where the
+      opaque status bar's reserved strip ends, so it's actually visible -
+      confirmed by the fact that the *reverted* gradient fade, positioned
+      identically, was clearly seen and disliked). Shows the selected
+      AirTag's name, falling back to "AirTags" - reusing the same fallback
+      already computed for `document.title`. Deliberately generic slot,
+      not just today's content, so future per-AirTag meta (battery,
+      last-seen, an alert badge) has an obvious place to go.
+- [x] `index.css`: new `--header-h: 44px` var (same unconditional-in-`:root`-
+      but-mobile-only-consumed pattern as the existing `--tabbar-h`). Also
+      fixed a real regression the new title bar would otherwise have
+      caused: `.leaflet-top`'s existing `top: env(safe-area-inset-top)`
+      rule (from an earlier fix, pushing the map's zoom control down below
+      the status bar) now collides with the title bar sitting at that same
+      position - added a mobile-only override pushing the zoom control down
+      by `--header-h` as well, so it clears the title bar instead of
+      rendering underneath it.
+- [x] `CLAUDE.md`: new "Hard constraint: iOS status bar can't be both
+      correctly-sized and translucent" section, so a future session doesn't
+      re-attempt the same two rejected approaches from scratch.
+
+## Review (v13)
+- Three files touched (`App.tsx`, `index.css`, `CLAUDE.md`), no
+  backend/dependency changes.
+- Verified: `npx tsc -b && npx vite build` clean; `npx oxlint` shows only
+  the two pre-existing `set-state-in-effect` warnings (unchanged). Removed
+  a leftover `aria-hidden="true"` from the old decorative panel's div now
+  that it holds real, meaningful text (the AirTag name) - would have hidden
+  it from screen readers otherwise.
+- Not verified in this sandbox (no real iOS device, and this sandbox's
+  Chromium doesn't reproduce genuine WebKit standalone-PWA status-bar
+  rendering - the same limitation noted in v10's review): whether the
+  title bar visually reads as intentional rather than as its own new "bar"
+  - that judgment call is exactly why the two previous attempts needed
+  real-device feedback to reject in the first place, and this one should
+  get the same scrutiny before being considered settled.

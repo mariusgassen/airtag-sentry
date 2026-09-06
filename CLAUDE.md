@@ -24,6 +24,36 @@ When a future feature needs setup or an ongoing user action:
   become a UI flow instead rather than assuming CLI is fine because some
   older code once did it that way.
 
+## Hard constraint: iOS status bar can't be both correctly-sized and translucent
+
+`frontend/index.html`'s `apple-mobile-web-app-status-bar-style` has exactly
+3 values, and on the installed iOS home-screen PWA they split into two
+mutually exclusive behaviors - don't spend time trying to get both, this
+has already been tried and confirmed impossible:
+
+- `black-translucent` lets the map show through the status bar, but
+  triggers a real WebKit bug on affected iOS versions: the WebView's
+  rendered height comes back short by exactly the status-bar height,
+  anchored at the top, leaving a strip of physically unreachable OS-black
+  at the very *bottom* of the screen (confirmed via real-device screenshots
+  here, and independently by Kegelkasse, a sister project, hitting the
+  identical bug). No CSS/JS can fill it - the render surface itself is
+  short, not just mispositioned content.
+- `black`/`default` fix that (correct full-height render surface, theme-
+  matched light/dark in `theme.ts`), but iOS then reserves the top strip
+  for its own opaque status bar no matter what the page draws there.
+
+Three separate attempts at a middle ground (a decorative "glass" panel
+under the status bar, a gradient fade at the map's top edge, the commonly-
+cited `min-height: calc(100% + safe-area-inset-top)` CSS trick) all
+confirmed the constraint rather than working around it. Current approach:
+keep `black`/`default`, and lean into the reserved strip with a real title
+bar (`App.tsx`, `--header-h` in `index.css`) instead of trying to fake
+translucency. That title bar's content is deliberately generic - currently
+just the selected AirTag's name, falling back to "AirTags" - so future
+per-AirTag meta (battery level, last-seen time, an alert badge, etc.) has
+an obvious place to go without a layout change.
+
 ## Project shape
 
 - `airtag_sentry/` — Python backend: `tracker.py`/`scheduler.py` (the `app`
