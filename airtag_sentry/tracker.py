@@ -60,16 +60,17 @@ def _load_key(cfg: Config, conn, airtag_id: str):
 def _update_owner_location(cfg: Config, conn) -> None:
     """Best-effort refresh of the owner's device location. Never allowed to break
     AirTag polling - a failure here just means this poll's away-correlation falls
-    back to whatever was recorded last time (or skips it, if nothing ever was)."""
-    if cfg.apple.owner is None:
-        return
+    back to whatever was recorded last time (or skips it, if nothing ever was).
+    fetch_owner_location() itself returns None immediately if owner tracking was
+    never connected via the dashboard, so no separate "is it configured" check
+    is needed here."""
     try:
-        location = fetch_owner_location(cfg)
+        location = fetch_owner_location(cfg, conn)
     except Exception:
         logger.exception("Failed to fetch owner device location this poll.")
         return
     if location is None:
-        logger.info("Owner tracking configured but no device location returned this poll.")
+        logger.info("No owner device location available this poll.")
         return
     record_owner_location(conn, location)
 

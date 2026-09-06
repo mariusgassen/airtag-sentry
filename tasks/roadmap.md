@@ -81,7 +81,7 @@ which likely encodes battery state (needs confirming against the library/
 protocol). If so: surface it in the dashboard and optionally alert on low
 battery, so a dying AirTag doesn't just silently stop reporting.
 
-## 10. Move Apple login flows into the dashboard UI
+## 10. Move Apple login flows into the dashboard UI — done
 
 Per `CLAUDE.md`'s UI-first constraint: `python -m airtag_sentry login` and
 `login-owner` are currently CLI-only interactive scripts
@@ -96,8 +96,9 @@ question is where the in-progress (password-submitted, 2FA-pending)
 `AppleAccount`/`PyiCloudService` object lives between the two requests -
 this app is single-user, so an in-process singleton keyed by nothing more
 than "the one active login attempt" is enough, no session-store needed.
-Once this ships, the `login`/`login-owner` CLI subcommands can be removed
-entirely rather than kept as a redundant second path.
+Status: **done** — see `tasks/todo.md` v12. The `login`/`login-owner` CLI
+subcommands were removed entirely rather than kept as a redundant second
+path.
 
 ## 11. CSV/GPX export
 

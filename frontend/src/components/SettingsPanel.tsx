@@ -1,10 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppSettings } from '../api'
-import { getSettings, updateSettings } from '../api'
+import {
+  appleDisconnect,
+  appleLogin,
+  appleSelectTwoFactorMethod,
+  appleSubmitTwoFactorCode,
+  getAppleStatus,
+  getOwnerAppleStatus,
+  getSettings,
+  ownerAppleDisconnect,
+  ownerAppleLogin,
+  ownerAppleSubmitTwoFactorCode,
+  updateSettings,
+} from '../api'
 import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
 import { LogoutIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
+import type { AppleConnectAdapter } from './AppleConnectPanel'
+import { AppleConnectPanel } from './AppleConnectPanel'
+
+const AIRTAG_APPLE_ADAPTER: AppleConnectAdapter = {
+  getStatus: getAppleStatus,
+  login: appleLogin,
+  selectMethod: appleSelectTwoFactorMethod,
+  submitCode: appleSubmitTwoFactorCode,
+  disconnect: appleDisconnect,
+}
+
+const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
+  getStatus: getOwnerAppleStatus,
+  login: ownerAppleLogin,
+  submitCode: ownerAppleSubmitTwoFactorCode,
+  disconnect: ownerAppleDisconnect,
+}
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -175,6 +204,14 @@ export function SettingsPanel() {
           <Section>
             <ThemeField />
           </Section>
+        </div>
+
+        <div className="px-3">
+          <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+            Apple-Konten
+          </p>
+          <AppleConnectPanel title="AirTag-Tracking" adapter={AIRTAG_APPLE_ADAPTER} />
+          <AppleConnectPanel title="Eigener Standort (optional)" adapter={OWNER_APPLE_ADAPTER} />
         </div>
 
         {!settings ? (

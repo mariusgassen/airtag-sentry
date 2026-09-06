@@ -54,11 +54,6 @@ services:
       # this compose topology, not something to set in .env.
       ANISETTE_MODE: remote
       ANISETTE_REMOTE_URL: http://anisette:6969
-      # Owner device tracking (optional, "moved without you" alerts). Only
-      # this service actually reads them; declared on both like every other
-      # secret above so Coolify's UI lists them consistently.
-      APPLE_OWNER_ID: ${APPLE_OWNER_ID}
-      APPLE_OWNER_PASSWORD: ${APPLE_OWNER_PASSWORD}
     volumes:
       - app_data:/app/data
 
@@ -97,10 +92,14 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
-      APPLE_OWNER_ID: ${APPLE_OWNER_ID}
-      APPLE_OWNER_PASSWORD: ${APPLE_OWNER_PASSWORD}
     volumes:
-      - app_data:/app/data:ro
+      # Read-write (not :ro): the Settings panel's Apple-ID login flow runs in
+      # this service and writes/deletes the AirTag session file here
+      # (APPLE_STORE_PATH) and the owner-tracking session cache
+      # (APPLE_OWNER_SESSION_PATH) - previously only the `app` service's CLI
+      # login command wrote to this volume, so it was safe to mount read-only
+      # here; that's no longer true now that login is a dashboard UI action.
+      - app_data:/app/data
 
 volumes:
   postgres_data:

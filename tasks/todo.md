@@ -762,3 +762,102 @@ also produced.
   This is a reverse-engineered, unofficial Apple API; if it breaks, it
   breaks the owner-tracking feature only - AirTag tracking is on a
   completely separate Apple session/library and is unaffected either way.
+
+## v12: move Apple login (AirTag + owner tracking) into the dashboard UI
+Trigger: "Why do I need to do the login from the CLI, I want to do this from
+the UI. Everything should be done from the UI if possible" - `login`/
+`login-owner` were the one remaining CLI-only setup step, added in v11 by
+mirroring an existing pattern without questioning it (see
+`tasks/lessons.md`). New `CLAUDE.md` now states this as a hard constraint.
+Implementing it surfaced a real design fix, not just a UI wrapper: unlike
+`FindMy.py`'s `AppleAccount` (which persists a resumable session without
+the password via `to_json()`/`from_json()`), `pyicloud` has no
+"resume-from-token-alone" mode - the owner-tracking password must stay
+available to every poll indefinitely, so storing it in plaintext `.env`
+(what v11 shipped) was the wrong call. Fixed here by giving it the same
+treatment AirTag keys already got in v3: encrypted in Postgres, entered via
+the dashboard.
+
+- [x] `airtag_sentry/auth.py`: `interactive_login()` replaced with a
+      stateful wizard - `start_login(cfg, email, password)` (persists
+      immediately if no 2FA, else returns available 2FA methods),
+      `request_2fa_code(method_index)`, `submit_2fa_code(cfg, code)`,
+      `is_connected(cfg)`, `disconnect(cfg)`. The in-progress `AppleAccount`
+      is held in a module-level variable between requests - single-user app,
+      one login attempt at a time, no session-store needed.
+      `restore_account()` (used by `tracker.py`) is unchanged.
+- [x] `airtag_sentry/owner_tracking.py`: `interactive_owner_login()`
+      replaced the same way - `start_owner_login(cfg, conn, apple_id,
+      password)`, `submit_owner_2fa_code(cfg, conn, code)`, `is_connected(conn)`,
+      `disconnect(conn)`. Successful login now encrypts the password
+      (`keystore.encrypt`, same as AirTag keys) and stores it in a new
+      `owner_apple_credentials` table instead of `.env`.
+      `fetch_owner_location(cfg, conn)` (gained `conn`) reads+decrypts from
+      there each poll instead of `cfg.apple.owner`.
+- [x] New Alembic migration: `owner_apple_credentials` table (single row,
+      same shape as `airtag_keys` - row absence = "not connected").
+- [x] `config.py`: `OwnerTrackingConfig`/`AppleConfig.owner` removed
+      entirely along with the `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` env
+      reads - another breaking change, no back-compat shim, consistent with
+      this project's established pattern (and low-cost: owner tracking only
+      shipped last PR, unlikely to be configured anywhere real yet).
+      `AppleConfig.owner_session_dir` (env `APPLE_OWNER_SESSION_PATH`)
+      replaces it as a plain infra path, same treatment as
+      `APPLE_STORE_PATH`.
+- [x] `tracker.py`: `_update_owner_location` simplified - no more
+      `cfg.apple.owner is None` guard, since `fetch_owner_location` now
+      checks the DB itself.
+- [x] `cli.py`: `login`/`login-owner` subcommands removed entirely (not
+      deprecated-but-kept) - only `poll`/`run`/`serve` remain, which are
+      container entrypoints, not user setup steps.
+- [x] `web/app.py`: new `/api/apple/status`, `/api/apple/login`,
+      `/api/apple/2fa/select`, `/api/apple/2fa/submit`, `DELETE /api/apple`,
+      and the owner-tracking equivalents under `/api/apple/owner/*` - all
+      behind the existing `AuthMiddleware` like every other `/api/*` route.
+- [x] Frontend: `AppleConnectPanel.tsx` (new) - a small reusable wizard
+      (credentials → optional 2FA-method-select → code → connected),
+      parameterized by an adapter so the same component drives both
+      sessions (owner tracking's pyicloud login never offers a method
+      choice, AirTag's `FindMy.py` login sometimes does). Wired into
+      `SettingsPanel.tsx` as a new "Apple-Konten" section.
+- [x] `docker-compose.yml`: removed `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD`
+      from both services. Also fixed a real bug this change would otherwise
+      have caused: the `dashboard` service's `app_data` volume was mounted
+      `:ro` (fine when only the `app` service's CLI ever wrote
+      `account.json`/the pyicloud session cache) - now that login runs as a
+      dashboard HTTP action, `dashboard` needs read-write access too.
+- [x] README/`.env.example`/`CLAUDE.md` updated throughout to describe the
+      UI flow instead of the CLI steps; roadmap item 10 marked done.
+- [x] Tests: `test_db.py` round-trip for the new credentials table;
+      `test_auth.py`/`test_owner_tracking.py` (new) cover the pending-login
+      guard clauses and `auth.py`'s file-based `is_connected`/`disconnect`
+      - real Apple network calls aren't exercisable here, consistent with
+      this project's existing precedent for Apple-login-flow coverage.
+
+## Review (v12)
+- Breaking change: `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` are gone: anyone
+  who somehow already set them (unlikely - v11 merged one PR ago) needs to
+  reconnect via Settings instead. The AirTag-tracking session's env var
+  (`APPLE_STORE_PATH`) is unchanged in shape, just no longer written by a
+  CLI command.
+- Verified: full `pytest` (57 passed) against a real local Postgres,
+  including the new migration applying cleanly with the expected columns.
+  Manually drove every new route through a real `TestClient` (actual GitHub
+  OAuth login flow, not a stubbed cookie) with `auth.start_login`/
+  `auth.request_2fa_code`/`auth.submit_2fa_code`/`auth.disconnect` and the
+  owner-tracking equivalents monkeypatched at the call site (real Apple
+  servers aren't reachable from here): confirmed the full wizard sequence
+  for both sessions (status → login → 2FA select → 2FA submit → status
+  flips to connected → disconnect → status flips back), that the stored
+  owner password is encrypted (not plaintext) in Postgres, and that a
+  failure surfaces as a 400 with a readable message. `docker compose
+  config` (dummy, uncommitted `.env`, no `APPLE_OWNER_*` vars at all now)
+  parses cleanly and confirms the `dashboard` service's `app_data` volume
+  is read-write (the `:ro` bug described above). Frontend:
+  `tsc -b && vite build` clean; `oxlint` shows only the two pre-existing
+  warnings - the new effect's `exhaustive-deps` warning was fixed properly
+  (adding the actually-stable `adapter` dependency), not suppressed.
+- Not verified in this sandbox (no real Apple ID/2FA device): the actual
+  `AppleConnectPanel` UI/UX in a real browser, and the true Apple
+  login/2FA round-trip for either session - same category of "not verified
+  here" as the CLI flows it replaces already were.

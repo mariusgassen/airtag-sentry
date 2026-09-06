@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from airtag_sentry import keystore
+from airtag_sentry import auth, keystore, owner_tracking
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     AppSettings,
@@ -199,6 +199,24 @@ class SettingsIn(BaseModel):
     movement_alert_on_backfill: bool
     movement_away_distance_meters: float = Field(gt=0)
     owner_location_max_age_minutes: float = Field(gt=0)
+
+
+class AppleLoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class AppleTwoFactorSelectIn(BaseModel):
+    method_index: int
+
+
+class AppleTwoFactorCodeIn(BaseModel):
+    code: str
+
+
+class OwnerLoginIn(BaseModel):
+    apple_id: str
+    password: str
 
 
 def _slugify(name: str) -> str:
@@ -623,6 +641,70 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "lon": location.lon,
             "horizontal_accuracy": location.horizontal_accuracy,
         }
+
+    @app.get("/api/apple/status")
+    def apple_status():
+        """Whether the AirTag-tracking Apple session (see auth.py) is connected."""
+        return {"connected": auth.is_connected(cfg)}
+
+    @app.post("/api/apple/login")
+    def apple_login(body: AppleLoginIn):
+        try:
+            result = auth.start_login(cfg, body.email, body.password)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
+        return dataclasses.asdict(result)
+
+    @app.post("/api/apple/2fa/select")
+    def apple_2fa_select(body: AppleTwoFactorSelectIn):
+        try:
+            auth.request_2fa_code(body.method_index)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/apple/2fa/submit")
+    def apple_2fa_submit(body: AppleTwoFactorCodeIn):
+        try:
+            auth.submit_2fa_code(cfg, body.code)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True}
+
+    @app.delete("/api/apple")
+    def apple_disconnect():
+        auth.disconnect(cfg)
+        return {"ok": True}
+
+    @app.get("/api/apple/owner/status")
+    def owner_apple_status():
+        """Whether the owner-device-tracking Apple session (see owner_tracking.py) is connected."""
+        with get_conn(cfg.database_url) as conn:
+            return {"connected": owner_tracking.is_connected(conn)}
+
+    @app.post("/api/apple/owner/login")
+    def owner_apple_login(body: OwnerLoginIn):
+        with get_conn(cfg.database_url) as conn:
+            try:
+                result = owner_tracking.start_owner_login(cfg, conn, body.apple_id, body.password)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
+        return result
+
+    @app.post("/api/apple/owner/2fa/submit")
+    def owner_apple_2fa_submit(body: AppleTwoFactorCodeIn):
+        with get_conn(cfg.database_url) as conn:
+            try:
+                owner_tracking.submit_owner_2fa_code(cfg, conn, body.code)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True}
+
+    @app.delete("/api/apple/owner")
+    def owner_apple_disconnect():
+        with get_conn(cfg.database_url) as conn:
+            owner_tracking.disconnect(conn)
+        return {"ok": True}
 
     @app.get("/api/push/vapid-public-key")
     def get_vapid_public_key():
