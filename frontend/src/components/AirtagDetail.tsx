@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, Report, Status } from '../api'
 import { deleteAirtag, deleteAirtagKey, renameAirtag, setAirtagKeyB64, setAirtagKeyJson } from '../api'
-import { formatRelative } from '../format'
+import { formatAlertReason, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { BellIcon, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PencilIcon, TrashIcon } from './icons'
 
@@ -90,7 +90,7 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
           </p>
           {status?.last_alert && (
             <p className="mt-1 text-sm text-[var(--destructive)]">
-              Alarm: {status.last_alert.reason} · {formatRelative(status.last_alert.timestamp)}
+              Alarm: {formatAlertReason(status.last_alert.reason)} · {formatRelative(status.last_alert.timestamp)}
             </p>
           )}
         </div>

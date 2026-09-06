@@ -1,19 +1,28 @@
 import datetime as dt
 
-from airtag_sentry.db import Report
-from airtag_sentry.movement import MovementConfig, evaluate_movement, haversine_distance
+from airtag_sentry.db import OwnerLocation, Report
+from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement, haversine_distance
 
 CFG = MovementConfig(
     distance_threshold_meters=100,
     stillstand_hours=24,
     stillstand_movement_meters=15,
     alert_on_backfill=False,
+    away_distance_threshold_meters=150,
+    owner_location_max_age_minutes=60,
 )
+
+NOW = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
 
 
 def _report(hours_ago: float, lat: float, lon: float) -> Report:
-    ts = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc) - dt.timedelta(hours=hours_ago)
+    ts = NOW - dt.timedelta(hours=hours_ago)
     return Report(id=None, airtag_id="test", timestamp=ts, lat=lat, lon=lon, accuracy=5.0, confidence=2)
+
+
+def _owner_location(minutes_ago: float, lat: float, lon: float) -> OwnerLocation:
+    recorded_at = NOW - dt.timedelta(minutes=minutes_ago)
+    return OwnerLocation(id=None, recorded_at=recorded_at, lat=lat, lon=lon, horizontal_accuracy=5.0)
 
 
 def test_haversine_zero_distance():
@@ -73,3 +82,28 @@ def test_no_stillstand_alert_below_movement_epsilon():
     prior = [_report(48, 52.5, 13.4), _report(30, 52.5, 13.4)]
     new = _report(0, 52.500005, 13.400005)  # sub-epsilon GPS noise
     assert evaluate_movement(new, prior, CFG) is None
+
+
+def test_evaluate_away_none_without_owner_location():
+    new = _report(0, 52.5, 13.4)
+    assert evaluate_away(new, None, NOW, CFG) is None
+
+
+def test_evaluate_away_returns_distance_when_far_and_fresh():
+    new = _report(0, 52.51, 13.4)  # ~1.1km from the owner location below
+    owner = _owner_location(5, 52.5, 13.4)
+    distance = evaluate_away(new, owner, NOW, CFG)
+    assert distance is not None
+    assert distance > CFG.away_distance_threshold_meters
+
+
+def test_evaluate_away_none_when_near_owner():
+    new = _report(0, 52.5, 13.4)
+    owner = _owner_location(5, 52.50005, 13.40005)  # a few meters of GPS noise
+    assert evaluate_away(new, owner, NOW, CFG) is None
+
+
+def test_evaluate_away_none_when_owner_location_stale():
+    new = _report(0, 52.51, 13.4)  # far from the owner location below
+    owner = _owner_location(120, 52.5, 13.4)  # 120 min old, over the 60 min max age
+    assert evaluate_away(new, owner, NOW, CFG) is None

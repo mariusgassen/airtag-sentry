@@ -661,3 +661,104 @@ edge, exposing raw map below the (correctly-sized) tab bar with no glass.
   regardless of viewport quirks) rather than confirmed to match the
   original bug 1:1, since the original couldn't be reproduced here to
   compare against directly.
+
+## v11: "moved without you" alert correlation
+Trigger: asked to refine/extend the roadmap and implement the next feature.
+Compared against Traccar (geofences, trip/stop reports, per-device
+notification rules) and researched the specific gap the user cared about:
+movement alerts only look at an AirTag's own history, not whether it moved
+*while the owner wasn't with it* - the actual signal that distinguishes
+theft from normal use. `FindMy.py`'s AirTag protocol (offline-finding/
+crowd-sourced) mostly only reports a device that's off or dead, so a live
+phone's location needs a different source - see `tasks/roadmap.md` (new
+file, item 1) for the full writeup and the rest of the backlog this session
+also produced.
+
+- [x] New dependency `pyicloud`: a second, independent Apple session (own
+      login, own 2FA, own persisted cookie-based session) purely to fetch
+      the owner's own device location via Apple's classic Find My iPhone
+      web service (`fmipservice` - the one behind icloud.com/find), a
+      different protocol than the AirTag search-party lookups. Entirely
+      optional - unset `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` and nothing
+      about existing behavior changes.
+- [x] `airtag_sentry/owner_tracking.py` (new): `interactive_owner_login()`
+      (CLI-invoked, handles 2FA + `trust_session()`) and
+      `fetch_owner_location()`, mirroring `auth.py`'s shape.
+- [x] `config.py`: `OwnerTrackingConfig`/`AppleConfig.owner`, read from
+      `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD`/`APPLE_OWNER_SESSION_PATH`
+      (same "present together or disabled" pattern as Telegram's two vars).
+- [x] New Alembic migration: `owner_locations` (append-only history table,
+      no dedup needed) + two new `settings` columns
+      (`movement_away_distance_meters` default 150,
+      `owner_location_max_age_minutes` default 60).
+- [x] `db.py`: `OwnerLocation` dataclass, `record_owner_location`/
+      `latest_owner_location`; `AppSettings`/`_SETTINGS_COLUMNS`/
+      `update_settings` extended for the two new columns.
+- [x] `movement.py`: `MovementConfig` gains the two new fields; new pure
+      `evaluate_away()` - only meaningful once a real movement alert has
+      already fired, returns the distance-from-owner if it's stale-free and
+      over threshold, else `None`. Same "no DB access" discipline as the
+      rest of the module.
+- [x] `tracker.py`: `_update_owner_location()` runs once per `poll_once()`
+      (best-effort, never allowed to break AirTag polling - wrapped in
+      try/except); after an existing movement alert fires, `evaluate_away()`
+      runs and - if it returns a distance - records and notifies a *third,
+      additional* `moved_without_owner` alert, never replacing the other two.
+- [x] `cli.py`: new `login-owner` subcommand, parallel to `login`.
+- [x] `web/app.py`: `SettingsIn` gains the two new fields;
+      new `GET /api/owner-location` (null if unconfigured/no reading yet).
+- [x] Frontend: `api.ts` (`AppSettings` fields, `getOwnerLocation`),
+      `SettingsPanel.tsx` (new "Standort-Korrelation" section, same
+      `Field`/`validate()` pattern as the existing movement settings),
+      `format.ts` (`ALERT_REASON_LABELS`/`formatAlertReason` - also fixes
+      `AirtagDetail.tsx` previously printing the raw `distance_threshold`/
+      `stillstand_movement` enum string verbatim, now that a third one
+      would have made that worse).
+- [x] README: new "Owner device tracking (optional)" section (what it does,
+      the `pyicloud`/fmipservice explanation, app-specific-password
+      recommendation, the `login-owner` step), Movement detection section
+      updated for the third alert type, Known Limitations updated.
+      `.env.example`/`docker-compose.yml` updated - the two secrets are
+      declared on both `app`/`dashboard` `environment:` blocks, matching
+      the existing pattern of every other secret in this file being listed
+      on both regardless of which service functionally needs it.
+- [x] `tests/test_movement.py`: `evaluate_away` cases (no owner location,
+      fresh+far, fresh+near, stale+far). `tests/test_db.py`:
+      `record_owner_location`/`latest_owner_location` round-trip, settings
+      tests extended for the two new columns.
+
+## Review (v11)
+- Additive, opt-in feature - unset `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD`
+  and behavior is unchanged from v10. The one breaking-adjacent change is
+  the two new required `SettingsIn`/`AppSettings` fields (existing
+  deployments get them via migration-seeded defaults, matching the pattern
+  every previous settings-column addition in this project has used).
+- No new automated test coverage was added for `/api/settings` or the new
+  `/api/owner-location` route specifically - this repo has never had
+  endpoint-level tests for any authenticated `/api/*` route (only `/health`,
+  whose DB call is stubbed); building that scaffolding just for this
+  feature would be new infrastructure the rest of the suite doesn't use.
+  Instead, matching how v6's settings endpoints were verified: manually
+  exercised via a real `TestClient` driven through the actual GitHub OAuth
+  login flow (not a hand-crafted session cookie) against real Postgres -
+  `GET /api/owner-location` round-trips a seeded row and returns `null`
+  when empty; `GET`/`PUT /api/settings` round-trip the two new fields;
+  `PUT` with `movement_away_distance_meters: 0` correctly 422s.
+- Verified: full `pytest` (51 passed) against a real local Postgres
+  (started for this session) - confirms the migration applies cleanly, the
+  `owner_locations` table and new `settings` columns exist with the right
+  seeded defaults, and `evaluate_away`'s four cases (no owner location,
+  fresh+far, fresh+near, stale+far) behave as designed. `docker compose
+  config` (with a dummy, uncommitted `.env`) parses cleanly and confirms
+  `APPLE_OWNER_ID`/`APPLE_OWNER_PASSWORD` are present in both `app`'s and
+  `dashboard`'s rendered `environment:` blocks. Frontend:
+  `tsc -b && vite build` clean; `oxlint` shows only the two pre-existing
+  `set-state-in-effect` warnings, no new ones.
+- Not verified in this sandbox (no real Apple ID/2FA device, no live
+  fmipservice access): the actual `pyicloud` login/2FA flow end-to-end, a
+  real Find My iPhone location round-trip, and whether `trust_session()`'s
+  ~2-month session lifetime holds up in practice - same category of
+  "not verified here" as the existing AirTag Apple login flow already is.
+  This is a reverse-engineered, unofficial Apple API; if it breaks, it
+  breaks the owner-tracking feature only - AirTag tracking is on a
+  completely separate Apple session/library and is unaffected either way.

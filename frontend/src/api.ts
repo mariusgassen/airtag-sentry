@@ -27,6 +27,15 @@ export interface AppSettings {
   movement_stillstand_hours: number
   movement_stillstand_movement_meters: number
   movement_alert_on_backfill: boolean
+  movement_away_distance_meters: number
+  owner_location_max_age_minutes: number
+}
+
+export interface OwnerLocation {
+  recorded_at: string
+  lat: number
+  lon: number
+  horizontal_accuracy: number | null
 }
 
 export class ApiError extends Error {}
@@ -105,6 +114,10 @@ export async function updateSettings(settings: AppSettings): Promise<AppSettings
   return (
     await apiFetch('/api/settings', { method: 'PUT', body: JSON.stringify(settings) })
   ).json()
+}
+
+export async function getOwnerLocation(): Promise<OwnerLocation | null> {
+  return (await apiFetch('/api/owner-location')).json()
 }
 
 export async function getVapidPublicKey(): Promise<string | null> {

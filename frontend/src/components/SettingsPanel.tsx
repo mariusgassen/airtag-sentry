@@ -76,6 +76,8 @@ type FieldKey =
   | 'movement_distance_threshold_meters'
   | 'movement_stillstand_hours'
   | 'movement_stillstand_movement_meters'
+  | 'movement_away_distance_meters'
+  | 'owner_location_max_age_minutes'
 
 const FIELD_ERROR = 'Muss größer als 0 sein.'
 
@@ -86,6 +88,8 @@ function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
     'movement_distance_threshold_meters',
     'movement_stillstand_hours',
     'movement_stillstand_movement_meters',
+    'movement_away_distance_meters',
+    'owner_location_max_age_minutes',
   ]
   for (const key of numericKeys) {
     const v = settings[key]
@@ -224,6 +228,26 @@ export function SettingsPanel() {
                   className="h-5 w-5 accent-[var(--accent)]"
                 />
               </label>
+            </Section>
+
+            <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+              Standort-Korrelation
+            </p>
+            <Section>
+              <Field
+                label="Abstand für „ohne dich“"
+                suffix="m"
+                value={settings.movement_away_distance_meters}
+                error={errors.movement_away_distance_meters}
+                onChange={(v) => update({ movement_away_distance_meters: v })}
+              />
+              <Field
+                label="Max. Alter deines Standorts"
+                suffix="min"
+                value={settings.owner_location_max_age_minutes}
+                error={errors.owner_location_max_age_minutes}
+                onChange={(v) => update({ owner_location_max_age_minutes: v })}
+              />
             </Section>
           </div>
         )}

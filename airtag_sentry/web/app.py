@@ -39,6 +39,7 @@ from airtag_sentry.db import (
     get_conn,
     get_settings,
     latest_alert,
+    latest_owner_location,
     list_airtags,
     list_keyed_airtag_ids,
     remove_push_subscription,
@@ -196,6 +197,8 @@ class SettingsIn(BaseModel):
     movement_stillstand_hours: float = Field(gt=0)
     movement_stillstand_movement_meters: float = Field(gt=0)
     movement_alert_on_backfill: bool
+    movement_away_distance_meters: float = Field(gt=0)
+    owner_location_max_age_minutes: float = Field(gt=0)
 
 
 def _slugify(name: str) -> str:
@@ -604,6 +607,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             settings = update_settings(conn, AppSettings(**body.model_dump()))
         return dataclasses.asdict(settings)
+
+    @app.get("/api/owner-location")
+    def get_owner_location():
+        """Latest known location of the owner's own device (see owner_tracking.py),
+        used to correlate AirTag movement against - null if the feature isn't
+        configured or no location has been recorded yet."""
+        with get_conn(cfg.database_url) as conn:
+            location = latest_owner_location(conn)
+        if location is None:
+            return None
+        return {
+            "recorded_at": location.recorded_at.isoformat(),
+            "lat": location.lat,
+            "lon": location.lon,
+            "horizontal_accuracy": location.horizontal_accuracy,
+        }
 
     @app.get("/api/push/vapid-public-key")
     def get_vapid_public_key():

@@ -15,3 +15,15 @@ export function formatRelative(iso: string): string {
 export function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
+
+/** Human-readable labels for Alert.reason values from the backend
+ * (airtag_sentry/movement.py / tracker.py). */
+export const ALERT_REASON_LABELS: Record<string, string> = {
+  distance_threshold: 'Bewegung',
+  stillstand_movement: 'Bewegung nach Stillstand',
+  moved_without_owner: 'Bewegung ohne dich',
+}
+
+export function formatAlertReason(reason: string): string {
+  return ALERT_REASON_LABELS[reason] ?? reason
+}

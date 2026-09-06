@@ -54,6 +54,11 @@ services:
       # this compose topology, not something to set in .env.
       ANISETTE_MODE: remote
       ANISETTE_REMOTE_URL: http://anisette:6969
+      # Owner device tracking (optional, "moved without you" alerts). Only
+      # this service actually reads them; declared on both like every other
+      # secret above so Coolify's UI lists them consistently.
+      APPLE_OWNER_ID: ${APPLE_OWNER_ID}
+      APPLE_OWNER_PASSWORD: ${APPLE_OWNER_PASSWORD}
     volumes:
       - app_data:/app/data
 
@@ -92,6 +97,8 @@ services:
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
       VAPID_SUBJECT: ${VAPID_SUBJECT}
+      APPLE_OWNER_ID: ${APPLE_OWNER_ID}
+      APPLE_OWNER_PASSWORD: ${APPLE_OWNER_PASSWORD}
     volumes:
       - app_data:/app/data:ro
 
