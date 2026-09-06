@@ -81,7 +81,25 @@ which likely encodes battery state (needs confirming against the library/
 protocol). If so: surface it in the dashboard and optionally alert on low
 battery, so a dying AirTag doesn't just silently stop reporting.
 
-## 10. CSV/GPX export
+## 10. Move Apple login flows into the dashboard UI
+
+Per `CLAUDE.md`'s UI-first constraint: `python -m airtag_sentry login` and
+`login-owner` are currently CLI-only interactive scripts
+(`input()`/`getpass.getpass()`), not because Apple's login protocol
+requires a terminal, but because that's how they were first built. Both are
+a small multi-step state machine (submit Apple ID + password → if 2FA
+required, pick a method and submit a live code → session persisted) that
+maps cleanly onto a dashboard form: a "Connect Apple ID" panel (Settings or
+AirTags), a password field, then a 2FA code field that appears if
+`requires_2fa`/`LoginState.REQUIRE_2FA` is returned. The main design
+question is where the in-progress (password-submitted, 2FA-pending)
+`AppleAccount`/`PyiCloudService` object lives between the two requests -
+this app is single-user, so an in-process singleton keyed by nothing more
+than "the one active login attempt" is enough, no session-store needed.
+Once this ships, the `login`/`login-owner` CLI subcommands can be removed
+entirely rather than kept as a redundant second path.
+
+## 11. CSV/GPX export
 
 Export an AirTag's location history for a given period — useful when
 reporting a theft to police.
