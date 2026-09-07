@@ -1,10 +1,19 @@
 import { useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, Report, Status } from '../api'
-import { deleteAirtag, deleteAirtagKey, renameAirtag, setAirtagKeyB64, setAirtagKeyJson } from '../api'
+import {
+  deleteAirtag,
+  deleteAirtagKey,
+  renameAirtag,
+  setAirtagAppearance,
+  setAirtagKeyB64,
+  setAirtagKeyJson,
+} from '../api'
+import { airtagColor, PALETTE } from '../airtagColor'
+import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { formatAlertReason, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { BellIcon, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PencilIcon, TrashIcon } from './icons'
+import { AirtagGlyph, BellIcon, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PaletteIcon, PencilIcon, TrashIcon } from './icons'
 
 interface Props {
   airtag: Airtag
@@ -57,6 +66,7 @@ export function Row({
 export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDeleted, pushStatus, onEnablePush }: Props) {
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
 
   async function handleDelete() {
@@ -83,7 +93,7 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         <div className="mb-6 flex flex-col items-center px-4 text-center">
-          <AirtagAvatar airtagId={airtag.id} size={80} className="mb-3" />
+          <AirtagAvatar airtag={airtag} size={80} className="mb-3" />
           <h2 className="text-xl font-semibold">{airtag.name}</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {status?.last_report ? `Zuletzt gesehen ${formatRelative(status.last_report.timestamp)}` : 'Kein Standort verfügbar'}
@@ -126,6 +136,17 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
                 }}
               />
             )}
+          </Section>
+
+          <Section>
+            <Row
+              icon={<PaletteIcon className="h-5 w-5" />}
+              label="Symbol & Farbe"
+              trailing={<ChevronRightIcon className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${appearanceOpen ? 'rotate-90' : ''}`} />}
+              onClick={() => setAppearanceOpen((v) => !v)}
+              bordered={false}
+            />
+            {appearanceOpen && <AppearanceForm airtag={airtag} onDone={onChanged} />}
           </Section>
 
           <Section>
@@ -209,6 +230,85 @@ function RenameForm({ airtag, onDone }: { airtag: Airtag; onDone: () => void | P
         >
           Sichern
         </button>
+      </div>
+    </div>
+  )
+}
+
+function AppearanceForm({ airtag, onDone }: { airtag: Airtag; onDone: () => void | Promise<void> }) {
+  const [saving, setSaving] = useState(false)
+  const effectiveColor = airtag.color ?? airtagColor(airtag.id)
+
+  async function pick(next: { icon?: string | null; color?: string | null }) {
+    const icon = next.icon !== undefined ? next.icon : airtag.icon
+    const color = next.color !== undefined ? next.color : airtag.color
+    setSaving(true)
+    try {
+      await setAirtagAppearance(airtag.id, icon, color)
+      await onDone()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const ringClass = 'ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]'
+
+  return (
+    <div className="border-t border-[var(--divider)] p-3">
+      <p className="mb-2 text-[0.72rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">Symbol</p>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => pick({ icon: null })}
+          disabled={saving}
+          aria-label="Automatisch"
+          title="Automatisch"
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-60 ${airtag.icon === null ? ringClass : ''}`}
+          style={{ backgroundColor: effectiveColor }}
+        >
+          <AirtagGlyph className="h-6 w-6" />
+        </button>
+        {DEVICE_ICON_NAMES.map((name) => {
+          const Glyph = DEVICE_ICON_COMPONENTS[name]
+          return (
+            <button
+              key={name}
+              type="button"
+              onClick={() => pick({ icon: name })}
+              disabled={saving}
+              aria-label={DEVICE_ICON_LABELS[name]}
+              title={DEVICE_ICON_LABELS[name]}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-60 ${airtag.icon === name ? ringClass : ''}`}
+              style={{ backgroundColor: effectiveColor }}
+            >
+              <Glyph className="h-6 w-6" />
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="mb-2 text-[0.72rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">Farbe</p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => pick({ color: null })}
+          disabled={saving}
+          aria-label="Automatisch"
+          title="Automatisch"
+          className={`h-8 w-8 shrink-0 rounded-full border-2 border-dashed border-[var(--text-secondary)] disabled:opacity-60 ${airtag.color === null ? ringClass : ''}`}
+        />
+        {PALETTE.map((hex) => (
+          <button
+            key={hex}
+            type="button"
+            onClick={() => pick({ color: hex })}
+            disabled={saving}
+            aria-label={hex}
+            title={hex}
+            className={`h-8 w-8 shrink-0 rounded-full disabled:opacity-60 ${airtag.color === hex ? ringClass : ''}`}
+            style={{ backgroundColor: hex }}
+          />
+        ))}
       </div>
     </div>
   )
