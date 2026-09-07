@@ -81,23 +81,28 @@ def evaluate_movement(
 
 def evaluate_away(
     new_report: Report,
-    owner_location: OwnerLocation | None,
+    owner_locations: list[OwnerLocation],
     now: dt.datetime,
     cfg: MovementConfig,
 ) -> float | None:
-    """Distance from the owner's last-known phone location if `new_report`
+    """Distance from the closest tracked owner device if `new_report`
     qualifies as "moved without the owner nearby", else None.
 
     Only meaningful to call once a real movement alert has already fired for
     `new_report` - this doesn't independently decide whether the tag moved,
-    only whether the owner was with it when it did.
+    only whether the owner was with it when it did. Multiple devices are an
+    OR: if any tracked device is near, the owner was with the tag; only the
+    closest device's distance is reported when none are.
     """
-    if owner_location is None:
-        return None
-    if now - owner_location.recorded_at > dt.timedelta(minutes=cfg.owner_location_max_age_minutes):
-        return None  # stale owner fix - don't classify off data that's too old to trust
+    fresh = [
+        loc
+        for loc in owner_locations
+        if now - loc.recorded_at <= dt.timedelta(minutes=cfg.owner_location_max_age_minutes)
+    ]
+    if not fresh:
+        return None  # no trustworthy data - don't classify off data that's missing or too old
 
-    distance = haversine_distance(
-        new_report.lat, new_report.lon, owner_location.lat, owner_location.lon
+    closest = min(
+        haversine_distance(new_report.lat, new_report.lon, loc.lat, loc.lon) for loc in fresh
     )
-    return distance if distance > cfg.away_distance_threshold_meters else None
+    return closest if closest > cfg.away_distance_threshold_meters else None

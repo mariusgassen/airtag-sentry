@@ -8,13 +8,13 @@ interface Props {
   airtags: Airtag[]
   statuses: Record<string, Status>
   onSelect: (id: string) => void
-  ownerLocation?: OwnerLocation | null
+  ownerLocations?: OwnerLocation[]
 }
 
 /** Main map view for the list/settings screens - every AirTag's last known
  * position at once (Find My's own overview screen), vs. MapCard's single
  * tag + route once you've drilled into its detail view. */
-export function OverviewMap({ airtags, statuses, onSelect, ownerLocation }: Props) {
+export function OverviewMap({ airtags, statuses, onSelect, ownerLocations = [] }: Props) {
   const located = airtags
     .map((airtag) => ({ airtag, lastReport: statuses[airtag.id]?.last_report ?? null }))
     .filter((entry): entry is { airtag: Airtag; lastReport: NonNullable<Status['last_report']> } =>
@@ -50,11 +50,13 @@ export function OverviewMap({ airtags, statuses, onSelect, ownerLocation }: Prop
           </Popup>
         </Marker>
       ))}
-      {ownerLocation && (
-        <Marker position={[ownerLocation.lat, ownerLocation.lon]} icon={currentLocationIcon}>
-          <Popup>Eigener Standort · {formatRelative(ownerLocation.recorded_at)}</Popup>
+      {ownerLocations.map((loc) => (
+        <Marker key={loc.device_id} position={[loc.lat, loc.lon]} icon={currentLocationIcon}>
+          <Popup>
+            {loc.name ?? 'Gerät'} · {formatRelative(loc.recorded_at)}
+          </Popup>
         </Marker>
-      )}
+      ))}
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
     </MapContainer>

@@ -31,7 +31,18 @@ export interface AppSettings {
   owner_location_max_age_minutes: number
 }
 
+export interface OwnerDevice {
+  id: string
+  name: string
+  device_type: string
+  enabled: boolean
+}
+
 export interface OwnerLocation {
+  device_id: string
+  // Only present on /api/owner-device-locations (a per-device history entry
+  // already has its device context from the panel showing it).
+  name?: string
   recorded_at: string
   lat: number
   lon: number
@@ -127,12 +138,27 @@ export async function updateSettings(settings: AppSettings): Promise<AppSettings
   ).json()
 }
 
-export async function getOwnerLocation(): Promise<OwnerLocation | null> {
-  return (await apiFetch('/api/owner-location')).json()
+export async function getOwnerDevices(): Promise<OwnerDevice[]> {
+  return (await apiFetch('/api/owner-devices')).json()
 }
 
-export async function getOwnerLocationHistory(limit = 200): Promise<OwnerLocation[]> {
-  return (await apiFetch(`/api/owner-location/history?limit=${limit}`)).json()
+export async function setOwnerDeviceEnabled(id: string, enabled: boolean): Promise<OwnerDevice> {
+  return (
+    await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    })
+  ).json()
+}
+
+export async function getOwnerDeviceLocations(): Promise<OwnerLocation[]> {
+  return (await apiFetch('/api/owner-device-locations')).json()
+}
+
+export async function getOwnerDeviceHistory(id: string, limit = 200): Promise<OwnerLocation[]> {
+  return (
+    await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}/history?limit=${limit}`)
+  ).json()
 }
 
 export async function getAppleStatus(): Promise<{ connected: boolean }> {

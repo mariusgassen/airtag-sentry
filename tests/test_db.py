@@ -6,6 +6,7 @@ import pytest
 
 from airtag_sentry.db import (
     AppSettings,
+    OwnerDevice,
     OwnerLocation,
     Report,
     StoredKey,
@@ -13,20 +14,23 @@ from airtag_sentry.db import (
     delete_airtag,
     delete_airtag_key,
     delete_owner_apple_credentials,
-    fetch_owner_locations,
+    fetch_owner_device_location_history,
     get_airtag_key,
     get_conn,
     get_owner_apple_credentials,
     get_settings,
     insert_reports,
-    latest_owner_location,
+    latest_owner_device_locations,
     list_airtags,
     list_keyed_airtag_ids,
-    record_owner_location,
+    list_owner_devices,
+    record_owner_device_location,
     rename_airtag,
     set_airtag_key,
     set_owner_apple_credentials,
+    set_owner_device_enabled,
     update_settings,
+    upsert_owner_devices,
 )
 from airtag_sentry.migrate import upgrade_to_head
 
@@ -44,7 +48,7 @@ def conn():
             with connection.cursor() as cur:
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
-                    "owner_locations, owner_apple_credentials RESTART IDENTITY CASCADE"
+                    "owner_devices, owner_device_locations, owner_apple_credentials RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
                 # reset it to defaults in place rather than truncating it away.
@@ -96,7 +100,8 @@ def test_schema_creates_tables(conn):
         "push_subscriptions",
         "airtag_keys",
         "settings",
-        "owner_locations",
+        "owner_devices",
+        "owner_device_locations",
         "owner_apple_credentials",
         "alembic_version",
     } <= tables
@@ -234,62 +239,71 @@ def test_update_settings_round_trips(conn):
     assert get_settings(conn) == updated
 
 
-def test_owner_location_record_and_latest_round_trip(conn):
-    assert latest_owner_location(conn) is None
-
-    first = record_owner_location(
-        conn,
-        OwnerLocation(
-            id=None,
-            recorded_at=dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc),
-            lat=52.5,
-            lon=13.4,
-            horizontal_accuracy=10.0,
-        ),
-    )
-    assert first.id is not None
-    assert latest_owner_location(conn) == first
-
-    # A later reading becomes the new "latest" one.
-    second = record_owner_location(
-        conn,
-        OwnerLocation(
-            id=None,
-            recorded_at=dt.datetime(2026, 1, 1, 10, 15, tzinfo=dt.timezone.utc),
-            lat=52.51,
-            lon=13.41,
-            horizontal_accuracy=8.0,
-        ),
-    )
-    assert latest_owner_location(conn) == second
-
-
-def test_fetch_owner_locations_returns_newest_first_and_respects_limit(conn):
-    assert fetch_owner_locations(conn) == []
-
-    first = record_owner_location(
-        conn,
-        OwnerLocation(
-            id=None,
-            recorded_at=dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc),
-            lat=52.5,
-            lon=13.4,
-            horizontal_accuracy=10.0,
-        ),
-    )
-    second = record_owner_location(
-        conn,
-        OwnerLocation(
-            id=None,
-            recorded_at=dt.datetime(2026, 1, 1, 10, 15, tzinfo=dt.timezone.utc),
-            lat=52.51,
-            lon=13.41,
-            horizontal_accuracy=8.0,
-        ),
+def _owner_location(device_id: str, iso: str, lat: float, lon: float, accuracy: float = 10.0) -> OwnerLocation:
+    return OwnerLocation(
+        id=None,
+        device_id=device_id,
+        recorded_at=dt.datetime.fromisoformat(iso).replace(tzinfo=dt.timezone.utc),
+        lat=lat,
+        lon=lon,
+        horizontal_accuracy=accuracy,
     )
 
-    assert fetch_owner_locations(conn) == [second, first]
-    assert fetch_owner_locations(conn, limit=1) == [second]
+
+def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):
+    assert list_owner_devices(conn) == []
+
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    assert list_owner_devices(conn) == [
+        OwnerDevice(id="mac-1", name="MacBook Air", device_type="Mac", enabled=False)
+    ]
+
+    enabled = set_owner_device_enabled(conn, "mac-1", True)
+    assert enabled == OwnerDevice(id="mac-1", name="MacBook Air", device_type="Mac", enabled=True)
+
+    # Re-discovering the same device (e.g. after a rename in Find My) must not
+    # reset `enabled` - only identity fields are refreshed.
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "Marius' MacBook", "device_type": "Mac"}])
+    assert list_owner_devices(conn) == [
+        OwnerDevice(id="mac-1", name="Marius' MacBook", device_type="Mac", enabled=True)
+    ]
+
+
+def test_set_owner_device_enabled_returns_none_for_unknown_id(conn):
+    assert set_owner_device_enabled(conn, "unknown", True) is None
+
+
+def test_latest_owner_device_locations_only_includes_enabled_devices(conn):
+    upsert_owner_devices(
+        conn,
+        [
+            {"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"},
+            {"id": "iphone-1", "name": "iPhone", "device_type": "iPhone"},
+        ],
+    )
+    set_owner_device_enabled(conn, "mac-1", True)
+    # iphone-1 stays disabled - it should never show up below, even with a
+    # recorded location.
+
+    record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
+    record_owner_device_location(conn, _owner_location("iphone-1", "2026-01-01T10:00", 52.6, 13.5))
+
+    assert [loc.device_id for loc in latest_owner_device_locations(conn)] == ["mac-1"]
+
+    # A later reading for the enabled device becomes the new "latest" one.
+    second = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:15", 52.51, 13.41, 8.0))
+    assert latest_owner_device_locations(conn) == [second]
+
+
+def test_fetch_owner_device_location_history_returns_newest_first_and_respects_limit(conn):
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    assert fetch_owner_device_location_history(conn, "mac-1") == []
+
+    first = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
+    second = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:15", 52.51, 13.41, 8.0))
+
+    assert fetch_owner_device_location_history(conn, "mac-1") == [second, first]
+    assert fetch_owner_device_location_history(conn, "mac-1", limit=1) == [second]
 
 
 def test_owner_apple_credentials_set_get_delete_round_trip(conn):

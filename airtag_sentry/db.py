@@ -63,8 +63,17 @@ class OwnerAppleCredentials:
 
 
 @dataclasses.dataclass(frozen=True)
+class OwnerDevice:
+    id: str
+    name: str
+    device_type: str
+    enabled: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class OwnerLocation:
     id: int | None
+    device_id: str
     recorded_at: dt.datetime
     lat: float
     lon: float
@@ -351,36 +360,87 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
     return settings
 
 
-def record_owner_location(conn: psycopg.Connection, location: OwnerLocation) -> OwnerLocation:
+def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict]) -> None:
+    """Records/refreshes device identity (name, type) as seen in a live Apple
+    listing. Leaves `enabled` untouched - discovering a device never opts it
+    into tracking on its own."""
+    if not devices:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO owner_devices (id, name, device_type)
+            VALUES (%(id)s, %(name)s, %(device_type)s)
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, device_type = EXCLUDED.device_type
+            """,
+            devices,
+        )
+    conn.commit()
+
+
+def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, name, device_type, enabled FROM owner_devices ORDER BY name")
+        return [OwnerDevice(*row) for row in cur.fetchall()]
+
+
+def set_owner_device_enabled(conn: psycopg.Connection, device_id: str, enabled: bool) -> OwnerDevice | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE owner_devices SET enabled = %s WHERE id = %s "
+            "RETURNING id, name, device_type, enabled",
+            (enabled, device_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocation) -> OwnerLocation:
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO owner_locations (recorded_at, lat, lon, horizontal_accuracy)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, recorded_at, lat, lon, horizontal_accuracy
+            INSERT INTO owner_device_locations (device_id, recorded_at, lat, lon, horizontal_accuracy)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, device_id, recorded_at, lat, lon, horizontal_accuracy
             """,
-            (location.recorded_at, location.lat, location.lon, location.horizontal_accuracy),
+            (
+                location.device_id,
+                location.recorded_at,
+                location.lat,
+                location.lon,
+                location.horizontal_accuracy,
+            ),
         )
         row = cur.fetchone()
     conn.commit()
     return OwnerLocation(*row)
 
 
-def latest_owner_location(conn: psycopg.Connection) -> OwnerLocation | None:
+def latest_owner_device_locations(conn: psycopg.Connection) -> list[OwnerLocation]:
+    """The latest reading for each *enabled* device - one row per device."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, recorded_at, lat, lon, horizontal_accuracy FROM owner_locations "
-            "ORDER BY recorded_at DESC LIMIT 1"
+            """
+            SELECT DISTINCT ON (odl.device_id)
+                odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy
+            FROM owner_device_locations odl
+            JOIN owner_devices od ON od.id = odl.device_id
+            WHERE od.enabled
+            ORDER BY odl.device_id, odl.recorded_at DESC
+            """
         )
-        row = cur.fetchone()
-        return OwnerLocation(*row) if row else None
+        return [OwnerLocation(*row) for row in cur.fetchall()]
 
 
-def fetch_owner_locations(conn: psycopg.Connection, limit: int = 200) -> list[OwnerLocation]:
+def fetch_owner_device_location_history(
+    conn: psycopg.Connection, device_id: str, limit: int = 200
+) -> list[OwnerLocation]:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, recorded_at, lat, lon, horizontal_accuracy FROM owner_locations "
+            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy "
+            "FROM owner_device_locations WHERE device_id = %s "
             "ORDER BY recorded_at DESC LIMIT %s",
-            (limit,),
+            (device_id, limit),
         )
         return [OwnerLocation(*row) for row in cur.fetchall()]

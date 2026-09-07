@@ -1096,3 +1096,108 @@ the UI, staying UI-first per `CLAUDE.md`.
   the real Postgres round-trip test and a clean build. The map marker and
   history list should be checked visually against a real connected account
   before considering this fully settled.
+
+## v15: Multi-device owner tracking (Macs, iPhones, iPads, Watches)
+
+Trigger: user asked for multiple trackable devices ("not AirTags, like
+AirPods, macs etc"), not just the one arbitrary device v11/v14 supported.
+Investigating surfaced two real, previously-unnoticed bugs on the exact
+code path this builds on, both fixed here:
+
+1. `fetch_owner_location()` called `device.location()` as a method, but
+   the installed pyicloud (2.7.0, resolved from `pyicloud>=1.0`) exposes
+   `AppleDevice.location` as a **property** - every call raised
+   `TypeError`, silently swallowed by `tracker.py`'s broad
+   except-and-log, so owner tracking has never actually recorded a
+   location despite v11/v14 looking connected. No test ever exercised
+   this path, consistent with every past "not verified end-to-end"
+   caveat for this feature.
+2. Every poll leaked a background thread: `PyiCloudService(...)` lazily
+   starts a daemon thread re-polling Apple every 5 minutes on first
+   `.devices` access, never stopped - and `_build_api()` builds a fresh
+   `PyiCloudService` every poll, forever. Fixed by collecting everything
+   needed from `.devices` in one pass, then calling
+   `api.devices.stop_event.set()` as the very last thing touching it.
+
+AirPods are explicitly out of scope: Find My-capable AirPods (Pro/Max)
+use the same offline-finding network as AirTags, not this device
+service - already trackable today via the existing "Manage AirTags"
+key-upload flow (`python -m findmy decrypt` extracts a key per paired
+accessory, AirPods included, per the README). User confirmed this scope
+split before implementation.
+
+- [x] New migration (`bf40cb34ac74`): drops the old singleton
+      `owner_locations` table (never held usable data, per bug #1 above)
+      and replaces it with `owner_devices` (registry, opt-in `enabled`
+      flag, mirrors the `airtags` table) + `owner_device_locations`
+      (per-device history, mirrors `location_reports`, FK'd with `ON
+      DELETE CASCADE`). Breaking change, no back-compat shim, per
+      `CLAUDE.md`'s established convention.
+- [x] `db.py`: `OwnerDevice` dataclass; `OwnerLocation` gained
+      `device_id`. New `upsert_owner_devices`, `list_owner_devices`,
+      `set_owner_device_enabled`, `record_owner_device_location`,
+      `latest_owner_device_locations` (one row per *enabled* device),
+      `fetch_owner_device_location_history`. Removed the old
+      singleton-shaped functions.
+- [x] `owner_tracking.py`: new `_snapshot_devices(api)` helper - one pass
+      over `api.devices` collecting `(id, name, device_type, location)`
+      into plain data, fixing both bugs above in one place. New
+      `list_owner_devices` (live-refreshes identity, DB `enabled` flags
+      intact), `set_device_enabled`, `fetch_owner_device_locations`
+      (only enabled devices, using `.location` as a property). Discovering
+      a device never auto-enables it - tracking/history only starts once
+      the user opts a device in via the dashboard.
+- [x] `tracker.py`: `_update_owner_location` → `_update_owner_devices`,
+      records every enabled device's location each poll. Away-correlation
+      now passes `latest_owner_device_locations(conn)` (a list) instead of
+      one location.
+- [x] `movement.py`: `evaluate_away` takes `list[OwnerLocation]` - an OR
+      across devices (any fresh nearby device suppresses the alert; the
+      *closest* fresh device's distance is reported when none are near).
+      Stays pure/DB-free.
+- [x] `web/app.py`: replaced `/api/owner-location` + `/api/owner-location
+      /history` with `GET /api/owner-devices` (live-refreshed list +
+      `enabled`), `PUT /api/owner-devices/{id}` (toggle), `GET
+      /api/owner-device-locations` (latest per enabled device, joined
+      with device name for map popups), `GET /api/owner-devices/{id}
+      /history`.
+- [x] Frontend: `api.ts` gained `OwnerDevice` + the new device-scoped
+      calls, replacing the old singleton ones. New
+      `OwnerDevicesPanel.tsx` (rendered in `SettingsPanel.tsx` under
+      "Eigener Standort") - lists devices with an enable checkbox
+      (reusing the existing plain-checkbox pattern from the movement
+      settings, no new toggle component) and a lazy-loaded per-device
+      Verlauf list. `AppleConnectPanel.tsx` reverted to its pre-v14
+      shape (plain connect/disconnect wizard, adapter-agnostic again) -
+      device/location display is `OwnerDevicesPanel`'s job now.
+      `MapCard.tsx`/`OverviewMap.tsx` render one marker per tracked
+      device instead of a single conditional one. `App.tsx` fetches
+      `getOwnerDeviceLocations()` once and passes the array down,
+      matching the existing top-down data flow.
+- [x] Tests: `test_db.py` replaced the old singleton tests with device
+      registry + per-device history round-trips (including that
+      re-discovering a device preserves its `enabled` flag, and that
+      disabled devices never show up in `latest_owner_device_locations`).
+      `test_movement.py` updated `evaluate_away`'s call sites for the
+      list signature and added two cases for the OR-across-devices
+      behavior. `test_owner_tracking.py` added a fake-`api.devices`
+      regression test proving `_snapshot_devices` reads `.location`
+      without calling it and always stops the monitor thread - directly
+      guarding both bugs above from recurring.
+
+## Review (v15)
+- 14 files touched (5 backend + 1 migration, 6 frontend, 3 tests), one
+  new migration, no new dependencies.
+- Verified: `pytest` against real local Postgres - 65 passed, including
+  all new tests. `cd frontend && npx tsc -b && npx vite build` clean;
+  `npx oxlint` shows only the same two pre-existing `set-state-in-effect`
+  warnings from v13/v14 (unchanged). `docker compose config` parses
+  cleanly with a throwaway `.env`.
+- Not verified in this sandbox: true end-to-end with a real multi-device
+  Apple account (no real Apple ID with several real devices available
+  here, same limitation noted in every prior owner-tracking review) -
+  confirmed instead against the real Postgres round-trip tests, a
+  targeted fake-API regression test for the two bugs found, and a clean
+  build. The live device list/picker, map markers, and per-device history
+  should get a real-account check before this is considered fully
+  settled.

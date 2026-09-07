@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Airtag, OwnerLocation, Report, Status } from './api'
-import { createAirtag, getAirtags, getOwnerLocation, getReports, getStatus } from './api'
+import { createAirtag, getAirtags, getOwnerDeviceLocations, getReports, getStatus } from './api'
 import { AirtagList } from './components/AirtagList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { MapCard } from './components/MapCard'
@@ -44,7 +44,7 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
-  const [ownerLocation, setOwnerLocation] = useState<OwnerLocation | null>(null)
+  const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   const [showDetail, setShowDetail] = useState(false)
   const [sheetState, setSheetState] = useState<SheetState>('default')
@@ -81,9 +81,9 @@ export default function App() {
   }, [refreshAirtags])
 
   useEffect(() => {
-    getOwnerLocation()
-      .then(setOwnerLocation)
-      .catch(() => setOwnerLocation(null))
+    getOwnerDeviceLocations()
+      .then(setOwnerLocations)
+      .catch(() => setOwnerLocations([]))
   }, [])
 
   useEffect(() => {
@@ -183,9 +183,9 @@ export default function App() {
           order and the sheet's own z-10. */}
       <div className="absolute inset-0 isolate md:relative md:flex-1">
         {activeTab === 'objects' && showDetail && currentAirtag ? (
-          <MapCard reports={reports} airtagId={currentAirtag.id} ownerLocation={ownerLocation} />
+          <MapCard reports={reports} airtagId={currentAirtag.id} ownerLocations={ownerLocations} />
         ) : (
-          <OverviewMap airtags={airtags} statuses={statuses} onSelect={handleSelect} ownerLocation={ownerLocation} />
+          <OverviewMap airtags={airtags} statuses={statuses} onSelect={handleSelect} ownerLocations={ownerLocations} />
         )}
       </div>
 

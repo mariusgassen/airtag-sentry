@@ -26,14 +26,14 @@ from airtag_sentry.db import (
     get_conn,
     get_settings,
     insert_reports,
-    latest_owner_location,
+    latest_owner_device_locations,
     list_airtags,
     record_alert,
-    record_owner_location,
+    record_owner_device_location,
 )
 from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
 from airtag_sentry.notifiers import build_notifiers, notify_all
-from airtag_sentry.owner_tracking import fetch_owner_location
+from airtag_sentry.owner_tracking import fetch_owner_device_locations
 
 logger = logging.getLogger(__name__)
 
@@ -57,22 +57,23 @@ def _load_key(cfg: Config, conn, airtag_id: str):
     return KeyPair.from_b64(plaintext)
 
 
-def _update_owner_location(cfg: Config, conn) -> None:
-    """Best-effort refresh of the owner's device location. Never allowed to break
-    AirTag polling - a failure here just means this poll's away-correlation falls
-    back to whatever was recorded last time (or skips it, if nothing ever was).
-    fetch_owner_location() itself returns None immediately if owner tracking was
-    never connected via the dashboard, so no separate "is it configured" check
+def _update_owner_devices(cfg: Config, conn) -> None:
+    """Best-effort refresh of every enabled owner device's location. Never allowed
+    to break AirTag polling - a failure here just means this poll's away-correlation
+    falls back to whatever was recorded last time (or skips it, if nothing ever was).
+    fetch_owner_device_locations() itself returns [] immediately if owner tracking
+    was never connected via the dashboard, so no separate "is it configured" check
     is needed here."""
     try:
-        location = fetch_owner_location(cfg, conn)
+        locations = fetch_owner_device_locations(cfg, conn)
     except Exception:
-        logger.exception("Failed to fetch owner device location this poll.")
+        logger.exception("Failed to fetch owner device locations this poll.")
         return
-    if location is None:
-        logger.info("No owner device location available this poll.")
+    if not locations:
+        logger.info("No owner device locations available this poll.")
         return
-    record_owner_location(conn, location)
+    for location in locations:
+        record_owner_device_location(conn, location)
 
 
 def poll_once(cfg: Config) -> None:
@@ -81,7 +82,7 @@ def poll_once(cfg: Config) -> None:
     with get_conn(cfg.database_url) as conn:
         settings = get_settings(conn)
         notifiers = build_notifiers(cfg)
-        _update_owner_location(cfg, conn)
+        _update_owner_devices(cfg, conn)
         for airtag in list_airtags(conn):
             try:
                 _poll_airtag(cfg, account, airtag, conn, notifiers, settings)
@@ -161,7 +162,7 @@ def _poll_airtag(
         notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
 
         away_distance = evaluate_away(
-            report, latest_owner_location(conn), dt.datetime.now(dt.timezone.utc), movement_cfg
+            report, latest_owner_device_locations(conn), dt.datetime.now(dt.timezone.utc), movement_cfg
         )
         if away_distance is not None:
             record_alert(

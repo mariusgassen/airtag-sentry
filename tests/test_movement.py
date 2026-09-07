@@ -20,9 +20,11 @@ def _report(hours_ago: float, lat: float, lon: float) -> Report:
     return Report(id=None, airtag_id="test", timestamp=ts, lat=lat, lon=lon, accuracy=5.0, confidence=2)
 
 
-def _owner_location(minutes_ago: float, lat: float, lon: float) -> OwnerLocation:
+def _owner_location(minutes_ago: float, lat: float, lon: float, device_id: str = "device-1") -> OwnerLocation:
     recorded_at = NOW - dt.timedelta(minutes=minutes_ago)
-    return OwnerLocation(id=None, recorded_at=recorded_at, lat=lat, lon=lon, horizontal_accuracy=5.0)
+    return OwnerLocation(
+        id=None, device_id=device_id, recorded_at=recorded_at, lat=lat, lon=lon, horizontal_accuracy=5.0
+    )
 
 
 def test_haversine_zero_distance():
@@ -84,15 +86,15 @@ def test_no_stillstand_alert_below_movement_epsilon():
     assert evaluate_movement(new, prior, CFG) is None
 
 
-def test_evaluate_away_none_without_owner_location():
+def test_evaluate_away_none_without_owner_locations():
     new = _report(0, 52.5, 13.4)
-    assert evaluate_away(new, None, NOW, CFG) is None
+    assert evaluate_away(new, [], NOW, CFG) is None
 
 
 def test_evaluate_away_returns_distance_when_far_and_fresh():
     new = _report(0, 52.51, 13.4)  # ~1.1km from the owner location below
     owner = _owner_location(5, 52.5, 13.4)
-    distance = evaluate_away(new, owner, NOW, CFG)
+    distance = evaluate_away(new, [owner], NOW, CFG)
     assert distance is not None
     assert distance > CFG.away_distance_threshold_meters
 
@@ -100,10 +102,28 @@ def test_evaluate_away_returns_distance_when_far_and_fresh():
 def test_evaluate_away_none_when_near_owner():
     new = _report(0, 52.5, 13.4)
     owner = _owner_location(5, 52.50005, 13.40005)  # a few meters of GPS noise
-    assert evaluate_away(new, owner, NOW, CFG) is None
+    assert evaluate_away(new, [owner], NOW, CFG) is None
 
 
 def test_evaluate_away_none_when_owner_location_stale():
     new = _report(0, 52.51, 13.4)  # far from the owner location below
     owner = _owner_location(120, 52.5, 13.4)  # 120 min old, over the 60 min max age
-    assert evaluate_away(new, owner, NOW, CFG) is None
+    assert evaluate_away(new, [owner], NOW, CFG) is None
+
+
+def test_evaluate_away_none_when_any_device_is_near():
+    # Two tracked devices: one far, one right next to the new report - being
+    # with *either* device counts as "with the owner" (OR across devices).
+    new = _report(0, 52.5, 13.4)
+    far = _owner_location(5, 52.6, 13.5, device_id="mac")
+    near = _owner_location(5, 52.50005, 13.40005, device_id="iphone")
+    assert evaluate_away(new, [far, near], NOW, CFG) is None
+
+
+def test_evaluate_away_reports_closest_device_when_all_far():
+    new = _report(0, 52.5, 13.4)
+    farther = _owner_location(5, 52.7, 13.6, device_id="mac")  # further away
+    closer = _owner_location(5, 52.51, 13.4, device_id="iphone")  # ~1.1km, still far
+    distance = evaluate_away(new, [farther, closer], NOW, CFG)
+    closer_distance = haversine_distance(new.lat, new.lon, closer.lat, closer.lon)
+    assert distance == closer_distance

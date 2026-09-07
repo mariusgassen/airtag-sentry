@@ -78,11 +78,11 @@ export function NoReportsView() {
 export function MapCard({
   reports,
   airtagId,
-  ownerLocation,
+  ownerLocations = [],
 }: {
   reports: Report[]
   airtagId: string
-  ownerLocation?: OwnerLocation | null
+  ownerLocations?: OwnerLocation[]
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
 
@@ -100,11 +100,13 @@ export function MapCard({
       <Marker position={positions[positions.length - 1]} icon={airtagPinIcon(airtagId)}>
         <Popup>Letzte Position</Popup>
       </Marker>
-      {ownerLocation && (
-        <Marker position={[ownerLocation.lat, ownerLocation.lon]} icon={currentLocationIcon}>
-          <Popup>Eigener Standort · {formatRelative(ownerLocation.recorded_at)}</Popup>
+      {ownerLocations.map((loc) => (
+        <Marker key={loc.device_id} position={[loc.lat, loc.lon]} icon={currentLocationIcon}>
+          <Popup>
+            {loc.name ?? 'Gerät'} · {formatRelative(loc.recorded_at)}
+          </Popup>
         </Marker>
-      )}
+      ))}
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
     </MapContainer>
