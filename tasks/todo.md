@@ -1596,3 +1596,67 @@ this container's `remote` anisette service entirely.
   against the real `findmy` package, but the end-to-end "run the script on
   your own machine, upload the result, does Apple accept it" path needs a
   real retry against their account to fully close this out.
+
+## v20: Fix silent hang on GET /api/owner-devices errors
+
+Trigger: real-user report right after v18 (multi-device owner tracking)
+deployed - "the device list is loading forever." Also saw a `GET
+/api/owner-location 404` in their logs, from v18's own removal of that
+route (superseded by `/api/owner-device-locations`) - almost certainly a
+stale already-open PWA session running pre-v18 JS rather than a code bug
+(the SW is already configured with `skipWaiting`/`clientsClaim` for
+exactly this, per `sw.ts`'s own comment, but that only takes effect on the
+*next* navigation/reload of an already-running page, not instantly for a
+backgrounded/resumed tab) - not otherwise actionable from this session
+without a live report of it recurring after a fresh reload.
+
+The "loading forever" part had a real, separate cause though:
+`owner_tracking.list_owner_devices()` does a *live*, uncached Apple call
+on every single request (rebuilds `PyiCloudService` fresh each time, per
+v18's own `_connect`/`_build_api`) - a lapsed pyicloud session trust, a
+transient network blip, or Apple-side rate limiting all raised uncaught
+through `GET /api/owner-devices`, producing a bare 500 with no detail.
+`OwnerDevicesPanel.tsx` had no `.catch()` on that fetch at all, so the
+promise rejection just left `devices` at `null` forever - "Lädt…" with no
+error, no retry, no way to tell what was wrong.
+
+- [x] `web/app.py`: `get_owner_devices()` now wraps the call in
+      try/except, logs it, and returns a 400 with the exception's message
+      - same pattern already used by the Apple login/2FA routes.
+- [x] `OwnerDevicesPanel.tsx`: new `devicesError` state; the fetch effect
+      now has a `.catch()`; on error, shows the message plus a "Erneut
+      versuchen" retry button (useful here specifically, since the
+      underlying call is a fresh live Apple request every time - a retry
+      can genuinely succeed where the last one didn't). Kept the
+      `setDevicesError` call inside the `.then()`/`.catch()` callbacks
+      rather than synchronously in the effect body - oxlint's
+      `set-state-in-effect` flagged an earlier draft that called a named
+      `async function loadDevices()` directly from the effect (it traces
+      into local function calls, not just literal `setState(...)` in the
+      effect's own body); resolved by keeping the effect's own fetch
+      chain fully inline and defining `loadDevices()` separately purely
+      for the retry button's `onClick`, matching this file's and
+      `App.tsx`'s existing convention for this exact lint rule.
+- [x] `test_web_auth.py`: new
+      `test_owner_devices_route_reports_apple_errors_instead_of_hanging`,
+      monkeypatching `owner_tracking.list_owner_devices` to raise and
+      confirming the route now returns 400 with the error detail instead
+      of an unhandled 500.
+
+## Review (v20)
+- 3 files touched (1 backend, 1 frontend, 1 test), no new dependencies.
+- Verified: `pytest tests/` - 52 passed, 20 skipped (Postgres-dependent,
+  no live Postgres in this sandbox), including the new regression test.
+  `cd frontend && npx tsc -b && npx vite build` clean; `npx oxlint` shows
+  only the same three pre-existing `set-state-in-effect` warnings from
+  v13/v14/v16/v17/v18, no new ones (after iterating past one new one an
+  earlier draft introduced - see above).
+- Not verified in this sandbox (no real owner-tracking Apple session, no
+  way to reproduce a real pyicloud failure here): that this specific fix
+  resolves the reporting user's actual "loading forever" symptom - the
+  error-handling path itself is covered by the new test, but whether their
+  underlying Apple call was in fact failing (versus, say, succeeding but
+  slowly) isn't confirmed. Also unconfirmed: whether the `/api/owner-location
+  404` in their logs was a one-time artifact of the v18 deploy transition
+  (stale already-open tab) or is still recurring after a fresh reload -
+  worth asking before assuming it's fully explained.

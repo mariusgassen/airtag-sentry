@@ -680,8 +680,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         """Live-refreshed list of the owner's Apple devices (Macs, iPhones, iPads,
         Watches - see owner_tracking.py), each with whether it's enabled for
         tracking. Empty if owner tracking isn't configured."""
-        with get_conn(cfg.database_url) as conn:
-            devices = owner_tracking.list_owner_devices(cfg, conn)
+        try:
+            with get_conn(cfg.database_url) as conn:
+                devices = owner_tracking.list_owner_devices(cfg, conn)
+        except Exception as exc:
+            # list_owner_devices() does a *live* Apple call on every request (no
+            # caching) - a lapsed pyicloud session trust, a transient network
+            # error, or Apple-side rate limiting all surface here uncaught
+            # otherwise, leaving the dashboard's device list spinning forever
+            # with no feedback (see tasks/todo.md v20).
+            logger.exception("Failed to list owner Apple devices.")
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return [dataclasses.asdict(d) for d in devices]
 
     @app.put("/api/owner-devices/{device_id}")
