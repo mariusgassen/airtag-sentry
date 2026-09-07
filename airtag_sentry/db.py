@@ -62,6 +62,12 @@ class PushSubscription:
 class OwnerAppleCredentials:
     apple_id: str
     encrypted_password: str
+    # Which of the account's devices determines "the owner's" location - see
+    # owner_tracking.py. Both None until explicitly chosen via
+    # set_owner_selected_device(); the name is stored alongside the id so the
+    # dashboard can label it without another Apple login.
+    selected_device_id: str | None
+    selected_device_name: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -294,14 +300,20 @@ def list_keyed_airtag_ids(conn: psycopg.Connection) -> set[str]:
 
 
 def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypted_password: str) -> None:
+    # A fresh login always resets the device pick - a previously selected
+    # device belonged to whatever session was connected before, and may not
+    # even exist under a different Apple ID.
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO owner_apple_credentials (id, apple_id, encrypted_password, updated_at)
-            VALUES (1, %s, %s, now())
+            INSERT INTO owner_apple_credentials
+                (id, apple_id, encrypted_password, selected_device_id, selected_device_name, updated_at)
+            VALUES (1, %s, %s, NULL, NULL, now())
             ON CONFLICT (id) DO UPDATE
                 SET apple_id = EXCLUDED.apple_id,
                     encrypted_password = EXCLUDED.encrypted_password,
+                    selected_device_id = NULL,
+                    selected_device_name = NULL,
                     updated_at = now()
             """,
             (apple_id, encrypted_password),
@@ -311,9 +323,21 @@ def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypt
 
 def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
     with conn.cursor() as cur:
-        cur.execute("SELECT apple_id, encrypted_password FROM owner_apple_credentials WHERE id = 1")
+        cur.execute(
+            "SELECT apple_id, encrypted_password, selected_device_id, selected_device_name "
+            "FROM owner_apple_credentials WHERE id = 1"
+        )
         row = cur.fetchone()
         return OwnerAppleCredentials(*row) if row else None
+
+
+def set_owner_selected_device(conn: psycopg.Connection, device_id: str, device_name: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE owner_apple_credentials SET selected_device_id = %s, selected_device_name = %s WHERE id = 1",
+            (device_id, device_name),
+        )
+    conn.commit()
 
 
 def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:

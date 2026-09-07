@@ -245,6 +245,11 @@ class OwnerLoginIn(BaseModel):
     password: str
 
 
+class OwnerDeviceSelectIn(BaseModel):
+    device_id: str
+    device_name: str
+
+
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
     return slug or "airtag"
@@ -737,9 +742,30 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/apple/owner/status")
     def owner_apple_status():
-        """Whether the owner-device-tracking Apple session (see owner_tracking.py) is connected."""
+        """Whether the owner-device-tracking Apple session (see owner_tracking.py) is
+        connected, and which of the account's devices (if any) has been selected to
+        determine its location."""
         with get_conn(cfg.database_url) as conn:
-            return {"connected": owner_tracking.is_connected(conn)}
+            return owner_tracking.connection_status(conn)
+
+    @app.get("/api/apple/owner/devices")
+    def owner_apple_devices():
+        """Devices on the connected owner Apple account, for the device-selection
+        step - see owner_tracking.list_owner_devices()."""
+        with get_conn(cfg.database_url) as conn:
+            try:
+                return owner_tracking.list_owner_devices(cfg, conn)
+            except Exception as exc:
+                logger.exception("Failed to list owner Apple devices.")
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/apple/owner/device")
+    def owner_apple_select_device(body: OwnerDeviceSelectIn):
+        """Select which device determines the owner's location - see
+        owner_tracking.set_selected_device()."""
+        with get_conn(cfg.database_url) as conn:
+            owner_tracking.set_selected_device(conn, body.device_id, body.device_name)
+        return {"ok": True}
 
     @app.post("/api/apple/owner/login")
     def owner_apple_login(body: OwnerLoginIn):

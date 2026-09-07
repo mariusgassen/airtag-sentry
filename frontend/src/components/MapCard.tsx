@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { formatRelative } from '../format'
-import { airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import { LocationArrowIcon } from './icons'
 
@@ -81,12 +81,15 @@ export function MapCard({
   reports,
   airtag,
   ownerLocation,
+  ownerLocationHistory,
 }: {
   reports: Report[]
   airtag: Airtag
   ownerLocation?: OwnerLocation | null
+  ownerLocationHistory?: OwnerLocation[]
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+  const ownerPositions: [number, number][] = (ownerLocationHistory ?? []).map((l) => [l.lat, l.lon])
 
   if (positions.length === 0) {
     return <NoReportsView />
@@ -101,6 +104,9 @@ export function MapCard({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Polyline positions={positions} pathOptions={{ color: '#0a84ff', weight: 4 }} />
+      {ownerPositions.length > 1 && (
+        <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
+      )}
       <Marker position={last} icon={airtagPinIcon(airtag)}>
         <Popup>
           <div className="text-sm">

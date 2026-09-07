@@ -1222,3 +1222,142 @@ native Maps app.
   failed in this sandbox (same outbound-proxy restriction noted since
   v1's review) but don't affect the app's own marker rendering, which
   doesn't depend on them.
+## v16: Owner device in the main AirTags list
+
+Trigger: v14 surfaced owner location on the map and in Settings ->
+Apple-Konten, but a connected owner device was otherwise invisible - you
+had to open Settings to even know owner tracking existed. The main
+AirTags list (the "Objects" tab, `AirtagList.tsx`) is the first thing the
+dashboard shows, so a connected owner device belongs there too, not only
+tucked away in Settings.
+
+- [x] `icons.tsx`: new `PersonIcon` (simple head-and-shoulders glyph) for
+      the owner row - distinct from `AirtagGlyph` so it doesn't read as
+      "just another AirTag".
+- [x] `AirtagList.tsx`: new `ownerConnected`/`ownerLocation` props. When
+      `ownerConnected`, renders a "Du" row at the top of the list (above
+      the AirTags), styled to match the AirTag rows (same avatar-badge +
+      title/subtitle layout) with its own accent-colored `PersonIcon`
+      badge instead of an `AirtagAvatar`, and the same relative-time
+      subtitle convention (`formatRelative`/"Kein Standort verfügbar")
+      already used for AirTags without a report. Not clickable - there is
+      no owner detail view (setup still lives in Settings ->
+      Apple-Konten's `AppleConnectPanel`), this is a status glance only.
+- [x] `App.tsx`: added `ownerConnected` state, fetched via the existing
+      `getOwnerAppleStatus()` (already used by `SettingsPanel.tsx`) in the
+      same mount effect as `ownerLocation`; both passed down to
+      `AirtagList`.
+
+## Review (v16)
+- 3 files touched, all frontend, no backend/schema change, no new
+  dependencies.
+- Verified: `cd frontend && npx tsc -b && npx vite build` clean; `npx
+  oxlint` shows only the same two pre-existing `set-state-in-effect`
+  warnings from v13/v14 (unchanged - the added `getOwnerAppleStatus` call
+  lives in the same effect as the existing `getOwnerLocation` call, so no
+  new warning).
+- Not verified in this sandbox: visually, against a real connected owner
+  Apple account (no real Apple ID/2FA available here, same limitation
+  noted in v11/v13/v14's reviews) - the row's conditional rendering and
+  data flow were checked by reading `SettingsPanel.tsx`'s existing
+  `OWNER_APPLE_ADAPTER` usage of the same `getOwnerAppleStatus`/
+  `getOwnerLocation` calls, not by exercising the UI live.
+
+## v17: Explicit owner device selection + movement trail
+
+Trigger: two follow-ups to v14/v16. First, `owner_tracking.fetch_owner_location()`
+returned whichever device on the connected Apple account answered first
+with a location - not deterministic, and not something the user could
+choose. Second, owner location has had a full history in `owner_locations`
+since v11 (already listed in Settings), but the map only ever showed the
+single latest position, never a route like AirTags get.
+
+Also found while rewriting the fetch: this project's `pyicloud>=1.0` pin
+currently resolves to 2.7.0, where `AppleDevice.location` is a `@property`,
+not a method - the existing `device.location()` call would raise
+`TypeError` the moment a real account returned a location. Fixed alongside
+the rewrite (verified by downloading the pyicloud wheel and reading
+`pyicloud/services/findmyiphone.py` directly, not by installing a live
+Apple session).
+
+Per `CLAUDE.md`'s "no backward-compatibility shims" convention, this is a
+deliberate breaking change: owner location now stops being fetched until a
+device is explicitly selected in Settings - no fallback to "first device
+that answers", including for the account already connected before this
+shipped.
+
+- [x] New migration `a39d0f20721f`: `owner_apple_credentials` gains
+      nullable `selected_device_id`/`selected_device_name` columns. The
+      name is stored alongside the id so the dashboard can label the
+      connection ("Verbunden · iPhone von Marius") without another Apple
+      login just to resolve it.
+- [x] `db.py`: `OwnerAppleCredentials` gains both fields;
+      `set_owner_apple_credentials` now resets them to `NULL` on every
+      fresh login (a previous pick may not even exist on a different
+      session); new `set_owner_selected_device(conn, device_id, device_name)`.
+- [x] `owner_tracking.py`: new `list_owner_devices()` (iterates
+      `api.devices`, using the real `AppleDevice.name`/`.model_name`
+      properties) and `set_selected_device()`; `fetch_owner_location()`
+      rewritten to return `None` immediately (no Apple call at all) when
+      no device is selected, otherwise match the selected device by id and
+      read `.location` as a property (the pyicloud fix above). New
+      `connection_status()` helper backing the status route below (which
+      fully supersedes the old `is_connected()`, removed as dead code).
+- [x] `web/app.py`: `owner_apple_status()` now returns
+      `selected_device_id`/`selected_device_name` too; new
+      `GET /api/apple/owner/devices` and `POST /api/apple/owner/device`
+      routes.
+- [x] `api.ts`: `OwnerDevice` type, `getOwnerDevices()`,
+      `selectOwnerDevice()`; `getOwnerAppleStatus()`'s return type gained
+      the two new fields.
+- [x] `AppleConnectPanel.tsx`: `AppleConnectAdapter` gained optional
+      `getDevices`/`selectDevice` (absent for the AirTag-tracking adapter,
+      same optionality pattern as `getLocation`/`getHistory`). When
+      connected with no device chosen yet, a required device list replaces
+      the usual "done" state; once picked, the row shows "Verbunden ·
+      <name>" with a "Gerät ändern" action to reopen the same list.
+- [x] `SettingsPanel.tsx`: wired the two new adapter fields for
+      `OWNER_APPLE_ADAPTER` only.
+- [x] `App.tsx` / `AirtagList.tsx`: the v16 "Du" row now shows the selected
+      device's name instead of the generic "Du" once one is picked, and
+      "Gerät in Einstellungen auswählen" instead of "Kein Standort
+      verfügbar" while connected but still unselected - directly naming
+      the state the real connected account is in immediately after this
+      ships.
+- [x] `mapIcons.ts`: new `OWNER_TRAIL_COLOR` constant (a literal hex, not
+      `var(--accent)` - Leaflet sets it as a plain SVG `stroke` attribute,
+      not a CSS property). `MapCard.tsx`/`OverviewMap.tsx` gained an
+      `ownerLocationHistory` prop, drawn as a dashed `Polyline` (2+ points)
+      so it reads as "your trail" without being confused with the AirTag
+      route's solid line despite the similar blue; left out of
+      `FitBounds`'s bounds calc for the same reason the single owner
+      marker already was.
+- [x] `test_db.py`: new
+      `test_owner_selected_device_persists_and_resets_on_relogin`;
+      extended the existing credentials round-trip test to check the new
+      columns default to `NULL`.
+- [x] `test_owner_tracking.py`: new tests for the "no device selected -
+      no Apple call" short-circuit, `list_owner_devices` returning `[]`
+      when disconnected, and a regression guard (a fake device exposing
+      `location` as a `@property`) for the pyicloud fix.
+
+## Review (v17)
+- 10 files touched (1 migration, 3 backend, 2 backend tests, 4 frontend),
+  no new dependencies.
+- Verified: `pytest` against real local Postgres (migration applied via
+  `alembic upgrade head`) - 50 passed, 14 skipped (unrelated), including
+  the 4 new tests. `cd frontend && npx tsc -b && npx vite build` clean;
+  `npx oxlint` shows only the same two pre-existing `set-state-in-effect`
+  warnings from v13/v14/v16 (two new ones surfaced while writing the device
+  picker's effects and were fixed by keeping `setState` calls inside
+  `.then()`/`.catch()` rather than synchronously in the effect body, and
+  by inlining the status-fetch effect instead of calling a named
+  non-memoized function from it). `docker compose config` parses cleanly
+  with a throwaway `.env`.
+- Not verified in this sandbox: a live Apple 2FA session, so the device
+  list/selection UI and the map trail should get a visual check against
+  the real connected account before considering this fully settled (same
+  standing caveat as v11/v13/v14/v16) - that account is specifically the one
+  that motivated this version, so re-selecting its device once this ships
+  is a needed manual step, not optional polish.
+

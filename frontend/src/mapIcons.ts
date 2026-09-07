@@ -105,3 +105,11 @@ export const currentLocationIcon: L.DivIcon = L.divIcon({
   iconSize: [20, 20],
   iconAnchor: [10, 10],
 })
+
+/** Owner location history trail color - a literal value rather than
+ * `var(--accent)` since Leaflet sets it as a plain SVG `stroke` attribute,
+ * not a CSS property, so a custom property wouldn't resolve there. Matches
+ * the dark-theme accent (index.css) that currentLocationIcon's dot already
+ * uses; dashed in Polyline usage to stay visually distinct from the
+ * AirTag route's solid line despite the similar blue. */
+export const OWNER_TRAIL_COLOR = '#0a84ff'

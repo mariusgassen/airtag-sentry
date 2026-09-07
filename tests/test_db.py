@@ -27,6 +27,7 @@ from airtag_sentry.db import (
     set_airtag_appearance,
     set_airtag_key,
     set_owner_apple_credentials,
+    set_owner_selected_device,
     update_settings,
 )
 from airtag_sentry.migrate import upgrade_to_head
@@ -315,6 +316,8 @@ def test_owner_apple_credentials_set_get_delete_round_trip(conn):
     stored = get_owner_apple_credentials(conn)
     assert stored.apple_id == "owner@example.com"
     assert stored.encrypted_password == "enc1"
+    assert stored.selected_device_id is None
+    assert stored.selected_device_name is None
 
     # Setting again replaces rather than duplicating (single-row table).
     set_owner_apple_credentials(conn, "owner@example.com", "enc2")
@@ -323,6 +326,22 @@ def test_owner_apple_credentials_set_get_delete_round_trip(conn):
 
     delete_owner_apple_credentials(conn)
     assert get_owner_apple_credentials(conn) is None
+
+
+def test_owner_selected_device_persists_and_resets_on_relogin(conn):
+    set_owner_apple_credentials(conn, "owner@example.com", "enc1")
+
+    set_owner_selected_device(conn, "device-1", "iPhone von Marius")
+    stored = get_owner_apple_credentials(conn)
+    assert stored.selected_device_id == "device-1"
+    assert stored.selected_device_name == "iPhone von Marius"
+
+    # A fresh login (even to the same account) always requires a fresh pick -
+    # a previously selected device may not even exist on a different session.
+    set_owner_apple_credentials(conn, "owner@example.com", "enc2")
+    stored = get_owner_apple_credentials(conn)
+    assert stored.selected_device_id is None
+    assert stored.selected_device_name is None
 
 
 def test_settings_table_stays_single_row(conn):
