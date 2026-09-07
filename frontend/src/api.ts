@@ -131,6 +131,10 @@ export async function getOwnerLocation(): Promise<OwnerLocation | null> {
   return (await apiFetch('/api/owner-location')).json()
 }
 
+export async function getOwnerLocationHistory(limit = 200): Promise<OwnerLocation[]> {
+  return (await apiFetch(`/api/owner-location/history?limit=${limit}`)).json()
+}
+
 export async function getAppleStatus(): Promise<{ connected: boolean }> {
   return (await apiFetch('/api/apple/status')).json()
 }

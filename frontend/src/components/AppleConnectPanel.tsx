@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { AppleLoginResult, AppleTwoFactorMethod } from '../api'
+import type { AppleLoginResult, AppleTwoFactorMethod, OwnerLocation } from '../api'
+import { formatRelative } from '../format'
 import { ChevronRightIcon, KeyIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 
@@ -13,6 +14,10 @@ export interface AppleConnectAdapter {
   selectMethod?: (methodIndex: number) => Promise<void>
   submitCode: (code: string) => Promise<void>
   disconnect: () => Promise<void>
+  // Only present for adapters that track a location (owner tracking) - the
+  // AirTag-tracking adapter has no location concept of its own.
+  getLocation?: () => Promise<OwnerLocation | null>
+  getHistory?: (limit?: number) => Promise<OwnerLocation[]>
 }
 
 interface Props {
@@ -33,13 +38,30 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   const [code, setCode] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [location, setLocation] = useState<OwnerLocation | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<OwnerLocation[] | null>(null)
 
   useEffect(() => {
     adapter.getStatus().then((s) => setConnected(s.connected))
   }, [adapter])
 
+  useEffect(() => {
+    if (connected && adapter.getLocation) {
+      adapter.getLocation().then(setLocation)
+    }
+  }, [connected, adapter])
+
   async function refreshStatus() {
     setConnected((await adapter.getStatus()).connected)
+  }
+
+  async function toggleHistory() {
+    const next = !historyOpen
+    setHistoryOpen(next)
+    if (next && history === null && adapter.getHistory) {
+      setHistory(await adapter.getHistory())
+    }
   }
 
   function reset() {
@@ -144,6 +166,14 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         bordered={false}
       />
 
+      {connected && adapter.getLocation && (
+        <p className="border-t border-[var(--divider)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+          {location
+            ? `Standort: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)} · ${formatRelative(location.recorded_at)}`
+            : 'Noch kein Standort erfasst.'}
+        </p>
+      )}
+
       {connected && (
         <div className="border-t border-[var(--divider)] p-3">
           <button
@@ -154,6 +184,20 @@ export function AppleConnectPanel({ title, adapter }: Props) {
             Trennen
           </button>
         </div>
+      )}
+
+      {connected && adapter.getHistory && (
+        <>
+          <Row
+            icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
+            label="Verlauf"
+            trailing={
+              <ChevronRightIcon className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
+            }
+            onClick={toggleHistory}
+          />
+          {historyOpen && <OwnerLocationHistoryList entries={history} />}
+        </>
       )}
 
       {open && !connected && (
@@ -230,5 +274,37 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         </div>
       )}
     </Section>
+  )
+}
+
+function OwnerLocationHistoryList({ entries }: { entries: OwnerLocation[] | null }) {
+  if (entries === null) {
+    return (
+      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
+        Lädt…
+      </div>
+    )
+  }
+  if (entries.length === 0) {
+    return (
+      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
+        Noch kein Standortverlauf vorhanden.
+      </div>
+    )
+  }
+  return (
+    <div className="max-h-64 overflow-y-auto border-t border-[var(--divider)]">
+      {entries.map((loc, i) => (
+        <div
+          key={loc.recorded_at}
+          className={`flex items-center justify-between px-4 py-2 text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
+        >
+          <span>{new Date(loc.recorded_at).toLocaleString()}</span>
+          <span className="text-[var(--text-secondary)]">
+            {loc.lat.toFixed(4)}, {loc.lon.toFixed(4)}
+          </span>
+        </div>
+      ))}
+    </div>
   )
 }

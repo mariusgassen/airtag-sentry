@@ -1033,3 +1033,66 @@ app already uses instead of edge-to-edge content.
   - that judgment call is exactly why the two previous attempts needed
   real-device feedback to reject in the first place, and this one should
   get the same scrutiny before being considered settled.
+
+## v14: Owner location history display
+
+Trigger: owner-device location tracking (`owner_tracking.py`, added in
+v11) has been fetching and recording history every poll since it shipped
+(`tracker.py`'s `_update_owner_location()` → `db.py`'s
+`record_owner_location()`, append-only into `owner_locations`), but
+nothing ever read back more than the single latest row, and nothing in the
+dashboard displayed it at all - not even the current position.
+`frontend/src/api.ts` already had a dead `getOwnerLocation()` +
+`OwnerLocation` type that no component called. This closes both gaps:
+adds a history read path and surfaces both current location and history in
+the UI, staying UI-first per `CLAUDE.md`.
+
+- [x] `db.py`: new `fetch_owner_locations(conn, limit=200)`, newest-first,
+      alongside the existing `latest_owner_location`. No migration needed -
+      `owner_locations` and its `idx_owner_locations_recorded_at DESC`
+      index (from the v11 migration) already support this query as-is.
+- [x] `web/app.py`: new `GET /api/owner-location/history` route, same dict
+      shape as the existing `/api/owner-location`, just as a list.
+- [x] `api.ts`: `getOwnerLocationHistory(limit=200)`, one-liner mirroring
+      `getReports`.
+- [x] `mapIcons.ts`: promoted `MapCard.tsx`'s local pulsing-dot
+      `CURRENT_LOCATION_ICON` div-icon into a shared `currentLocationIcon`
+      export, reused for the owner's position rather than inventing a new
+      marker style.
+- [x] `MapCard.tsx` / `OverviewMap.tsx`: new optional `ownerLocation` prop,
+      rendered as a `currentLocationIcon` marker alongside the existing
+      AirTag marker(s)/polyline - the one place "moved without you" becomes
+      visually checkable at a glance. Owner position is deliberately left
+      out of `FitBounds`'s bounds calculation so a lone owner marker can't
+      dominate zoom before any AirTag has reported.
+- [x] `App.tsx`: lifted `ownerLocation` state, fetched once on mount
+      alongside `refreshAirtags()`, passed down to both map components -
+      same top-down flow already used for `statuses`/`reports`.
+- [x] `AppleConnectPanel.tsx`: `AppleConnectAdapter` gained optional
+      `getLocation`/`getHistory` (absent for the AirTag-tracking adapter,
+      same optionality pattern as the existing `selectMethod?`). When
+      present and connected, the "Eigener Standort" row now shows the
+      current position + relative time, plus a lazy-loaded "Verlauf" list
+      matching `AirtagDetail.tsx`'s `HistoryList` styling (skips the
+      reverse, since the API is already newest-first).
+- [x] `SettingsPanel.tsx`: wired `OWNER_APPLE_ADAPTER` with the new
+      `getLocation`/`getHistory`; `AIRTAG_APPLE_ADAPTER` untouched (no
+      location concept there).
+- [x] `test_db.py`: new
+      `test_fetch_owner_locations_returns_newest_first_and_respects_limit`.
+
+## Review (v14)
+- 9 files touched (2 backend, 6 frontend, 1 test), no schema/migration
+  change, no new dependencies.
+- Verified: `pytest` against real local Postgres - 60 passed, including the
+  new test. `cd frontend && npx tsc -b && npx vite build` clean; `npx
+  oxlint` shows only the same two pre-existing `set-state-in-effect`
+  warnings from v13 (unchanged - the new owner-location effect in
+  `App.tsx` did not add a new one). `docker compose config` parses cleanly
+  with a throwaway `.env`.
+- Not verified in this sandbox: true end-to-end with a live Apple
+  owner-tracking session (no real Apple ID/2FA available here, same
+  limitation noted in v11's and v13's reviews) - confirmed instead against
+  the real Postgres round-trip test and a clean build. The map marker and
+  history list should be checked visually against a real connected account
+  before considering this fully settled.

@@ -1,15 +1,8 @@
 import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import type { Report } from '../api'
-import { airtagPinIcon } from '../mapIcons'
-
-const CURRENT_LOCATION_ICON = L.divIcon({
-  className: 'current-location-marker',
-  html: '<span class="pulse"></span><span class="dot"></span>',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-})
+import type { OwnerLocation, Report } from '../api'
+import { formatRelative } from '../format'
+import { airtagPinIcon, currentLocationIcon } from '../mapIcons'
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
@@ -74,7 +67,7 @@ export function NoReportsView() {
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <Marker position={here} icon={CURRENT_LOCATION_ICON}>
+      <Marker position={here} icon={currentLocationIcon}>
         <Popup>Aktueller Standort</Popup>
       </Marker>
       <InvalidateSizeOnResize />
@@ -82,7 +75,15 @@ export function NoReportsView() {
   )
 }
 
-export function MapCard({ reports, airtagId }: { reports: Report[]; airtagId: string }) {
+export function MapCard({
+  reports,
+  airtagId,
+  ownerLocation,
+}: {
+  reports: Report[]
+  airtagId: string
+  ownerLocation?: OwnerLocation | null
+}) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
 
   if (positions.length === 0) {
@@ -99,6 +100,11 @@ export function MapCard({ reports, airtagId }: { reports: Report[]; airtagId: st
       <Marker position={positions[positions.length - 1]} icon={airtagPinIcon(airtagId)}>
         <Popup>Letzte Position</Popup>
       </Marker>
+      {ownerLocation && (
+        <Marker position={[ownerLocation.lat, ownerLocation.lon]} icon={currentLocationIcon}>
+          <Popup>Eigener Standort · {formatRelative(ownerLocation.recorded_at)}</Popup>
+        </Marker>
+      )}
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
     </MapContainer>
