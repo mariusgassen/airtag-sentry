@@ -35,6 +35,7 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    fetch_owner_locations,
     fetch_reports,
     get_conn,
     get_settings,
@@ -641,6 +642,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "lon": location.lon,
             "horizontal_accuracy": location.horizontal_accuracy,
         }
+
+    @app.get("/api/owner-location/history")
+    def get_owner_location_history(limit: int = 200):
+        """History of the owner's device location, newest first - see
+        owner_tracking.py; empty if the feature isn't configured."""
+        with get_conn(cfg.database_url) as conn:
+            locations = fetch_owner_locations(conn, limit=limit)
+        return [
+            {
+                "recorded_at": loc.recorded_at.isoformat(),
+                "lat": loc.lat,
+                "lon": loc.lon,
+                "horizontal_accuracy": loc.horizontal_accuracy,
+            }
+            for loc in locations
+        ]
 
     @app.get("/api/apple/status")
     def apple_status():

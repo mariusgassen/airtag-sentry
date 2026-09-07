@@ -26,3 +26,13 @@ export function airtagPinIcon(id: string): L.DivIcon {
     popupAnchor: [0, -(SIZE + 4)],
   })
 }
+
+/** "You are here" pulsing-dot marker, shared between MapCard (browser
+ * geolocation fallback) and any map showing the owner's own device
+ * location - deliberately distinct from airtagPinIcon's badge look. */
+export const currentLocationIcon: L.DivIcon = L.divIcon({
+  className: 'current-location-marker',
+  html: '<span class="pulse"></span><span class="dot"></span>',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+})

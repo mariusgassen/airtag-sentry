@@ -13,6 +13,7 @@ from airtag_sentry.db import (
     delete_airtag,
     delete_airtag_key,
     delete_owner_apple_credentials,
+    fetch_owner_locations,
     get_airtag_key,
     get_conn,
     get_owner_apple_credentials,
@@ -261,6 +262,34 @@ def test_owner_location_record_and_latest_round_trip(conn):
         ),
     )
     assert latest_owner_location(conn) == second
+
+
+def test_fetch_owner_locations_returns_newest_first_and_respects_limit(conn):
+    assert fetch_owner_locations(conn) == []
+
+    first = record_owner_location(
+        conn,
+        OwnerLocation(
+            id=None,
+            recorded_at=dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc),
+            lat=52.5,
+            lon=13.4,
+            horizontal_accuracy=10.0,
+        ),
+    )
+    second = record_owner_location(
+        conn,
+        OwnerLocation(
+            id=None,
+            recorded_at=dt.datetime(2026, 1, 1, 10, 15, tzinfo=dt.timezone.utc),
+            lat=52.51,
+            lon=13.41,
+            horizontal_accuracy=8.0,
+        ),
+    )
+
+    assert fetch_owner_locations(conn) == [second, first]
+    assert fetch_owner_locations(conn, limit=1) == [second]
 
 
 def test_owner_apple_credentials_set_get_delete_round_trip(conn):

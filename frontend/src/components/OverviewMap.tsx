@@ -1,19 +1,20 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
-import type { Airtag, Status } from '../api'
+import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
-import { airtagPinIcon } from '../mapIcons'
+import { airtagPinIcon, currentLocationIcon } from '../mapIcons'
 import { FitBounds, InvalidateSizeOnResize, NoReportsView } from './MapCard'
 
 interface Props {
   airtags: Airtag[]
   statuses: Record<string, Status>
   onSelect: (id: string) => void
+  ownerLocation?: OwnerLocation | null
 }
 
 /** Main map view for the list/settings screens - every AirTag's last known
  * position at once (Find My's own overview screen), vs. MapCard's single
  * tag + route once you've drilled into its detail view. */
-export function OverviewMap({ airtags, statuses, onSelect }: Props) {
+export function OverviewMap({ airtags, statuses, onSelect, ownerLocation }: Props) {
   const located = airtags
     .map((airtag) => ({ airtag, lastReport: statuses[airtag.id]?.last_report ?? null }))
     .filter((entry): entry is { airtag: Airtag; lastReport: NonNullable<Status['last_report']> } =>
@@ -49,6 +50,11 @@ export function OverviewMap({ airtags, statuses, onSelect }: Props) {
           </Popup>
         </Marker>
       ))}
+      {ownerLocation && (
+        <Marker position={[ownerLocation.lat, ownerLocation.lon]} icon={currentLocationIcon}>
+          <Popup>Eigener Standort · {formatRelative(ownerLocation.recorded_at)}</Popup>
+        </Marker>
+      )}
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
     </MapContainer>

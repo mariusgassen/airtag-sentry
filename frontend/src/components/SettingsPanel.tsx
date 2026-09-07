@@ -7,6 +7,8 @@ import {
   appleSubmitTwoFactorCode,
   getAppleStatus,
   getOwnerAppleStatus,
+  getOwnerLocation,
+  getOwnerLocationHistory,
   getSettings,
   ownerAppleDisconnect,
   ownerAppleLogin,
@@ -33,6 +35,8 @@ const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
   login: ownerAppleLogin,
   submitCode: ownerAppleSubmitTwoFactorCode,
   disconnect: ownerAppleDisconnect,
+  getLocation: getOwnerLocation,
+  getHistory: getOwnerLocationHistory,
 }
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [

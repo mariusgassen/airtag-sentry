@@ -374,3 +374,13 @@ def latest_owner_location(conn: psycopg.Connection) -> OwnerLocation | None:
         )
         row = cur.fetchone()
         return OwnerLocation(*row) if row else None
+
+
+def fetch_owner_locations(conn: psycopg.Connection, limit: int = 200) -> list[OwnerLocation]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, recorded_at, lat, lon, horizontal_accuracy FROM owner_locations "
+            "ORDER BY recorded_at DESC LIMIT %s",
+            (limit,),
+        )
+        return [OwnerLocation(*row) for row in cur.fetchall()]
