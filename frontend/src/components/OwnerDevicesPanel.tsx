@@ -51,19 +51,27 @@ export function OwnerDevicesPanel() {
   }
 
   async function toggle(device: OwnerDevice) {
-    const updated = await setOwnerDeviceEnabled(device.id, !device.enabled)
-    setDevices((ds) => ds?.map((d) => (d.id === updated.id ? updated : d)) ?? ds)
+    try {
+      const updated = await setOwnerDeviceEnabled(device.id, !device.enabled)
+      setDevices((ds) => ds?.map((d) => (d.id === updated.id ? updated : d)) ?? ds)
+    } catch (err) {
+      alert('Ändern fehlgeschlagen: ' + (err as Error).message)
+    }
   }
 
   async function togglePrimary(device: OwnerDevice) {
-    if (device.is_primary) {
-      await clearOwnerDevicePrimary()
-      setDevices((ds) => ds?.map((d) => ({ ...d, is_primary: false })) ?? ds)
-      return
+    try {
+      if (device.is_primary) {
+        await clearOwnerDevicePrimary()
+        setDevices((ds) => ds?.map((d) => ({ ...d, is_primary: false })) ?? ds)
+        return
+      }
+      const updated = await setOwnerDevicePrimary(device.id)
+      // Picking a new primary is exclusive and force-enables the device server-side.
+      setDevices((ds) => ds?.map((d) => (d.id === updated.id ? updated : { ...d, is_primary: false })) ?? ds)
+    } catch (err) {
+      alert('Ändern fehlgeschlagen: ' + (err as Error).message)
     }
-    const updated = await setOwnerDevicePrimary(device.id)
-    // Picking a new primary is exclusive and force-enables the device server-side.
-    setDevices((ds) => ds?.map((d) => (d.id === updated.id ? updated : { ...d, is_primary: false })) ?? ds)
   }
 
   async function toggleHistory(id: string) {

@@ -1723,3 +1723,52 @@ AirTag - lived in `AirtagList`'s header bell and a per-AirTag
   the new dashboard connect flow (encrypt → store → decrypt → send)
   unexercised against a real bot; worth a real-token smoke test before
   relying on it.
+
+## v22: Fix silent no-op when checking/favoriting an owner device fails
+
+Trigger: user report - "cannot set device in iCloud devices as favorite or
+check it." Same root cause class as v20 (which fixed the analogous problem
+for the device *list* fetch): `OwnerDevicesPanel.tsx`'s `toggle()` (the
+enabled checkbox) and `togglePrimary()` (the favorite star) called
+`setOwnerDeviceEnabled`/`setOwnerDevicePrimary`/`clearOwnerDevicePrimary`
+with no `try`/`catch` at all. Since the checkbox/star are controlled by
+`device.enabled`/`device.is_primary` from state, a rejected request (a
+lapsed pyicloud session, a transient network error, or any other backend
+failure) left state - and therefore the control - completely unchanged,
+with the rejection going nowhere but the browser console. From the user's
+side this reads as "nothing happens when I click it," indistinguishable
+from the feature being broken outright, even though the click was in fact
+sent and failed for a real (and previously invisible) reason.
+
+- [x] `OwnerDevicesPanel.tsx`: wrapped both `toggle()` and `togglePrimary()`
+      bodies in `try`/`catch`, showing `alert('Ändern fehlgeschlagen: ' +
+      err.message)` on failure - the same pattern `AirtagDetail.tsx`'s
+      `KeyForm.handleSave()` already uses for a single row-level action
+      failing, rather than adding a new persistent error-banner state like
+      v20's list-level fix (there's no natural place to anchor a banner to
+      one specific row's toggle, and a one-off alert is enough to stop the
+      click from looking like it did nothing).
+
+## Review (v22)
+- 1 file touched, no new dependencies, no backend change (the enable/
+  primary routes are plain DB writes with no live Apple call, so they
+  don't share v20's "uncaught 500 from Apple" failure mode specifically -
+  but any failure there, DB or otherwise, was equally silent before this
+  fix).
+- Verified: `pytest tests/` - 52 passed, 21 skipped (Postgres-dependent, no
+  live Postgres in this sandbox) - unchanged, since this fix touches no
+  Python. `cd frontend && npx tsc -b && npx vite build` clean; `npx oxlint`
+  shows only the same three pre-existing `set-state-in-effect` warnings
+  from v13/v14/v16/v17/v18, no new ones. `docker compose config` parses
+  cleanly with a throwaway `.env`.
+- Not verified in this sandbox (no real owner-tracking Apple session): the
+  actual failing request the reporting user hit. The fix addresses the
+  general defect - any failure in these two calls was silently swallowed -
+  rather than one specific underlying cause, since none could be
+  reproduced here; worth confirming with the user whether the alert now
+  appears (and what it says) the next time a check/favorite click doesn't
+  take effect. No frontend test added - this repo has no frontend test
+  harness yet (no `.test.`/`.spec.` files anywhere under `frontend/`), and
+  standing one up for a two-branch `try`/`catch` would be disproportionate;
+  covered instead by the build/lint verification above plus manual code
+  review against the working `KeyForm` precedent.
