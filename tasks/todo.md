@@ -971,6 +971,45 @@ run command, which mounts this exact path for this exact reason).
   can be confirmed without watching a real deployment survive multiple
   redeploys without re-triggering it.
 
+## v12.4: fix v12.3's anisette volume - it mounted the wrong subdirectory
+Trigger: the 503 recurred hours after v12.3 deployed, on both 2FA methods.
+User asked directly: "does it only meet the lib folder?" - yes, and that
+was the bug. v12.3 mounted `anisette_data` at
+`.../anisette-v3/lib/`, matching the upstream project's own documented
+`docker run` example - but reading the actual server source
+(`source/app.d` in [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server))
+shows `device.json` - the file holding the machine ID/UUID Apple actually
+keys trust off - is written directly into `configurationPath`
+(`~/.config/anisette-v3`), the *parent* of `lib/`. `lib/` itself only
+caches two downloadable Apple libraries (`libCoreADI.so`/
+`libstoreservicescore.so`), which aren't identity-bearing at all. So v12.3
+persisted the one thing that didn't matter and silently missed the one
+thing that did - every redeploy was still generating a brand-new device
+identity exactly as before, with no error to reveal it.
+
+Also audited: this prompted a full re-check of every env var in both
+`app`'s and `dashboard`'s `environment:` blocks against what `config.py`
+actually reads - none were stale. `APPLE_STORE_PATH`/
+`APPLE_OWNER_SESSION_PATH`/`ANISETTE_LIBS_PATH` are deliberately absent
+(code defaults, per earlier reviews) and still correctly so.
+
+- [x] `docker-compose.yml`: `anisette_data` now mounts at
+      `/home/Alcoholic/.config/anisette-v3/` (the parent), covering both
+      `device.json` and `lib/` in one volume. Comment updated with the
+      source-level explanation and an explicit warning not to trust the
+      upstream README's own example path without checking the source, in
+      case this image is ever updated again.
+
+## Review (v12.4)
+- One file touched, no application code changes.
+- Verified: `docker compose config` (throwaway `.env`) parses cleanly and
+  confirms the volume now mounts at the corrected parent path.
+- Not verified in this sandbox (no real Apple ID, no way to run the actual
+  anisette-v3-server binary here to inspect `device.json` being written):
+  that a real deployment's `device.json` now survives a restart and that
+  this actually stops the 503s in practice - confirmed by reading the
+  server's own source code, not by observing the file get written.
+
 ## v13: Top safe-area title bar (replaces dead decorative panel)
 
 Trigger: a follow-up round on v10's fix, done in a separate session and not
