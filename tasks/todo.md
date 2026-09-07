@@ -1096,3 +1096,44 @@ the UI, staying UI-first per `CLAUDE.md`.
   the real Postgres round-trip test and a clean build. The map marker and
   history list should be checked visually against a real connected account
   before considering this fully settled.
+
+## v15: Owner device in the main AirTags list
+
+Trigger: v14 surfaced owner location on the map and in Settings ->
+Apple-Konten, but a connected owner device was otherwise invisible - you
+had to open Settings to even know owner tracking existed. The main
+AirTags list (the "Objects" tab, `AirtagList.tsx`) is the first thing the
+dashboard shows, so a connected owner device belongs there too, not only
+tucked away in Settings.
+
+- [x] `icons.tsx`: new `PersonIcon` (simple head-and-shoulders glyph) for
+      the owner row - distinct from `AirtagGlyph` so it doesn't read as
+      "just another AirTag".
+- [x] `AirtagList.tsx`: new `ownerConnected`/`ownerLocation` props. When
+      `ownerConnected`, renders a "Du" row at the top of the list (above
+      the AirTags), styled to match the AirTag rows (same avatar-badge +
+      title/subtitle layout) with its own accent-colored `PersonIcon`
+      badge instead of an `AirtagAvatar`, and the same relative-time
+      subtitle convention (`formatRelative`/"Kein Standort verfügbar")
+      already used for AirTags without a report. Not clickable - there is
+      no owner detail view (setup still lives in Settings ->
+      Apple-Konten's `AppleConnectPanel`), this is a status glance only.
+- [x] `App.tsx`: added `ownerConnected` state, fetched via the existing
+      `getOwnerAppleStatus()` (already used by `SettingsPanel.tsx`) in the
+      same mount effect as `ownerLocation`; both passed down to
+      `AirtagList`.
+
+## Review (v15)
+- 3 files touched, all frontend, no backend/schema change, no new
+  dependencies.
+- Verified: `cd frontend && npx tsc -b && npx vite build` clean; `npx
+  oxlint` shows only the same two pre-existing `set-state-in-effect`
+  warnings from v13/v14 (unchanged - the added `getOwnerAppleStatus` call
+  lives in the same effect as the existing `getOwnerLocation` call, so no
+  new warning).
+- Not verified in this sandbox: visually, against a real connected owner
+  Apple account (no real Apple ID/2FA available here, same limitation
+  noted in v11/v13/v14's reviews) - the row's conditional rendering and
+  data flow were checked by reading `SettingsPanel.tsx`'s existing
+  `OWNER_APPLE_ADAPTER` usage of the same `getOwnerAppleStatus`/
+  `getOwnerLocation` calls, not by exercising the UI live.

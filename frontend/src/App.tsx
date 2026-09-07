@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Airtag, OwnerLocation, Report, Status } from './api'
-import { createAirtag, getAirtags, getOwnerLocation, getReports, getStatus } from './api'
+import { createAirtag, getAirtags, getOwnerAppleStatus, getOwnerLocation, getReports, getStatus } from './api'
 import { AirtagList } from './components/AirtagList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { MapCard } from './components/MapCard'
@@ -45,6 +45,7 @@ export default function App() {
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
   const [ownerLocation, setOwnerLocation] = useState<OwnerLocation | null>(null)
+  const [ownerConnected, setOwnerConnected] = useState(false)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   const [showDetail, setShowDetail] = useState(false)
   const [sheetState, setSheetState] = useState<SheetState>('default')
@@ -84,6 +85,9 @@ export default function App() {
     getOwnerLocation()
       .then(setOwnerLocation)
       .catch(() => setOwnerLocation(null))
+    getOwnerAppleStatus()
+      .then((s) => setOwnerConnected(s.connected))
+      .catch(() => setOwnerConnected(false))
   }, [])
 
   useEffect(() => {
@@ -281,6 +285,8 @@ export default function App() {
                 onCreate={handleCreate}
                 pushStatus={push.status}
                 onEnablePush={push.enable}
+                ownerConnected={ownerConnected}
+                ownerLocation={ownerLocation}
               />
             )}
           </div>
