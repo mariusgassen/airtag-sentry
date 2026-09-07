@@ -104,3 +104,35 @@ path.
 
 Export an AirTag's location history for a given period — useful when
 reporting a theft to police.
+
+## 12. Fallback: upload an existing `account.json` instead of live login
+
+Real-user report (Sep 2026): a first-time AirTag-tracking login for this
+Apple ID consistently failed 2FA submission with
+`findmy.errors.UnhandledProtocolError: Error response for GSA request: 503`
+- a raw rejection from Apple's own GSA endpoint, not a bug in this app's
+code. Independently corroborated in
+[malmeloo/FindMy.py#165](https://github.com/malmeloo/FindMy.py/issues/165):
+another user hit the identical error on a *fresh* account.json generation
+attempt, while a session generated on a real Mac worked fine afterward -
+pointing at Apple's anti-automation defenses rejecting first-time login
+handshakes from freshly-provisioned (non-genuine-hardware) device
+identities, at least some of the time. Ruled out as a cause: anisette
+device-identity persistence (already fixed, `tasks/todo.md` v12.3) and the
+UI-vs-CLI login trigger (this Apple ID had never completed this flow via
+the old CLI `login` command either, so it isn't a regression from the
+login-UI migration).
+
+If waiting out Apple's apparent cooldown and retrying with the same
+(persisted, not re-provisioned) anisette identity doesn't eventually
+succeed, the fallback used elsewhere in the FindMy.py ecosystem is: generate
+`account.json` via a real Mac/genuine Apple hardware once (the same
+`FindMy.py`/keychain mechanism this project's README already documents for
+*AirTag key* extraction, just applied to the *account* session instead),
+then let the dashboard accept an upload of that file directly - bypassing
+the live SRP+2FA handshake this app currently always performs. Would need:
+a new `POST /api/apple/session` (multipart upload) validating the JSON
+shape before writing it to `APPLE_STORE_PATH`, and an "Upload session
+file" option alongside the existing login form in `AppleConnectPanel.tsx`
+(or a variant of it). Only worth building if the wait-and-retry path turns
+out not to work for this account.
