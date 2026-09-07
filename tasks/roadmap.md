@@ -136,3 +136,42 @@ shape before writing it to `APPLE_STORE_PATH`, and an "Upload session
 file" option alongside the existing login form in `AppleConnectPanel.tsx`
 (or a variant of it). Only worth building if the wait-and-retry path turns
 out not to work for this account.
+
+## 13. Blocked on upstream: AirTag key extraction without a Mac (rustpush)
+
+The README's "Getting started" still has exactly one step that isn't a
+dashboard flow: step 2, "Extract your AirTag's key," which requires a Mac
+with the AirTag paired in Find My and `python -m findmy decrypt` reading
+the local macOS keychain. Per `CLAUDE.md`'s UI-first constraint, that's the
+one case here where "there's a real technical reason a browser request
+can't do it" - `FindMy.py` (the library this app depends on for all Apple
+offline-finding protocol work, see `README.md`) has no way to pull that key
+material without genuine Apple hardware.
+
+[malmeloo/FindMy.py#173](https://github.com/malmeloo/FindMy.py/issues/173)
+(opened by the library's own maintainer, Sep 2025, unassigned, no comments
+yet) tracks closing exactly that gap: importing accessory secrets straight
+from iCloud Keychain, no Mac needed. The suggested mechanism is
+[rustpush](https://github.com/OpenBubbles/rustpush), a Rust reimplementation
+of Apple's push/iMessage/iCloud protocols that already has a working
+CloudKit keychain-sync client
+([`cloudkit.rs#L828`](https://github.com/OpenBubbles/rustpush/blob/master/src/cloudkit.rs#L828)).
+Three integration shapes are floated in the issue, in the maintainer's own
+order of preference: (a) port the relevant Rust logic into `FindMy.py`
+directly ("potentially a lot of work"), (b) a Rust CLI wrapper around
+rustpush that dumps secrets in `FindMy.py`'s existing key-JSON format and
+ideally reuses the same Apple session `auth.py` already holds, or (c) a
+Python binding over rustpush (the maintainer's least-favored option, since
+`FindMy.py` is deliberately Python-only).
+
+This is upstream work, not airtag-sentry work - this repo already accepts
+AirTag key material purely through the UI (paste-or-upload in the AirTag
+detail view, per `README.md`'s existing "fully UI-managed" note), so
+nothing here needs to change to consume whatever `FindMy.py` ships. Once
+issue #173 lands in a released `FindMy.py` version, the only change on this
+side is deleting README step 2's Mac/keychain instructions (and the
+"Prerequisites" bullet requiring one) in favor of whatever new
+one-line CLI/export step `FindMy.py` exposes, closing the last gap in the
+UI-first constraint. Tracked here to revisit next time `FindMy.py` is
+bumped in `pyproject.toml` - not worth reimplementing rustpush's protocol
+work independently inside this repo.
