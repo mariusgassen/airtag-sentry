@@ -18,6 +18,13 @@
      the sheet's height calculations never need to know the tab bar's
      rendered size. */
   --tabbar-h: calc(49px + env(safe-area-inset-bottom));
+
+  /* Height of the mobile top title bar (App.tsx, below the reserved status
+     bar strip) - shared with Leaflet's zoom-control offset in the mobile
+     media query below, so the two never overlap. Only consumed on mobile
+     (App.tsx's header is md:hidden); defining it unconditionally here
+     matches --tabbar-h's own pattern above. */
+  --header-h: 44px;
 }
 
 /* iOS/macOS system light-mode palette - applied when the OS is in light
@@ -229,5 +236,16 @@ body {
   }
   .sheet[data-dragging="true"][data-state="minimized"] {
     height: calc(var(--sheet-handle-h) + var(--drag-delta, 0px));
+  }
+
+  /* App.tsx's title bar (mobile only, md:hidden) sits right below the
+     reserved status bar strip, at top: env(safe-area-inset-top) - this
+     overrides the unconditional .leaflet-top rule above (which only
+     accounts for the status bar itself) to also push the zoom control down
+     by --header-h, so it clears the title bar instead of sitting under it.
+     Scoped to this mobile media query since the desktop layout has no
+     title bar to clear. */
+  .leaflet-top {
+    top: calc(env(safe-area-inset-top) + var(--header-h));
   }
 }

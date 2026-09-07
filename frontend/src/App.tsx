@@ -182,19 +182,28 @@ export default function App() {
         )}
       </div>
 
-      {/* Glass background for the top safe area (status bar/notch), matching
-          the bottom's chrome-blur treatment (TabBar, sheet handle) so the
-          full-bleed map doesn't look cut off under the notch. Decorative
-          only - no controls live here, and it never intercepts map taps.
-          On an installed iOS PWA this is currently covered by the OS's own
-          opaque status bar (index.html's status-bar-style comment) and
-          isn't visible there - kept for Android/desktop and in case a
-          future WebKit fixes the black-translucent sizing bug that forced
-          the opaque bar in the first place. */}
-      <div
-        aria-hidden="true"
-        className="chrome-blur pointer-events-none absolute inset-x-0 top-0 z-10 h-[env(safe-area-inset-top)] md:hidden"
-      />
+      {/* Title bar for the reserved top safe area. index.html's
+          status-bar-style comment covers why this space can't be
+          translucent map instead (CLAUDE.md's "iOS status bar" section has
+          the full trade-off) - this leans into that constraint instead of
+          fighting it, the same way most non-immersive iOS apps use a real
+          header rather than trying to bleed content under the status bar.
+          Positioned starting at safe-area-inset-top (not top-0): iOS
+          reserves the strip above that for its own opaque status bar
+          regardless of what's drawn there, so a title placed any higher
+          would just be covered. .leaflet-top's mobile-only offset (see
+          index.css) adds --header-h on top of its existing
+          safe-area-inset-top push so the zoom control clears this bar
+          instead of sitting underneath it. Currently just the selected
+          AirTag's name (or "AirTags" with none selected/on the overview
+          map) - reusing the same fallback as `title` above - but the slot
+          is deliberately generic so future per-AirTag meta (e.g. battery,
+          last-seen) can go here without a layout change. */}
+      <div className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-10 flex h-[var(--header-h)] items-center justify-center border-b border-[var(--divider)] chrome-blur md:hidden">
+        <span className="truncate px-12 text-[15px] font-semibold text-[var(--text)]">
+          {currentAirtag?.name ?? 'AirTags'}
+        </span>
+      </div>
 
       {/* Sheet + tab bar, grouped so the tab bar always sits directly below
           the sheet: on mobile this column is pinned to the screen's bottom
