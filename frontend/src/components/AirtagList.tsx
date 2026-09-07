@@ -19,6 +19,10 @@ interface Props {
   // the Settings panel it started in (see tasks/todo.md v15).
   ownerConnected: boolean
   ownerLocation: OwnerLocation | null
+  // Name of the device selected in Settings -> Apple-Konten (see
+  // owner_tracking.set_selected_device) - null while connected but not yet
+  // chosen, which fetch_owner_location() treats as "nothing to fetch".
+  ownerDeviceName: string | null
 }
 
 export function AirtagList({
@@ -31,6 +35,7 @@ export function AirtagList({
   onEnablePush,
   ownerConnected,
   ownerLocation,
+  ownerDeviceName,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -103,9 +108,13 @@ export function AirtagList({
                 <PersonIcon className="h-5 w-5" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[0.95rem] font-medium">Du</span>
+                <span className="block truncate text-[0.95rem] font-medium">{ownerDeviceName ?? 'Du'}</span>
                 <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
-                  {ownerLocation ? capitalize(formatRelative(ownerLocation.recorded_at)) : 'Kein Standort verfügbar'}
+                  {ownerLocation
+                    ? capitalize(formatRelative(ownerLocation.recorded_at))
+                    : ownerDeviceName === null
+                      ? 'Gerät in Einstellungen auswählen'
+                      : 'Kein Standort verfügbar'}
                 </span>
               </span>
             </div>

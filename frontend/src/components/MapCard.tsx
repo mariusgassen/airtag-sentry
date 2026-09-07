@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
 import type { OwnerLocation, Report } from '../api'
 import { formatRelative } from '../format'
-import { airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
@@ -79,12 +79,15 @@ export function MapCard({
   reports,
   airtagId,
   ownerLocation,
+  ownerLocationHistory,
 }: {
   reports: Report[]
   airtagId: string
   ownerLocation?: OwnerLocation | null
+  ownerLocationHistory?: OwnerLocation[]
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+  const ownerPositions: [number, number][] = (ownerLocationHistory ?? []).map((l) => [l.lat, l.lon])
 
   if (positions.length === 0) {
     return <NoReportsView />
@@ -97,6 +100,9 @@ export function MapCard({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Polyline positions={positions} pathOptions={{ color: '#0a84ff', weight: 4 }} />
+      {ownerPositions.length > 1 && (
+        <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
+      )}
       <Marker position={positions[positions.length - 1]} icon={airtagPinIcon(airtagId)}>
         <Popup>Letzte Position</Popup>
       </Marker>

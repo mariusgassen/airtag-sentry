@@ -38,6 +38,11 @@ export interface OwnerLocation {
   horizontal_accuracy: number | null
 }
 
+export interface OwnerDevice {
+  id: string
+  name: string
+}
+
 export interface AppleTwoFactorMethod {
   index: number
   kind: 'trusted_device' | 'sms' | 'unknown'
@@ -160,8 +165,23 @@ export async function appleDisconnect(): Promise<void> {
   await apiFetch('/api/apple', { method: 'DELETE' })
 }
 
-export async function getOwnerAppleStatus(): Promise<{ connected: boolean }> {
+export async function getOwnerAppleStatus(): Promise<{
+  connected: boolean
+  selected_device_id: string | null
+  selected_device_name: string | null
+}> {
   return (await apiFetch('/api/apple/owner/status')).json()
+}
+
+export async function getOwnerDevices(): Promise<OwnerDevice[]> {
+  return (await apiFetch('/api/apple/owner/devices')).json()
+}
+
+export async function selectOwnerDevice(device: OwnerDevice): Promise<void> {
+  await apiFetch('/api/apple/owner/device', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: device.id, device_name: device.name }),
+  })
 }
 
 export async function ownerAppleLogin(appleId: string, password: string): Promise<AppleLoginResult> {

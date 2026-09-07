@@ -18,6 +18,13 @@ entered through the dashboard's login flow rather than an env var.
 
 Entirely optional: every function here is a no-op (or returns None) when no
 credentials are stored, so the rest of the app is unaffected if it's never connected.
+
+Which of the account's (possibly several) devices counts as "the owner" is an
+explicit choice, not a guess: fetch_owner_location() only ever reads the one
+device selected via set_selected_device() (persisted in
+owner_apple_credentials.selected_device_id/_name), and returns None - fetching
+nothing - until a device has been chosen. There is deliberately no
+"first device that answers" fallback.
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from airtag_sentry.db import (
     delete_owner_apple_credentials,
     get_owner_apple_credentials,
     set_owner_apple_credentials,
+    set_owner_selected_device,
 )
 
 logger = logging.getLogger(__name__)
@@ -104,32 +112,66 @@ def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
     _pending_password = None
 
 
-def is_connected(conn) -> bool:
-    return get_owner_apple_credentials(conn) is not None
+def connection_status(conn) -> dict:
+    """Connection + device-selection status for the dashboard's Apple-Konten panel."""
+    creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
+    if creds is None:
+        return {"connected": False, "selected_device_id": None, "selected_device_name": None}
+    return {
+        "connected": True,
+        "selected_device_id": creds.selected_device_id,
+        "selected_device_name": creds.selected_device_name,
+    }
 
 
 def disconnect(conn) -> None:
     delete_owner_apple_credentials(conn)
 
 
-def fetch_owner_location(cfg: Config, conn) -> OwnerLocation | None:
-    """Fetch the owner's current device location, or None if it isn't connected or
-    no device returned a location this call."""
+def list_owner_devices(cfg: Config, conn) -> list[dict]:
+    """Devices on the connected owner Apple account, for the dashboard's device-
+    selection step (see set_selected_device()). Empty list if not connected."""
     creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
     if creds is None:
+        return []
+
+    password = keystore.decrypt(cfg.key_encryption_key, creds.encrypted_password)
+    api = _build_api(creds.apple_id, password, cfg.apple.owner_session_dir)
+    return [
+        {"id": device["id"], "name": device.name or device.model_name or "Unbekanntes Gerät"}
+        for device in api.devices
+    ]
+
+
+def set_selected_device(conn, device_id: str, device_name: str) -> None:
+    """Persist which of the account's devices determines the owner's location."""
+    set_owner_selected_device(conn, device_id, device_name)
+
+
+def fetch_owner_location(cfg: Config, conn) -> OwnerLocation | None:
+    """Fetch the selected owner device's current location - None if not connected,
+    no device has been selected yet (see set_selected_device()), the selected
+    device is no longer on the account, or it didn't return a location this call."""
+    creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
+    if creds is None or creds.selected_device_id is None:
         return None
 
     password = keystore.decrypt(cfg.key_encryption_key, creds.encrypted_password)
     api = _build_api(creds.apple_id, password, cfg.apple.owner_session_dir)
-    for device in api.devices:
-        location = device.location()
-        if location is None:
-            continue
-        return OwnerLocation(
-            id=None,
-            recorded_at=dt.datetime.now(dt.timezone.utc),
-            lat=location["latitude"],
-            lon=location["longitude"],
-            horizontal_accuracy=location.get("horizontalAccuracy"),
-        )
-    return None
+    device = next((d for d in api.devices if d["id"] == creds.selected_device_id), None)
+    if device is None:
+        logger.warning("Selected owner device is no longer on the Apple account.")
+        return None
+
+    # A property in current pyicloud (not a method) - it returns the already-
+    # fetched location dict directly, or None if none is available.
+    location = device.location
+    if location is None:
+        return None
+    return OwnerLocation(
+        id=None,
+        recorded_at=dt.datetime.now(dt.timezone.utc),
+        lat=location["latitude"],
+        lon=location["longitude"],
+        horizontal_accuracy=location.get("horizontalAccuracy"),
+    )
