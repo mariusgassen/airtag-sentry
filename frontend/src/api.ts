@@ -176,6 +176,13 @@ export async function appleSubmitTwoFactorCode(code: string): Promise<void> {
   await apiFetch('/api/apple/2fa/submit', { method: 'POST', body: JSON.stringify({ code }) })
 }
 
+export async function appleImportSession(sessionJson: unknown): Promise<void> {
+  await apiFetch('/api/apple/session', {
+    method: 'POST',
+    body: JSON.stringify({ session_json: sessionJson }),
+  })
+}
+
 export async function appleDisconnect(): Promise<void> {
   await apiFetch('/api/apple', { method: 'DELETE' })
 }

@@ -122,6 +122,21 @@ def disconnect(cfg: Config) -> None:
     Path(cfg.apple.store_path).unlink(missing_ok=True)
 
 
+def import_session(cfg: Config, session_json: dict) -> None:
+    """Import an Apple session generated elsewhere (e.g. AppleAccount.to_json()
+    run on a machine with genuine Apple hardware) instead of performing the
+    live SRP+2FA handshake here. Fallback for when Apple's anti-automation
+    defenses reject fresh login attempts from this container's own anisette
+    identity with `GSA request: 503` - see tasks/roadmap.md #12."""
+    try:
+        account = AppleAccount.from_json(
+            session_json, anisette_libs_path=cfg.apple.anisette.libs_path
+        )
+    except Exception as exc:
+        raise ValueError(f"Invalid session file: {exc}") from exc
+    account.to_json(cfg.apple.store_path)
+
+
 def restore_account(cfg: Config) -> AppleAccount:
     """Restore a previously saved session. Raises FileNotFoundError if none exists yet."""
     try:

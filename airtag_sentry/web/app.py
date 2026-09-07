@@ -240,6 +240,10 @@ class AppleTwoFactorCodeIn(BaseModel):
     code: str
 
 
+class AppleSessionImportIn(BaseModel):
+    session_json: dict
+
+
 class OwnerLoginIn(BaseModel):
     apple_id: str
     password: str
@@ -732,6 +736,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             auth.submit_2fa_code(cfg, body.code)
         except Exception as exc:
             logger.exception("Apple 2FA code submission failed.")
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/apple/session")
+    def apple_import_session(body: AppleSessionImportIn):
+        """Fallback for when the live login keeps failing with Apple's GSA 503
+        - import a session generated elsewhere instead (see auth.import_session)."""
+        try:
+            auth.import_session(cfg, body.session_json)
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True}
 

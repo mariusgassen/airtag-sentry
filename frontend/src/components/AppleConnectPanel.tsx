@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ChangeEvent } from 'react'
 import type { AppleLoginResult, AppleTwoFactorMethod, OwnerDevice, OwnerLocation } from '../api'
 import { formatRelative } from '../format'
 import { ChevronRightIcon, KeyIcon } from './icons'
@@ -13,6 +14,11 @@ export interface AppleConnectAdapter {
     selected_device_name?: string | null
   }>
   login: (email: string, password: string) => Promise<AppleLoginResult>
+  // Only present where a live-login fallback exists (AirTag tracking) - lets
+  // the user upload a session file generated elsewhere (e.g. on a machine
+  // with genuine Apple hardware) instead of the live SRP+2FA handshake, for
+  // when that keeps failing with Apple's GSA 503 (see tasks/roadmap.md #12).
+  importSession?: (sessionJson: unknown) => Promise<void>
   // Absent for adapters whose underlying login never offers a method choice
   // (owner tracking/pyicloud) - the wizard skips straight to the code step.
   selectMethod?: (methodIndex: number) => Promise<void>
@@ -154,6 +160,25 @@ export function AppleConnectPanel({ title, adapter }: Props) {
       setError((err as Error).message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleImportSession(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file || !adapter.importSession) return
+    setSaving(true)
+    setError(null)
+    try {
+      const text = await file.text()
+      await adapter.importSession(JSON.parse(text))
+      await refreshStatus()
+      setOpen(false)
+      reset()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSaving(false)
+      e.target.value = ''
     }
   }
 
@@ -331,6 +356,25 @@ export function AppleConnectPanel({ title, adapter }: Props) {
               >
                 Anmelden
               </button>
+
+              {adapter.importSession && (
+                <div className="mt-3 border-t border-[var(--divider)] pt-3">
+                  <p className="mb-1 text-[0.78rem] text-[var(--text-secondary)]">
+                    Schlägt die Anmeldung mit "GSA 503" fehl? Stattdessen eine
+                    Session-Datei hochladen, die auf einem anderen Gerät erzeugt wurde.
+                  </p>
+                  <label className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-[var(--divider)] p-3 text-[0.8rem] text-[var(--text-secondary)]">
+                    <input
+                      type="file"
+                      accept="application/json"
+                      onChange={handleImportSession}
+                      disabled={saving}
+                      className="hidden"
+                    />
+                    Session-Datei auswählen (account.json)
+                  </label>
+                </div>
+              )}
             </>
           )}
 

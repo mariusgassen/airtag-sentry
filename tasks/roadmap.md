@@ -105,7 +105,7 @@ path.
 Export an AirTag's location history for a given period — useful when
 reporting a theft to police.
 
-## 12. Fallback: upload an existing `account.json` instead of live login
+## 12. Fallback: upload an existing `account.json` instead of live login - done
 
 Real-user report (Sep 2026): a first-time AirTag-tracking login for this
 Apple ID consistently failed 2FA submission with
@@ -118,24 +118,32 @@ attempt, while a session generated on a real Mac worked fine afterward -
 pointing at Apple's anti-automation defenses rejecting first-time login
 handshakes from freshly-provisioned (non-genuine-hardware) device
 identities, at least some of the time. Ruled out as a cause: anisette
-device-identity persistence (already fixed, `tasks/todo.md` v12.3) and the
-UI-vs-CLI login trigger (this Apple ID had never completed this flow via
-the old CLI `login` command either, so it isn't a regression from the
-login-UI migration).
+device-identity persistence (already fixed, `tasks/todo.md` v12.3/v12.4)
+and the UI-vs-CLI login trigger (this Apple ID had never completed this
+flow via the old CLI `login` command either, so it isn't a regression from
+the login-UI migration).
 
-If waiting out Apple's apparent cooldown and retrying with the same
-(persisted, not re-provisioned) anisette identity doesn't eventually
-succeed, the fallback used elsewhere in the FindMy.py ecosystem is: generate
-`account.json` via a real Mac/genuine Apple hardware once (the same
-`FindMy.py`/keychain mechanism this project's README already documents for
-*AirTag key* extraction, just applied to the *account* session instead),
-then let the dashboard accept an upload of that file directly - bypassing
-the live SRP+2FA handshake this app currently always performs. Would need:
-a new `POST /api/apple/session` (multipart upload) validating the JSON
-shape before writing it to `APPLE_STORE_PATH`, and an "Upload session
-file" option alongside the existing login form in `AppleConnectPanel.tsx`
-(or a variant of it). Only worth building if the wait-and-retry path turns
-out not to work for this account.
+The user confirmed the wait-and-retry path didn't work: still 503 on both
+2FA methods after redeploying with the corrected (v12.4) anisette volume
+mount, across multiple attempts. So built the fallback: generate
+`account.json` on a different machine (`scripts/generate_apple_session.py`,
+a short standalone script using `LocalAnisetteProvider` - no macOS/Keychain
+access needed, unlike the *AirTag key* extraction step this was originally
+modeled on) and upload it directly, bypassing the live SRP+2FA handshake
+this app's own container performs. Changes both the source IP (the user's
+own network instead of wherever the container is hosted) and gets a
+completely fresh anisette identity - either of which may be what Apple's
+abuse detection was flagging.
+
+Status: **done**. `auth.import_session()` validates the upload via
+`AppleAccount.from_json()` before writing it to `APPLE_STORE_PATH`;
+`POST /api/apple/session` exposes it; `AppleConnectPanel.tsx` gained a
+"Session-Datei hochladen" file picker next to the login form (AirTag
+tracking only - owner tracking's `pyicloud` session has a different shape
+and isn't affected by this GSA issue). README documents the workaround.
+Not yet confirmed against this user's real account (needs a real 503 to
+retry against); `pytest tests/test_auth.py` covers the validation/write
+path with a synthetic minimal session.
 
 ## 13. Blocked on upstream: AirTag key extraction without a Mac (rustpush)
 
