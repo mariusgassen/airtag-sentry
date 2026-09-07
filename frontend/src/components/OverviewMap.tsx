@@ -12,9 +12,9 @@ interface Props {
   onSelect: (id: string) => void
   // Current position of every *enabled* owner device (see OwnerDevicesPanel.tsx).
   ownerLocations?: OwnerLocation[]
-  // History of just the *primary* device - drawn as a dashed trail, matching
-  // the route AirTags already get. Other tracked devices don't get a trail.
-  primaryLocationHistory?: OwnerLocation[]
+  // History of every *enabled* device, keyed by device_id - each drawn as its
+  // own dashed trail, matching the route AirTags already get.
+  ownerLocationHistories?: Record<string, OwnerLocation[]>
 }
 
 /** Main map view for the list/settings screens - every AirTag's last known
@@ -25,9 +25,8 @@ export function OverviewMap({
   statuses,
   onSelect,
   ownerLocations = [],
-  primaryLocationHistory = [],
+  ownerLocationHistories = {},
 }: Props) {
-  const ownerPositions: [number, number][] = primaryLocationHistory.map((l) => [l.lat, l.lon])
   const located = airtags
     .map((airtag) => ({ airtag, lastReport: statuses[airtag.id]?.last_report ?? null }))
     .filter((entry): entry is { airtag: Airtag; lastReport: NonNullable<Status['last_report']> } =>
@@ -74,9 +73,17 @@ export function OverviewMap({
           </Popup>
         </Marker>
       ))}
-      {ownerPositions.length > 1 && (
-        <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
-      )}
+      {Object.entries(ownerLocationHistories).map(([deviceId, history]) => {
+        const ownerPositions: [number, number][] = history.map((l) => [l.lat, l.lon])
+        if (ownerPositions.length < 2) return null
+        return (
+          <Polyline
+            key={deviceId}
+            positions={ownerPositions}
+            pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }}
+          />
+        )
+      })}
       {ownerLocations.map((loc) => (
         <Marker key={loc.device_id} position={[loc.lat, loc.lon]} icon={currentLocationIcon}>
           <Popup>

@@ -81,18 +81,17 @@ export function MapCard({
   reports,
   airtag,
   ownerLocations = [],
-  primaryLocationHistory = [],
+  ownerLocationHistories = {},
 }: {
   reports: Report[]
   airtag: Airtag
   // Current position of every *enabled* owner device (see OwnerDevicesPanel.tsx).
   ownerLocations?: OwnerLocation[]
-  // History of just the *primary* device - drawn as a dashed trail, matching
-  // the route the AirTag itself gets. Other tracked devices don't get a trail.
-  primaryLocationHistory?: OwnerLocation[]
+  // History of every *enabled* device, keyed by device_id - each drawn as its
+  // own dashed trail, matching the route the AirTag itself gets.
+  ownerLocationHistories?: Record<string, OwnerLocation[]>
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
-  const ownerPositions: [number, number][] = primaryLocationHistory.map((l) => [l.lat, l.lon])
 
   if (positions.length === 0) {
     return <NoReportsView />
@@ -107,9 +106,17 @@ export function MapCard({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Polyline positions={positions} pathOptions={{ color: '#0a84ff', weight: 4 }} />
-      {ownerPositions.length > 1 && (
-        <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
-      )}
+      {Object.entries(ownerLocationHistories).map(([deviceId, history]) => {
+        const ownerPositions: [number, number][] = history.map((l) => [l.lat, l.lon])
+        if (ownerPositions.length < 2) return null
+        return (
+          <Polyline
+            key={deviceId}
+            positions={ownerPositions}
+            pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }}
+          />
+        )
+      })}
       <Marker position={last} icon={airtagPinIcon(airtag)}>
         <Popup>
           <div className="text-sm">

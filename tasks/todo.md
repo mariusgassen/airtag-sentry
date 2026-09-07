@@ -1448,11 +1448,16 @@ AirTags, not this device service - already trackable via the existing
       connect/disconnect wizard - device management doesn't belong in a
       component shared with the AirTag-tracking adapter, which has no
       device concept at all. `MapCard.tsx`/`OverviewMap.tsx` keep v17's
-      dashed trail (now `primaryLocationHistory`, the primary device's
-      history specifically) and gained one marker per enabled device
-      (`ownerLocations`, was a single conditional marker). `App.tsx`
+      dashed trail, now drawn once per *enabled* device (`ownerLocationHistories`,
+      keyed by `device_id` - user pushed back on an earlier draft that only
+      trailed the primary device: "the location trail should be active for
+      all devices") plus one marker per enabled device (`ownerLocations`,
+      was a single conditional marker). Only away-correlation and the "Du"
+      row stay primary-only, matching the user's actual ask ("single device
+      as my location, but multiple in the location list"). `App.tsx`
       derives the primary device's own location from the enabled-devices
-      array for `AirtagList`'s "Du" row rather than a separate fetch.
+      array for `AirtagList`'s "Du" row rather than a separate fetch, and
+      fetches every enabled device's history in parallel for the trails.
 - [x] Tests: `test_db.py` replaced v17's selected-device test with
       registry + primary-exclusivity + per-device-history round-trips
       (including that disabling the primary clears `is_primary`, and that
@@ -1478,8 +1483,8 @@ AirTags, not this device service - already trackable via the existing
   against a long-lived local test DB). `pytest` - 69 passed, including all
   new/updated tests. `cd frontend && npx tsc -b && npx vite build` clean;
   `npx oxlint` shows three `set-state-in-effect` warnings - the two
-  pre-existing ones from v13/v14/v16/v17, plus one new one on
-  `primaryLocationHistory`'s clear-on-disconnect effect, which follows the
+  pre-existing ones from v13/v14/v16/v17, plus one new one on the
+  owner-location-histories clear-when-empty effect, which follows the
   exact same early-return-then-setState shape as the already-accepted
   `setReports([])` one a few lines below it rather than introducing a new
   pattern. `docker compose config` parses cleanly with a throwaway `.env`.

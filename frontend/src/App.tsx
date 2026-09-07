@@ -53,10 +53,11 @@ export default function App() {
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
   // Current position of every *enabled* owner device (Settings -> Eigene
-  // Geräte) - shown as markers on the map. The *primary* one among them
-  // additionally drives away-correlation display and the trail below.
+  // Geräte) - shown as markers on the map, each with its own trail below.
+  // The *primary* one among them additionally drives away-correlation
+  // display (the "Du" row / evaluate_away on the backend).
   const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
-  const [primaryLocationHistory, setPrimaryLocationHistory] = useState<OwnerLocation[]>([])
+  const [ownerLocationHistories, setOwnerLocationHistories] = useState<Record<string, OwnerLocation[]>>({})
   const [ownerConnected, setOwnerConnected] = useState(false)
   const [ownerDeviceId, setOwnerDeviceId] = useState<string | null>(null)
   const [ownerDeviceName, setOwnerDeviceName] = useState<string | null>(null)
@@ -113,14 +114,24 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (!ownerDeviceId) {
-      setPrimaryLocationHistory([])
+    if (ownerLocations.length === 0) {
+      setOwnerLocationHistories({})
       return
     }
-    getOwnerDeviceHistory(ownerDeviceId)
-      .then(setPrimaryLocationHistory)
-      .catch(() => setPrimaryLocationHistory([]))
-  }, [ownerDeviceId])
+    let cancelled = false
+    Promise.all(
+      ownerLocations.map((loc) =>
+        getOwnerDeviceHistory(loc.device_id)
+          .then((rows) => [loc.device_id, rows] as const)
+          .catch(() => [loc.device_id, []] as const),
+      ),
+    ).then((entries) => {
+      if (!cancelled) setOwnerLocationHistories(Object.fromEntries(entries))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ownerLocations])
 
   useEffect(() => {
     if (!currentId) {
@@ -224,7 +235,7 @@ export default function App() {
             reports={reports}
             airtag={currentAirtag}
             ownerLocations={ownerLocations}
-            primaryLocationHistory={primaryLocationHistory}
+            ownerLocationHistories={ownerLocationHistories}
           />
         ) : (
           <OverviewMap
@@ -232,7 +243,7 @@ export default function App() {
             statuses={statuses}
             onSelect={handleSelect}
             ownerLocations={ownerLocations}
-            primaryLocationHistory={primaryLocationHistory}
+            ownerLocationHistories={ownerLocationHistories}
           />
         )}
       </div>
