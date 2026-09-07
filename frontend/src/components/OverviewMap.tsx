@@ -10,15 +10,23 @@ interface Props {
   airtags: Airtag[]
   statuses: Record<string, Status>
   onSelect: (id: string) => void
-  ownerLocation?: OwnerLocation | null
-  ownerLocationHistory?: OwnerLocation[]
+  // Current position of every *enabled* owner device (see OwnerDevicesPanel.tsx).
+  ownerLocations?: OwnerLocation[]
+  // History of every *enabled* device, keyed by device_id - each drawn as its
+  // own dashed trail, matching the route AirTags already get.
+  ownerLocationHistories?: Record<string, OwnerLocation[]>
 }
 
 /** Main map view for the list/settings screens - every AirTag's last known
  * position at once (Find My's own overview screen), vs. MapCard's single
  * tag + route once you've drilled into its detail view. */
-export function OverviewMap({ airtags, statuses, onSelect, ownerLocation, ownerLocationHistory }: Props) {
-  const ownerPositions: [number, number][] = (ownerLocationHistory ?? []).map((l) => [l.lat, l.lon])
+export function OverviewMap({
+  airtags,
+  statuses,
+  onSelect,
+  ownerLocations = [],
+  ownerLocationHistories = {},
+}: Props) {
   const located = airtags
     .map((airtag) => ({ airtag, lastReport: statuses[airtag.id]?.last_report ?? null }))
     .filter((entry): entry is { airtag: Airtag; lastReport: NonNullable<Status['last_report']> } =>
@@ -65,14 +73,24 @@ export function OverviewMap({ airtags, statuses, onSelect, ownerLocation, ownerL
           </Popup>
         </Marker>
       ))}
-      {ownerPositions.length > 1 && (
-        <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
-      )}
-      {ownerLocation && (
-        <Marker position={[ownerLocation.lat, ownerLocation.lon]} icon={currentLocationIcon}>
-          <Popup>Eigener Standort · {formatRelative(ownerLocation.recorded_at)}</Popup>
+      {Object.entries(ownerLocationHistories).map(([deviceId, history]) => {
+        const ownerPositions: [number, number][] = history.map((l) => [l.lat, l.lon])
+        if (ownerPositions.length < 2) return null
+        return (
+          <Polyline
+            key={deviceId}
+            positions={ownerPositions}
+            pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }}
+          />
+        )
+      })}
+      {ownerLocations.map((loc) => (
+        <Marker key={loc.device_id} position={[loc.lat, loc.lon]} icon={currentLocationIcon}>
+          <Popup>
+            {loc.name ?? 'Gerät'} · {formatRelative(loc.recorded_at)}
+          </Popup>
         </Marker>
-      )}
+      ))}
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
     </MapContainer>

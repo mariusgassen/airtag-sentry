@@ -20,9 +20,11 @@ def _report(hours_ago: float, lat: float, lon: float) -> Report:
     return Report(id=None, airtag_id="test", timestamp=ts, lat=lat, lon=lon, accuracy=5.0, confidence=2)
 
 
-def _owner_location(minutes_ago: float, lat: float, lon: float) -> OwnerLocation:
+def _owner_location(minutes_ago: float, lat: float, lon: float, device_id: str = "device-1") -> OwnerLocation:
     recorded_at = NOW - dt.timedelta(minutes=minutes_ago)
-    return OwnerLocation(id=None, recorded_at=recorded_at, lat=lat, lon=lon, horizontal_accuracy=5.0)
+    return OwnerLocation(
+        id=None, device_id=device_id, recorded_at=recorded_at, lat=lat, lon=lon, horizontal_accuracy=5.0
+    )
 
 
 def test_haversine_zero_distance():

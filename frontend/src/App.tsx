@@ -5,8 +5,8 @@ import {
   createAirtag,
   getAirtags,
   getOwnerAppleStatus,
-  getOwnerLocation,
-  getOwnerLocationHistory,
+  getOwnerDeviceHistory,
+  getOwnerDeviceLocations,
   getReports,
   getStatus,
 } from './api'
@@ -52,9 +52,14 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
-  const [ownerLocation, setOwnerLocation] = useState<OwnerLocation | null>(null)
-  const [ownerLocationHistory, setOwnerLocationHistory] = useState<OwnerLocation[]>([])
+  // Current position of every *enabled* owner device (Settings -> Eigene
+  // Geräte) - shown as markers on the map, each with its own trail below.
+  // The *primary* one among them additionally drives away-correlation
+  // display (the "Du" row / evaluate_away on the backend).
+  const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
+  const [ownerLocationHistories, setOwnerLocationHistories] = useState<Record<string, OwnerLocation[]>>({})
   const [ownerConnected, setOwnerConnected] = useState(false)
+  const [ownerDeviceId, setOwnerDeviceId] = useState<string | null>(null)
   const [ownerDeviceName, setOwnerDeviceName] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   const [showDetail, setShowDetail] = useState(false)
@@ -92,22 +97,41 @@ export default function App() {
   }, [refreshAirtags])
 
   useEffect(() => {
-    getOwnerLocation()
-      .then(setOwnerLocation)
-      .catch(() => setOwnerLocation(null))
-    getOwnerLocationHistory()
-      .then(setOwnerLocationHistory)
-      .catch(() => setOwnerLocationHistory([]))
+    getOwnerDeviceLocations()
+      .then(setOwnerLocations)
+      .catch(() => setOwnerLocations([]))
     getOwnerAppleStatus()
       .then((s) => {
         setOwnerConnected(s.connected)
-        setOwnerDeviceName(s.selected_device_name ?? null)
+        setOwnerDeviceId(s.primary_device_id ?? null)
+        setOwnerDeviceName(s.primary_device_name ?? null)
       })
       .catch(() => {
         setOwnerConnected(false)
+        setOwnerDeviceId(null)
         setOwnerDeviceName(null)
       })
   }, [])
+
+  useEffect(() => {
+    if (ownerLocations.length === 0) {
+      setOwnerLocationHistories({})
+      return
+    }
+    let cancelled = false
+    Promise.all(
+      ownerLocations.map((loc) =>
+        getOwnerDeviceHistory(loc.device_id)
+          .then((rows) => [loc.device_id, rows] as const)
+          .catch(() => [loc.device_id, []] as const),
+      ),
+    ).then((entries) => {
+      if (!cancelled) setOwnerLocationHistories(Object.fromEntries(entries))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ownerLocations])
 
   useEffect(() => {
     if (!currentId) {
@@ -124,6 +148,7 @@ export default function App() {
   }, [currentId])
 
   const currentAirtag = airtags.find((a) => a.id === currentId) ?? null
+  const ownerLocation = ownerLocations.find((l) => l.device_id === ownerDeviceId) ?? null
   const title = currentAirtag ? `AirTagSentry — ${currentAirtag.name}` : 'AirTagSentry'
   useEffect(() => {
     document.title = title
@@ -209,16 +234,16 @@ export default function App() {
           <MapCard
             reports={reports}
             airtag={currentAirtag}
-            ownerLocation={ownerLocation}
-            ownerLocationHistory={ownerLocationHistory}
+            ownerLocations={ownerLocations}
+            ownerLocationHistories={ownerLocationHistories}
           />
         ) : (
           <OverviewMap
             airtags={airtags}
             statuses={statuses}
             onSelect={handleSelect}
-            ownerLocation={ownerLocation}
-            ownerLocationHistory={ownerLocationHistory}
+            ownerLocations={ownerLocations}
+            ownerLocationHistories={ownerLocationHistories}
           />
         )}
       </div>

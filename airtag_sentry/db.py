@@ -62,17 +62,26 @@ class PushSubscription:
 class OwnerAppleCredentials:
     apple_id: str
     encrypted_password: str
-    # Which of the account's devices determines "the owner's" location - see
-    # owner_tracking.py. Both None until explicitly chosen via
-    # set_owner_selected_device(); the name is stored alongside the id so the
-    # dashboard can label it without another Apple login.
-    selected_device_id: str | None
-    selected_device_name: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class OwnerDevice:
+    id: str
+    name: str
+    device_type: str
+    enabled: bool
+    # Exactly one device (or none) is primary at a time - see
+    # set_owner_device_primary(). The primary device is the one used for
+    # "moved without you" away-correlation and its history is drawn as the
+    # map trail; other enabled devices are tracked/listed but don't affect
+    # either.
+    is_primary: bool
 
 
 @dataclasses.dataclass(frozen=True)
 class OwnerLocation:
     id: int | None
+    device_id: str
     recorded_at: dt.datetime
     lat: float
     lon: float
@@ -300,20 +309,14 @@ def list_keyed_airtag_ids(conn: psycopg.Connection) -> set[str]:
 
 
 def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypted_password: str) -> None:
-    # A fresh login always resets the device pick - a previously selected
-    # device belonged to whatever session was connected before, and may not
-    # even exist under a different Apple ID.
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO owner_apple_credentials
-                (id, apple_id, encrypted_password, selected_device_id, selected_device_name, updated_at)
-            VALUES (1, %s, %s, NULL, NULL, now())
+            INSERT INTO owner_apple_credentials (id, apple_id, encrypted_password, updated_at)
+            VALUES (1, %s, %s, now())
             ON CONFLICT (id) DO UPDATE
                 SET apple_id = EXCLUDED.apple_id,
                     encrypted_password = EXCLUDED.encrypted_password,
-                    selected_device_id = NULL,
-                    selected_device_name = NULL,
                     updated_at = now()
             """,
             (apple_id, encrypted_password),
@@ -323,21 +326,9 @@ def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypt
 
 def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT apple_id, encrypted_password, selected_device_id, selected_device_name "
-            "FROM owner_apple_credentials WHERE id = 1"
-        )
+        cur.execute("SELECT apple_id, encrypted_password FROM owner_apple_credentials WHERE id = 1")
         row = cur.fetchone()
         return OwnerAppleCredentials(*row) if row else None
-
-
-def set_owner_selected_device(conn: psycopg.Connection, device_id: str, device_name: str) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "UPDATE owner_apple_credentials SET selected_device_id = %s, selected_device_name = %s WHERE id = 1",
-            (device_id, device_name),
-        )
-    conn.commit()
 
 
 def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:
@@ -393,36 +384,127 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
     return settings
 
 
-def record_owner_location(conn: psycopg.Connection, location: OwnerLocation) -> OwnerLocation:
+def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict]) -> None:
+    """Records/refreshes device identity (name, type) as seen in a live Apple
+    listing. Leaves `enabled` untouched - discovering a device never opts it
+    into tracking on its own."""
+    if not devices:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO owner_devices (id, name, device_type)
+            VALUES (%(id)s, %(name)s, %(device_type)s)
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, device_type = EXCLUDED.device_type
+            """,
+            devices,
+        )
+    conn.commit()
+
+
+def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, name, device_type, enabled, is_primary FROM owner_devices ORDER BY name")
+        return [OwnerDevice(*row) for row in cur.fetchall()]
+
+
+def set_owner_device_enabled(conn: psycopg.Connection, device_id: str, enabled: bool) -> OwnerDevice | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            # Disabling a device that's currently primary clears is_primary too -
+            # a disabled device never gets a fresh location, so leaving it primary
+            # would silently stop away-correlation without any visible signal why.
+            "UPDATE owner_devices SET enabled = %s, is_primary = is_primary AND %s WHERE id = %s "
+            "RETURNING id, name, device_type, enabled, is_primary",
+            (enabled, enabled, device_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def set_owner_device_primary(conn: psycopg.Connection, device_id: str | None) -> OwnerDevice | None:
+    """Marks `device_id` as the one device used for away-correlation and the map
+    trail, clearing any previous primary first (at most one at a time). Also
+    force-enables it, since a disabled device never gets a fresh location.
+    `device_id=None` just clears the current primary, returning None."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE owner_devices SET is_primary = false WHERE is_primary")
+        if device_id is None:
+            conn.commit()
+            return None
+        cur.execute(
+            "UPDATE owner_devices SET is_primary = true, enabled = true WHERE id = %s "
+            "RETURNING id, name, device_type, enabled, is_primary",
+            (device_id,),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocation) -> OwnerLocation:
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO owner_locations (recorded_at, lat, lon, horizontal_accuracy)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, recorded_at, lat, lon, horizontal_accuracy
+            INSERT INTO owner_device_locations (device_id, recorded_at, lat, lon, horizontal_accuracy)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, device_id, recorded_at, lat, lon, horizontal_accuracy
             """,
-            (location.recorded_at, location.lat, location.lon, location.horizontal_accuracy),
+            (
+                location.device_id,
+                location.recorded_at,
+                location.lat,
+                location.lon,
+                location.horizontal_accuracy,
+            ),
         )
         row = cur.fetchone()
     conn.commit()
     return OwnerLocation(*row)
 
 
-def latest_owner_location(conn: psycopg.Connection) -> OwnerLocation | None:
+def latest_owner_device_locations(conn: psycopg.Connection) -> list[OwnerLocation]:
+    """The latest reading for each *enabled* device - one row per device."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, recorded_at, lat, lon, horizontal_accuracy FROM owner_locations "
-            "ORDER BY recorded_at DESC LIMIT 1"
+            """
+            SELECT DISTINCT ON (odl.device_id)
+                odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy
+            FROM owner_device_locations odl
+            JOIN owner_devices od ON od.id = odl.device_id
+            WHERE od.enabled
+            ORDER BY odl.device_id, odl.recorded_at DESC
+            """
+        )
+        return [OwnerLocation(*row) for row in cur.fetchall()]
+
+
+def latest_primary_owner_device_location(conn: psycopg.Connection) -> OwnerLocation | None:
+    """The primary device's latest reading, used for away-correlation and the
+    map trail - None if no device is marked primary or it has no location yet."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy
+            FROM owner_device_locations odl
+            JOIN owner_devices od ON od.id = odl.device_id
+            WHERE od.is_primary
+            ORDER BY odl.recorded_at DESC LIMIT 1
+            """
         )
         row = cur.fetchone()
         return OwnerLocation(*row) if row else None
 
 
-def fetch_owner_locations(conn: psycopg.Connection, limit: int = 200) -> list[OwnerLocation]:
+def fetch_owner_device_location_history(
+    conn: psycopg.Connection, device_id: str, limit: int = 200
+) -> list[OwnerLocation]:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, recorded_at, lat, lon, horizontal_accuracy FROM owner_locations "
+            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy "
+            "FROM owner_device_locations WHERE device_id = %s "
             "ORDER BY recorded_at DESC LIMIT %s",
-            (limit,),
+            (device_id, limit),
         )
         return [OwnerLocation(*row) for row in cur.fetchall()]

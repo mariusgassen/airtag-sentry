@@ -85,12 +85,15 @@ def evaluate_away(
     now: dt.datetime,
     cfg: MovementConfig,
 ) -> float | None:
-    """Distance from the owner's last-known phone location if `new_report`
-    qualifies as "moved without the owner nearby", else None.
+    """Distance from the primary owner device's last-known location if
+    `new_report` qualifies as "moved without the owner nearby", else None.
 
     Only meaningful to call once a real movement alert has already fired for
     `new_report` - this doesn't independently decide whether the tag moved,
-    only whether the owner was with it when it did.
+    only whether the owner was with it when it did. `owner_location` is
+    always the *primary* tracked device (see owner_tracking.py) - other
+    tracked-but-not-primary devices don't factor into this at all, so there's
+    exactly one definite answer to "where does the app think the owner is."
     """
     if owner_location is None:
         return None

@@ -8,14 +8,10 @@ import {
   appleSubmitTwoFactorCode,
   getAppleStatus,
   getOwnerAppleStatus,
-  getOwnerDevices,
-  getOwnerLocation,
-  getOwnerLocationHistory,
   getSettings,
   ownerAppleDisconnect,
   ownerAppleLogin,
   ownerAppleSubmitTwoFactorCode,
-  selectOwnerDevice,
   updateSettings,
 } from '../api'
 import type { ThemePreference } from '../theme'
@@ -24,6 +20,7 @@ import { LogoutIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 import type { AppleConnectAdapter } from './AppleConnectPanel'
 import { AppleConnectPanel } from './AppleConnectPanel'
+import { OwnerDevicesPanel } from './OwnerDevicesPanel'
 
 const AIRTAG_APPLE_ADAPTER: AppleConnectAdapter = {
   getStatus: getAppleStatus,
@@ -39,10 +36,6 @@ const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
   login: ownerAppleLogin,
   submitCode: ownerAppleSubmitTwoFactorCode,
   disconnect: ownerAppleDisconnect,
-  getLocation: getOwnerLocation,
-  getHistory: getOwnerLocationHistory,
-  getDevices: getOwnerDevices,
-  selectDevice: selectOwnerDevice,
 }
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
@@ -223,6 +216,8 @@ export function SettingsPanel() {
           <AppleConnectPanel title="AirTag-Tracking" adapter={AIRTAG_APPLE_ADAPTER} />
           <AppleConnectPanel title="Eigener Standort (optional)" adapter={OWNER_APPLE_ADAPTER} />
         </div>
+
+        <OwnerDevicesPanel />
 
         {!settings ? (
           <p className="px-4 text-sm text-[var(--text-secondary)]">Lädt…</p>

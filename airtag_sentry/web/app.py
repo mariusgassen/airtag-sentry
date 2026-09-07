@@ -35,14 +35,15 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
-    fetch_owner_locations,
+    fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
     get_settings,
     latest_alert,
-    latest_owner_location,
+    latest_owner_device_locations,
     list_airtags,
     list_keyed_airtag_ids,
+    list_owner_devices as db_list_owner_devices,
     remove_push_subscription,
     rename_airtag,
     set_airtag_appearance,
@@ -249,9 +250,8 @@ class OwnerLoginIn(BaseModel):
     password: str
 
 
-class OwnerDeviceSelectIn(BaseModel):
-    device_id: str
-    device_name: str
+class OwnerDeviceEnabledIn(BaseModel):
+    enabled: bool
 
 
 def _slugify(name: str) -> str:
@@ -675,28 +675,65 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             settings = update_settings(conn, AppSettings(**body.model_dump()))
         return dataclasses.asdict(settings)
 
-    @app.get("/api/owner-location")
-    def get_owner_location():
-        """Latest known location of the owner's own device (see owner_tracking.py),
-        used to correlate AirTag movement against - null if the feature isn't
-        configured or no location has been recorded yet."""
+    @app.get("/api/owner-devices")
+    def get_owner_devices():
+        """Live-refreshed list of the owner's Apple devices (Macs, iPhones, iPads,
+        Watches - see owner_tracking.py), each with whether it's enabled for
+        tracking. Empty if owner tracking isn't configured."""
         with get_conn(cfg.database_url) as conn:
-            location = latest_owner_location(conn)
-        if location is None:
-            return None
-        return {
-            "recorded_at": location.recorded_at.isoformat(),
-            "lat": location.lat,
-            "lon": location.lon,
-            "horizontal_accuracy": location.horizontal_accuracy,
-        }
+            devices = owner_tracking.list_owner_devices(cfg, conn)
+        return [dataclasses.asdict(d) for d in devices]
 
-    @app.get("/api/owner-location/history")
-    def get_owner_location_history(limit: int = 200):
-        """History of the owner's device location, newest first - see
-        owner_tracking.py; empty if the feature isn't configured."""
+    @app.put("/api/owner-devices/{device_id}")
+    def set_owner_device_enabled_route(device_id: str, body: OwnerDeviceEnabledIn):
         with get_conn(cfg.database_url) as conn:
-            locations = fetch_owner_locations(conn, limit=limit)
+            device = owner_tracking.set_device_enabled(conn, device_id, body.enabled)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
+        return dataclasses.asdict(device)
+
+    @app.put("/api/owner-devices/{device_id}/primary")
+    def set_owner_device_primary_route(device_id: str):
+        """Marks `device_id` as the one device used for "moved without you"
+        away-correlation and the map's location trail - also enables it, since a
+        disabled device never gets a fresh location. Clears any previous primary."""
+        with get_conn(cfg.database_url) as conn:
+            device = owner_tracking.set_device_primary(conn, device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
+        return dataclasses.asdict(device)
+
+    @app.delete("/api/owner-devices/primary")
+    def clear_owner_device_primary_route():
+        with get_conn(cfg.database_url) as conn:
+            owner_tracking.set_device_primary(conn, None)
+        return {"ok": True}
+
+    @app.get("/api/owner-device-locations")
+    def get_owner_device_locations():
+        """Latest known location of every *enabled* owner device, used to correlate
+        AirTag movement against and to show on the map - one entry per enabled
+        device with a recorded fix, empty if none."""
+        with get_conn(cfg.database_url) as conn:
+            locations = latest_owner_device_locations(conn)
+            names = {d.id: d.name for d in db_list_owner_devices(conn)}
+        return [
+            {
+                "device_id": loc.device_id,
+                "name": names.get(loc.device_id, loc.device_id),
+                "recorded_at": loc.recorded_at.isoformat(),
+                "lat": loc.lat,
+                "lon": loc.lon,
+                "horizontal_accuracy": loc.horizontal_accuracy,
+            }
+            for loc in locations
+        ]
+
+    @app.get("/api/owner-devices/{device_id}/history")
+    def get_owner_device_history(device_id: str, limit: int = 200):
+        """History of one owner device's location, newest first."""
+        with get_conn(cfg.database_url) as conn:
+            locations = fetch_owner_device_location_history(conn, device_id, limit=limit)
         return [
             {
                 "recorded_at": loc.recorded_at.isoformat(),
@@ -757,29 +794,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/apple/owner/status")
     def owner_apple_status():
         """Whether the owner-device-tracking Apple session (see owner_tracking.py) is
-        connected, and which of the account's devices (if any) has been selected to
-        determine its location."""
+        connected, and which of the account's devices (if any) is currently marked
+        primary - see owner_tracking.connection_status()."""
         with get_conn(cfg.database_url) as conn:
             return owner_tracking.connection_status(conn)
-
-    @app.get("/api/apple/owner/devices")
-    def owner_apple_devices():
-        """Devices on the connected owner Apple account, for the device-selection
-        step - see owner_tracking.list_owner_devices()."""
-        with get_conn(cfg.database_url) as conn:
-            try:
-                return owner_tracking.list_owner_devices(cfg, conn)
-            except Exception as exc:
-                logger.exception("Failed to list owner Apple devices.")
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.post("/api/apple/owner/device")
-    def owner_apple_select_device(body: OwnerDeviceSelectIn):
-        """Select which device determines the owner's location - see
-        owner_tracking.set_selected_device()."""
-        with get_conn(cfg.database_url) as conn:
-            owner_tracking.set_selected_device(conn, body.device_id, body.device_name)
-        return {"ok": True}
 
     @app.post("/api/apple/owner/login")
     def owner_apple_login(body: OwnerLoginIn):
