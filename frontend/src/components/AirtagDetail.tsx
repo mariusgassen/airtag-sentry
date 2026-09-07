@@ -13,7 +13,7 @@ import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { formatAlertReason, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { AirtagGlyph, BellIcon, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PaletteIcon, PencilIcon, TrashIcon } from './icons'
+import { AirtagGlyph, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PaletteIcon, PencilIcon, TrashIcon } from './icons'
 
 interface Props {
   airtag: Airtag
@@ -22,8 +22,6 @@ interface Props {
   onBack: () => void
   onChanged: () => void | Promise<void>
   onDeleted: () => void | Promise<void>
-  pushStatus: 'idle' | 'active' | 'error'
-  onEnablePush: () => void
 }
 
 export function Section({ children }: { children: ReactNode }) {
@@ -63,7 +61,7 @@ export function Row({
   )
 }
 
-export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDeleted, pushStatus, onEnablePush }: Props) {
+export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDeleted }: Props) {
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
@@ -106,19 +104,6 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
         </div>
 
         <div className="px-3">
-          <Section>
-            <Row
-              icon={<BellIcon className="h-5 w-5" filled={pushStatus === 'active'} />}
-              label="Benachrichtigungen"
-              trailing={
-                <span className={`text-sm ${pushStatus === 'active' ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
-                  {pushStatus === 'active' ? 'Aktiv' : 'Aktivieren'}
-                </span>
-              }
-              onClick={pushStatus === 'active' ? undefined : onEnablePush}
-            />
-          </Section>
-
           <Section>
             <Row
               icon={<PencilIcon className="h-5 w-5" />}

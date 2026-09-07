@@ -176,13 +176,17 @@ else works exactly as without it. Disconnect any time from the same panel.
 
 ## Notifications
 
-Each backend is optional and independent — enable any combination in `.env`:
+Each backend is optional and independent:
 
 | Backend  | Enable by setting                                                                                             |
 |----------|-----------------------------------------------------------------------------------------------------------------|
-| ntfy.sh  | `NTFY_TOPIC_URL` (e.g. `https://ntfy.sh/your-secret-topic`)                                                     |
-| Telegram | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`                                                                       |
-| Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT`, then click "Enable notifications" on the dashboard |
+| ntfy.sh  | `NTFY_TOPIC_URL` (e.g. `https://ntfy.sh/your-secret-topic`) in `.env`                                          |
+| Telegram | Bot token + chat ID, connected from the dashboard's Settings ⚙️ → **Benachrichtigungen** panel                |
+| Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` in `.env`, then click "Enable notifications" on the dashboard |
+
+Telegram's bot token is encrypted and stored in Postgres (never in `.env`) -
+create a bot via [@BotFather](https://t.me/BotFather) to get a token, then
+message the bot (or add it to a group) and use its chat ID.
 
 Treat the VAPID keypair like the encryption key above — generate it once and
 back it up. Every device's push subscription is tied to the public key that

@@ -14,11 +14,13 @@ from airtag_sentry.db import (
     delete_airtag,
     delete_airtag_key,
     delete_owner_apple_credentials,
+    delete_telegram_credentials,
     fetch_owner_device_location_history,
     get_airtag_key,
     get_conn,
     get_owner_apple_credentials,
     get_settings,
+    get_telegram_credentials,
     insert_reports,
     latest_owner_device_locations,
     latest_primary_owner_device_location,
@@ -32,6 +34,7 @@ from airtag_sentry.db import (
     set_owner_apple_credentials,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_telegram_credentials,
     update_settings,
     upsert_owner_devices,
 )
@@ -51,7 +54,8 @@ def conn():
             with connection.cursor() as cur:
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
-                    "owner_devices, owner_device_locations, owner_apple_credentials RESTART IDENTITY CASCADE"
+                    "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings "
+                    "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
                 # reset it to defaults in place rather than truncating it away.
@@ -106,6 +110,7 @@ def test_schema_creates_tables(conn):
         "owner_devices",
         "owner_device_locations",
         "owner_apple_credentials",
+        "telegram_settings",
         "alembic_version",
     } <= tables
 
@@ -401,6 +406,24 @@ def test_owner_apple_credentials_set_get_delete_round_trip(conn):
 
     delete_owner_apple_credentials(conn)
     assert get_owner_apple_credentials(conn) is None
+
+
+def test_telegram_credentials_set_get_delete_round_trip(conn):
+    assert get_telegram_credentials(conn) is None
+
+    set_telegram_credentials(conn, "enc-token-1", "12345")
+    stored = get_telegram_credentials(conn)
+    assert stored.bot_token_encrypted == "enc-token-1"
+    assert stored.chat_id == "12345"
+
+    # Setting again replaces rather than duplicating (single-row table).
+    set_telegram_credentials(conn, "enc-token-2", "67890")
+    stored = get_telegram_credentials(conn)
+    assert stored.bot_token_encrypted == "enc-token-2"
+    assert stored.chat_id == "67890"
+
+    delete_telegram_credentials(conn)
+    assert get_telegram_credentials(conn) is None
 
 
 def test_settings_table_stays_single_row(conn):

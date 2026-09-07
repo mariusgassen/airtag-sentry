@@ -1660,3 +1660,66 @@ error, no retry, no way to tell what was wrong.
   404` in their logs was a one-time artifact of the v18 deploy transition
   (stale already-open tab) or is still recurring after a fresh reload -
   worth asking before assuming it's fully explained.
+
+## v21: Telegram + general notifications moved into Settings UI
+Trigger: asked to move Telegram config into the dashboard and move the
+general (not per-AirTag) notification controls out of the objects panel.
+Two unrelated CLAUDE.md violations in one go: Telegram was still a CLI-era
+`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` env-var pair (everything else
+notification-adjacent already moved to the dashboard), and the Web Push
+"enable notifications" toggle - which subscribes the whole browser, not one
+AirTag - lived in `AirtagList`'s header bell and a per-AirTag
+"Benachrichtigungen" row in `AirtagDetail` instead of Settings.
+
+- [x] Telegram credentials follow the same treatment owner-tracking's Apple
+      password got (`owner_apple_credentials`): a dashboard connect flow,
+      encrypted bot token in a new singleton `telegram_settings` table (row
+      absence = "not configured"), never in `.env`. New migration
+      `f3a4c8e1d9b2_telegram_settings`.
+- [x] `db.py`: `TelegramCredentials` dataclass +
+      `set_telegram_credentials`/`get_telegram_credentials`/
+      `delete_telegram_credentials`, mirroring the owner-Apple-credentials
+      functions exactly.
+- [x] `config.py`: dropped `TelegramConfig`/`NotificationsConfig.telegram`
+      and the `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` env reads - no
+      backward-compat shim, per CLAUDE.md's established convention.
+- [x] `notifiers/__init__.py`: `build_notifiers()` now takes the DB
+      connection too and looks up Telegram credentials there instead of on
+      `cfg.notifications`, decrypting the bot token with the existing
+      `AIRTAG_KEY_ENCRYPTION_KEY`. `tracker.py`'s one call site updated.
+- [x] `web/app.py`: `GET/POST/DELETE /api/notifications/telegram` (status
+      never returns the bot token back, same as the Apple-login routes
+      never echo the password).
+- [x] Frontend: new `TelegramPanel.tsx` (same connect/disconnect shape as
+      `AppleConnectPanel.tsx`, minus 2FA - just bot token + chat ID) and a
+      `PaperPlaneIcon`. `SettingsPanel.tsx` gained a "Benachrichtigungen"
+      section (push toggle, moved from the objects panel, + `TelegramPanel`)
+      placed right after "Darstellung". `AirtagList.tsx` lost its header
+      bell button and `AirtagDetail.tsx` lost its per-AirTag
+      "Benachrichtigungen" row - both took `pushStatus`/`onEnablePush` as
+      props purely to render that control, now dropped along with it;
+      `App.tsx` passes them to `SettingsPanel` instead.
+- [x] `.env.example`/`docker-compose.yml`/README: removed the two Telegram
+      env vars, README's Notifications table points at Settings ⚙️ →
+      **Benachrichtigungen** instead.
+- [x] Tests: `test_db.py` gained the same set/get/delete round-trip test
+      as the owner-Apple-credentials one, plus `telegram_settings` in the
+      schema-tables assertion and the per-test truncate list.
+
+## Review (v21)
+- 13 files touched (5 backend + 1 migration, 6 frontend, 1 test) + 3 docs
+  files, one new migration, no new dependencies.
+- Verified: recreated both local Postgres databases (`airtag_sentry` and
+  the `airtag_sentry_test` `test_db.py` targets) from scratch and ran
+  `alembic upgrade head` against each - the new migration chains cleanly
+  onto v18's head. `pytest` - 70 passed (69 prior + the new Telegram
+  round-trip), 0 skipped once both DBs existed. `cd frontend && npx tsc -b
+  && npx vite build` clean; `npx oxlint` shows the same three pre-existing
+  `set-state-in-effect` warnings as v18, none new. `docker compose config`
+  parses cleanly with a throwaway `.env` containing no `TELEGRAM_*` vars.
+- Not verified: an actual Telegram bot end-to-end (no bot token available
+  in this sandbox) - `notifiers/telegram.py` itself is unchanged and still
+  covered by `test_notifiers.py`'s mocked-HTTP test, so this only leaves
+  the new dashboard connect flow (encrypt → store → decrypt → send)
+  unexercised against a real bot; worth a real-token smoke test before
+  relying on it.

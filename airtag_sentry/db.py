@@ -65,6 +65,12 @@ class OwnerAppleCredentials:
 
 
 @dataclasses.dataclass(frozen=True)
+class TelegramCredentials:
+    bot_token_encrypted: str
+    chat_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class OwnerDevice:
     id: str
     name: str
@@ -334,6 +340,35 @@ def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentia
 def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM owner_apple_credentials WHERE id = 1")
+    conn.commit()
+
+
+def set_telegram_credentials(conn: psycopg.Connection, bot_token_encrypted: str, chat_id: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO telegram_settings (id, bot_token_encrypted, chat_id, updated_at)
+            VALUES (1, %s, %s, now())
+            ON CONFLICT (id) DO UPDATE
+                SET bot_token_encrypted = EXCLUDED.bot_token_encrypted,
+                    chat_id = EXCLUDED.chat_id,
+                    updated_at = now()
+            """,
+            (bot_token_encrypted, chat_id),
+        )
+    conn.commit()
+
+
+def get_telegram_credentials(conn: psycopg.Connection) -> TelegramCredentials | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT bot_token_encrypted, chat_id FROM telegram_settings WHERE id = 1")
+        row = cur.fetchone()
+        return TelegramCredentials(*row) if row else None
+
+
+def delete_telegram_credentials(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM telegram_settings WHERE id = 1")
     conn.commit()
 
 

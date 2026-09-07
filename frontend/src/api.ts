@@ -242,6 +242,28 @@ export async function ownerAppleDisconnect(): Promise<void> {
   await apiFetch('/api/apple/owner', { method: 'DELETE' })
 }
 
+export interface TelegramStatus {
+  connected: boolean
+  chat_id: string | null
+}
+
+export async function getTelegramStatus(): Promise<TelegramStatus> {
+  return (await apiFetch('/api/notifications/telegram')).json()
+}
+
+export async function setTelegramCredentials(botToken: string, chatId: string): Promise<TelegramStatus> {
+  return (
+    await apiFetch('/api/notifications/telegram', {
+      method: 'POST',
+      body: JSON.stringify({ bot_token: botToken, chat_id: chatId }),
+    })
+  ).json()
+}
+
+export async function deleteTelegramCredentials(): Promise<void> {
+  await apiFetch('/api/notifications/telegram', { method: 'DELETE' })
+}
+
 export async function getVapidPublicKey(): Promise<string | null> {
   const res = await fetch('/api/push/vapid-public-key')
   if (!res.ok) return null
