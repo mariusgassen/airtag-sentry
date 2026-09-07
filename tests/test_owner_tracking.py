@@ -27,6 +27,11 @@ def test_build_api_wraps_failed_login_with_app_specific_password_hint(monkeypatc
         owner_tracking._build_api("owner@example.com", "wrong-password", "/tmp/unused")
 
 
+def test_list_owner_devices_returns_empty_when_not_connected(monkeypatch):
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: None)
+    assert owner_tracking.list_owner_devices(cfg=None, conn=None) == []
+
+
 class _FakeStopEvent:
     def __init__(self):
         self.was_set = False

@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import type { Airtag, Status } from '../api'
+import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { BellIcon, ChevronRightIcon, PlusIcon } from './icons'
+import { BellIcon, ChevronRightIcon, PersonIcon, PlusIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -13,6 +13,19 @@ interface Props {
   onCreate: (name: string) => Promise<void>
   pushStatus: 'idle' | 'active' | 'error'
   onEnablePush: () => void
+  // Only rendered when the owner-tracking Apple account (see
+  // owner_tracking.py / Settings -> Apple-Konten) is connected - this list
+  // is the first place a connected owner device becomes visible, not just
+  // the Settings panel it started in (see tasks/todo.md v15).
+  ownerConnected: boolean
+  // The *primary* tracked device's latest location (see
+  // owner_tracking.set_device_primary) - other tracked-but-not-primary
+  // devices (Settings -> Eigene Geräte) don't show up here.
+  ownerLocation: OwnerLocation | null
+  // Name of the primary device - null while connected but none has been
+  // marked primary yet, which movement.evaluate_away() treats as "nothing
+  // to correlate against".
+  ownerDeviceName: string | null
 }
 
 export function AirtagList({
@@ -23,6 +36,9 @@ export function AirtagList({
   onCreate,
   pushStatus,
   onEnablePush,
+  ownerConnected,
+  ownerLocation,
+  ownerDeviceName,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -88,6 +104,25 @@ export function AirtagList({
       )}
 
       <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        {ownerConnected && (
+          <div className="mb-2 overflow-hidden rounded-2xl bg-[var(--surface)]">
+            <div className="flex w-full items-center gap-3 px-3 py-2.5">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white">
+                <PersonIcon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[0.95rem] font-medium">{ownerDeviceName ?? 'Du'}</span>
+                <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
+                  {ownerLocation
+                    ? capitalize(formatRelative(ownerLocation.recorded_at))
+                    : ownerDeviceName === null
+                      ? 'Gerät in Einstellungen auswählen'
+                      : 'Kein Standort verfügbar'}
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
         {airtags.length === 0 ? (
           <div className="mx-2 mt-4 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
             Noch keine AirTags.
@@ -111,7 +146,7 @@ export function AirtagList({
                     selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
                   } ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
                 >
-                  <AirtagAvatar airtagId={a.id} size={40} />
+                  <AirtagAvatar airtag={a} size={40} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[0.95rem] font-medium">{a.name}</span>
                     <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">{subtitle}</span>

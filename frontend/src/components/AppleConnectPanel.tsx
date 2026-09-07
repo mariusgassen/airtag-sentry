@@ -6,7 +6,14 @@ import { Row, Section } from './AirtagDetail'
 type Step = 'credentials' | 'select-method' | 'code'
 
 export interface AppleConnectAdapter {
-  getStatus: () => Promise<{ connected: boolean }>
+  getStatus: () => Promise<{
+    connected: boolean
+    // Only meaningful for the owner-tracking adapter - which of its
+    // (possibly several) devices is currently primary, see
+    // OwnerDevicesPanel.tsx and owner_tracking.set_device_primary().
+    primary_device_id?: string | null
+    primary_device_name?: string | null
+  }>
   login: (email: string, password: string) => Promise<AppleLoginResult>
   // Absent for adapters whose underlying login never offers a method choice
   // (owner tracking/pyicloud) - the wizard skips straight to the code step.
@@ -25,6 +32,7 @@ const METHOD_LABEL = (m: AppleTwoFactorMethod) =>
 
 export function AppleConnectPanel({ title, adapter }: Props) {
   const [connected, setConnected] = useState<boolean | null>(null)
+  const [primaryDeviceName, setPrimaryDeviceName] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>('credentials')
   const [email, setEmail] = useState('')
@@ -35,11 +43,16 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    adapter.getStatus().then((s) => setConnected(s.connected))
+    adapter.getStatus().then((s) => {
+      setConnected(s.connected)
+      setPrimaryDeviceName(s.primary_device_name ?? null)
+    })
   }, [adapter])
 
   async function refreshStatus() {
-    setConnected((await adapter.getStatus()).connected)
+    const s = await adapter.getStatus()
+    setConnected(s.connected)
+    setPrimaryDeviceName(s.primary_device_name ?? null)
   }
 
   function reset() {
@@ -128,7 +141,13 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         trailing={
           <span className="flex items-center gap-2">
             <span className={`text-sm ${connected ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
-              {connected === null ? '…' : connected ? 'Verbunden' : 'Nicht verbunden'}
+              {connected === null
+                ? '…'
+                : connected
+                  ? primaryDeviceName
+                    ? `Verbunden · ${primaryDeviceName}`
+                    : 'Verbunden'
+                  : 'Nicht verbunden'}
             </span>
             {!connected && <ChevronRightIcon className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${open ? 'rotate-90' : ''}`} />}
           </span>

@@ -19,6 +19,8 @@ import psycopg
 class AirtagRecord:
     id: str
     name: str
+    icon: str | None = None
+    color: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,6 +70,12 @@ class OwnerDevice:
     name: str
     device_type: str
     enabled: bool
+    # Exactly one device (or none) is primary at a time - see
+    # set_owner_device_primary(). The primary device is the one used for
+    # "moved without you" away-correlation and its history is drawn as the
+    # map trail; other enabled devices are tracked/listed but don't affect
+    # either.
+    is_primary: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,7 +108,7 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
 def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO airtags (id, name) VALUES (%s, %s) RETURNING id, name",
+            "INSERT INTO airtags (id, name) VALUES (%s, %s) RETURNING id, name, icon, color",
             (airtag_id, name),
         )
         row = cur.fetchone()
@@ -110,15 +118,31 @@ def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> Airtag
 
 def list_airtags(conn: psycopg.Connection) -> list[AirtagRecord]:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, name FROM airtags ORDER BY created_at ASC")
+        cur.execute("SELECT id, name, icon, color FROM airtags ORDER BY created_at ASC")
         return [AirtagRecord(*row) for row in cur.fetchall()]
 
 
 def rename_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord | None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name",
+            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name, icon, color",
             (name, airtag_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return AirtagRecord(*row) if row else None
+
+
+def set_airtag_appearance(
+    conn: psycopg.Connection, airtag_id: str, icon: str | None, color: str | None
+) -> AirtagRecord | None:
+    """Set (or, with both args None, reset to automatic) an AirTag's chosen
+    icon/color. Both fields are always written together since the picker UI
+    always submits both current values."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE airtags SET icon = %s, color = %s WHERE id = %s RETURNING id, name, icon, color",
+            (icon, color, airtag_id),
         )
         row = cur.fetchone()
     conn.commit()
@@ -380,16 +404,39 @@ def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict]) -> None:
 
 def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, name, device_type, enabled FROM owner_devices ORDER BY name")
+        cur.execute("SELECT id, name, device_type, enabled, is_primary FROM owner_devices ORDER BY name")
         return [OwnerDevice(*row) for row in cur.fetchall()]
 
 
 def set_owner_device_enabled(conn: psycopg.Connection, device_id: str, enabled: bool) -> OwnerDevice | None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE owner_devices SET enabled = %s WHERE id = %s "
-            "RETURNING id, name, device_type, enabled",
-            (enabled, device_id),
+            # Disabling a device that's currently primary clears is_primary too -
+            # a disabled device never gets a fresh location, so leaving it primary
+            # would silently stop away-correlation without any visible signal why.
+            "UPDATE owner_devices SET enabled = %s, is_primary = is_primary AND %s WHERE id = %s "
+            "RETURNING id, name, device_type, enabled, is_primary",
+            (enabled, enabled, device_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def set_owner_device_primary(conn: psycopg.Connection, device_id: str | None) -> OwnerDevice | None:
+    """Marks `device_id` as the one device used for away-correlation and the map
+    trail, clearing any previous primary first (at most one at a time). Also
+    force-enables it, since a disabled device never gets a fresh location.
+    `device_id=None` just clears the current primary, returning None."""
+    with conn.cursor() as cur:
+        cur.execute("UPDATE owner_devices SET is_primary = false WHERE is_primary")
+        if device_id is None:
+            conn.commit()
+            return None
+        cur.execute(
+            "UPDATE owner_devices SET is_primary = true, enabled = true WHERE id = %s "
+            "RETURNING id, name, device_type, enabled, is_primary",
+            (device_id,),
         )
         row = cur.fetchone()
     conn.commit()
@@ -431,6 +478,23 @@ def latest_owner_device_locations(conn: psycopg.Connection) -> list[OwnerLocatio
             """
         )
         return [OwnerLocation(*row) for row in cur.fetchall()]
+
+
+def latest_primary_owner_device_location(conn: psycopg.Connection) -> OwnerLocation | None:
+    """The primary device's latest reading, used for away-correlation and the
+    map trail - None if no device is marked primary or it has no location yet."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy
+            FROM owner_device_locations odl
+            JOIN owner_devices od ON od.id = odl.device_id
+            WHERE od.is_primary
+            ORDER BY odl.recorded_at DESC LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        return OwnerLocation(*row) if row else None
 
 
 def fetch_owner_device_location_history(

@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react'
 import type { OwnerDevice, OwnerLocation } from '../api'
-import { getOwnerAppleStatus, getOwnerDeviceHistory, getOwnerDevices, setOwnerDeviceEnabled } from '../api'
+import {
+  clearOwnerDevicePrimary,
+  getOwnerAppleStatus,
+  getOwnerDeviceHistory,
+  getOwnerDevices,
+  setOwnerDeviceEnabled,
+  setOwnerDevicePrimary,
+} from '../api'
 import { Row, Section } from './AirtagDetail'
-import { ChevronRightIcon } from './icons'
+import { ChevronRightIcon, StarIcon } from './icons'
 
 /** Lists the owner's Apple devices (Macs, iPhones, iPads, Watches - see
  * owner_tracking.py) once the "Eigener Standort" Apple session is connected,
  * with a toggle to opt each one into tracking and an expandable history for
- * enabled ones. AirPods don't show up here - they're tracked the same way
- * an AirTag is, via the Manage AirTags key-upload flow. */
+ * enabled ones. Exactly one device can additionally be marked *primary* (the
+ * star) - that's the one used for "moved without you" away-correlation and
+ * the map's location trail; every other tracked device is still listed with
+ * its own history, it just doesn't affect either. AirPods don't show up
+ * here - they're tracked the same way an AirTag is, via the Manage AirTags
+ * key-upload flow. */
 export function OwnerDevicesPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [devices, setDevices] = useState<OwnerDevice[] | null>(null)
@@ -28,6 +39,17 @@ export function OwnerDevicesPanel() {
   async function toggle(device: OwnerDevice) {
     const updated = await setOwnerDeviceEnabled(device.id, !device.enabled)
     setDevices((ds) => ds?.map((d) => (d.id === updated.id ? updated : d)) ?? ds)
+  }
+
+  async function togglePrimary(device: OwnerDevice) {
+    if (device.is_primary) {
+      await clearOwnerDevicePrimary()
+      setDevices((ds) => ds?.map((d) => ({ ...d, is_primary: false })) ?? ds)
+      return
+    }
+    const updated = await setOwnerDevicePrimary(device.id)
+    // Picking a new primary is exclusive and force-enables the device server-side.
+    setDevices((ds) => ds?.map((d) => (d.id === updated.id ? updated : { ...d, is_primary: false })) ?? ds)
   }
 
   async function toggleHistory(id: string) {
@@ -58,12 +80,23 @@ export function OwnerDevicesPanel() {
               <Row
                 label={d.name}
                 trailing={
-                  <input
-                    type="checkbox"
-                    checked={d.enabled}
-                    onChange={() => toggle(d)}
-                    className="h-5 w-5 accent-[var(--accent)]"
-                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => togglePrimary(d)}
+                      title={d.is_primary ? 'Nicht mehr als eigenen Standort verwenden' : 'Als eigenen Standort verwenden'}
+                      aria-label={d.is_primary ? 'Nicht mehr als eigenen Standort verwenden' : 'Als eigenen Standort verwenden'}
+                      className={`flex h-8 w-8 items-center justify-center rounded-full ${d.is_primary ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'}`}
+                    >
+                      <StarIcon className="h-4 w-4" filled={d.is_primary} />
+                    </button>
+                    <input
+                      type="checkbox"
+                      checked={d.enabled}
+                      onChange={() => toggle(d)}
+                      className="h-5 w-5 accent-[var(--accent)]"
+                    />
+                  </div>
                 }
                 bordered={false}
               />

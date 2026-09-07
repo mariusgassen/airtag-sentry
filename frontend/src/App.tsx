@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Airtag, OwnerLocation, Report, Status } from './api'
-import { createAirtag, getAirtags, getOwnerDeviceLocations, getReports, getStatus } from './api'
+import {
+  createAirtag,
+  getAirtags,
+  getOwnerAppleStatus,
+  getOwnerDeviceHistory,
+  getOwnerDeviceLocations,
+  getReports,
+  getStatus,
+} from './api'
 import { AirtagList } from './components/AirtagList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { MapCard } from './components/MapCard'
@@ -44,7 +52,14 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
+  // Current position of every *enabled* owner device (Settings -> Eigene
+  // Geräte) - shown as markers on the map. The *primary* one among them
+  // additionally drives away-correlation display and the trail below.
   const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
+  const [primaryLocationHistory, setPrimaryLocationHistory] = useState<OwnerLocation[]>([])
+  const [ownerConnected, setOwnerConnected] = useState(false)
+  const [ownerDeviceId, setOwnerDeviceId] = useState<string | null>(null)
+  const [ownerDeviceName, setOwnerDeviceName] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   const [showDetail, setShowDetail] = useState(false)
   const [sheetState, setSheetState] = useState<SheetState>('default')
@@ -84,7 +99,28 @@ export default function App() {
     getOwnerDeviceLocations()
       .then(setOwnerLocations)
       .catch(() => setOwnerLocations([]))
+    getOwnerAppleStatus()
+      .then((s) => {
+        setOwnerConnected(s.connected)
+        setOwnerDeviceId(s.primary_device_id ?? null)
+        setOwnerDeviceName(s.primary_device_name ?? null)
+      })
+      .catch(() => {
+        setOwnerConnected(false)
+        setOwnerDeviceId(null)
+        setOwnerDeviceName(null)
+      })
   }, [])
+
+  useEffect(() => {
+    if (!ownerDeviceId) {
+      setPrimaryLocationHistory([])
+      return
+    }
+    getOwnerDeviceHistory(ownerDeviceId)
+      .then(setPrimaryLocationHistory)
+      .catch(() => setPrimaryLocationHistory([]))
+  }, [ownerDeviceId])
 
   useEffect(() => {
     if (!currentId) {
@@ -101,6 +137,7 @@ export default function App() {
   }, [currentId])
 
   const currentAirtag = airtags.find((a) => a.id === currentId) ?? null
+  const ownerLocation = ownerLocations.find((l) => l.device_id === ownerDeviceId) ?? null
   const title = currentAirtag ? `AirTagSentry — ${currentAirtag.name}` : 'AirTagSentry'
   useEffect(() => {
     document.title = title
@@ -183,9 +220,20 @@ export default function App() {
           order and the sheet's own z-10. */}
       <div className="absolute inset-0 isolate md:relative md:flex-1">
         {activeTab === 'objects' && showDetail && currentAirtag ? (
-          <MapCard reports={reports} airtagId={currentAirtag.id} ownerLocations={ownerLocations} />
+          <MapCard
+            reports={reports}
+            airtag={currentAirtag}
+            ownerLocations={ownerLocations}
+            primaryLocationHistory={primaryLocationHistory}
+          />
         ) : (
-          <OverviewMap airtags={airtags} statuses={statuses} onSelect={handleSelect} ownerLocations={ownerLocations} />
+          <OverviewMap
+            airtags={airtags}
+            statuses={statuses}
+            onSelect={handleSelect}
+            ownerLocations={ownerLocations}
+            primaryLocationHistory={primaryLocationHistory}
+          />
         )}
       </div>
 
@@ -281,6 +329,9 @@ export default function App() {
                 onCreate={handleCreate}
                 pushStatus={push.status}
                 onEnablePush={push.enable}
+                ownerConnected={ownerConnected}
+                ownerLocation={ownerLocation}
+                ownerDeviceName={ownerDeviceName}
               />
             )}
           </div>

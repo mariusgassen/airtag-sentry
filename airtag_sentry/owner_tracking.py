@@ -16,6 +16,12 @@ records its identity; a device only gets its location polled and historized once
 explicitly enabled via set_device_enabled, so connecting the account never silently
 starts recording history for every device on it.
 
+Exactly one enabled device can additionally be marked primary (set_device_primary) -
+that's the one used for "moved without you" away-correlation and the map's location
+trail. Every other enabled device is still tracked/listed with its own history, it
+just doesn't affect correlation - a deliberate choice over "any enabled device counts"
+so the user has one definite answer to "where does the app think I am."
+
 AirPods are deliberately out of scope here even though the user may think of them as
 "another device": Find My-capable AirPods (Pro/Max) use the same offline-finding
 network as AirTags, not this service - they're tracked the same way an AirTag is,
@@ -51,6 +57,7 @@ from airtag_sentry.db import (
     list_owner_devices as db_list_owner_devices,
     set_owner_apple_credentials,
     set_owner_device_enabled,
+    set_owner_device_primary,
     upsert_owner_devices,
 )
 
@@ -123,8 +130,17 @@ def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
     _pending_password = None
 
 
-def is_connected(conn) -> bool:
-    return get_owner_apple_credentials(conn) is not None
+def connection_status(conn) -> dict:
+    """Connection + primary-device status for the dashboard's Apple-Konten panel."""
+    creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
+    if creds is None:
+        return {"connected": False, "primary_device_id": None, "primary_device_name": None}
+    primary = next((d for d in db_list_owner_devices(conn) if d.is_primary), None)
+    return {
+        "connected": True,
+        "primary_device_id": primary.id if primary else None,
+        "primary_device_name": primary.name if primary else None,
+    }
 
 
 def disconnect(conn) -> None:
@@ -171,8 +187,8 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
 
 def list_owner_devices(cfg: Config, conn) -> list[OwnerDevice]:
     """Live-refreshes device identity (name/type) from the Apple account and
-    returns the full known list, DB `enabled` flags intact. Empty if not
-    connected."""
+    returns the full known list, DB `enabled`/`is_primary` flags intact. Empty
+    if not connected."""
     api = _connect(cfg, conn)
     if api is None:
         return []
@@ -186,6 +202,10 @@ def list_owner_devices(cfg: Config, conn) -> list[OwnerDevice]:
 
 def set_device_enabled(conn, device_id: str, enabled: bool) -> OwnerDevice | None:
     return set_owner_device_enabled(conn, device_id, enabled)
+
+
+def set_device_primary(conn, device_id: str | None) -> OwnerDevice | None:
+    return set_owner_device_primary(conn, device_id)
 
 
 def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:

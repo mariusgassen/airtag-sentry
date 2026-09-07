@@ -2,6 +2,8 @@ export interface Airtag {
   id: string
   name: string
   has_key: boolean
+  icon: string | null
+  color: string | null
 }
 
 export interface Report {
@@ -36,6 +38,7 @@ export interface OwnerDevice {
   name: string
   device_type: string
   enabled: boolean
+  is_primary: boolean
 }
 
 export interface OwnerLocation {
@@ -100,6 +103,19 @@ export async function deleteAirtag(id: string): Promise<void> {
   await apiFetch(`/api/airtags/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+export async function setAirtagAppearance(
+  id: string,
+  icon: string | null,
+  color: string | null,
+): Promise<{ id: string; icon: string | null; color: string | null }> {
+  return (
+    await apiFetch(`/api/airtags/${encodeURIComponent(id)}/appearance`, {
+      method: 'PATCH',
+      body: JSON.stringify({ icon, color }),
+    })
+  ).json()
+}
+
 export async function setAirtagKeyB64(id: string, privateKeyB64: string): Promise<void> {
   await apiFetch(`/api/airtags/${encodeURIComponent(id)}/key`, {
     method: 'POST',
@@ -151,6 +167,14 @@ export async function setOwnerDeviceEnabled(id: string, enabled: boolean): Promi
   ).json()
 }
 
+export async function setOwnerDevicePrimary(id: string): Promise<OwnerDevice> {
+  return (await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}/primary`, { method: 'PUT' })).json()
+}
+
+export async function clearOwnerDevicePrimary(): Promise<void> {
+  await apiFetch('/api/owner-devices/primary', { method: 'DELETE' })
+}
+
 export async function getOwnerDeviceLocations(): Promise<OwnerLocation[]> {
   return (await apiFetch('/api/owner-device-locations')).json()
 }
@@ -186,7 +210,11 @@ export async function appleDisconnect(): Promise<void> {
   await apiFetch('/api/apple', { method: 'DELETE' })
 }
 
-export async function getOwnerAppleStatus(): Promise<{ connected: boolean }> {
+export async function getOwnerAppleStatus(): Promise<{
+  connected: boolean
+  primary_device_id: string | null
+  primary_device_name: string | null
+}> {
   return (await apiFetch('/api/apple/owner/status')).json()
 }
 

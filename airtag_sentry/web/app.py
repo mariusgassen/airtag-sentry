@@ -46,6 +46,7 @@ from airtag_sentry.db import (
     list_owner_devices as db_list_owner_devices,
     remove_push_subscription,
     rename_airtag,
+    set_airtag_appearance,
     set_airtag_key,
     update_settings,
 )
@@ -53,6 +54,25 @@ from airtag_sentry.db import (
 STATIC_DIR = Path(__file__).parent / "static"
 
 logger = logging.getLogger(__name__)
+
+# Must stay in sync with frontend/src/deviceIcons.tsx's icon registry keys -
+# the picker only ever offers these, but the server still validates rather
+# than trusting the client.
+AIRTAG_ICON_CHOICES = {
+    "bike",
+    "backpack",
+    "car",
+    "keys",
+    "wallet",
+    "suitcase",
+    "laptop",
+    "camera",
+    "pet",
+    "headphones",
+    "book",
+    "box",
+}
+_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class _CacheControlledStaticFiles(StaticFiles):
@@ -191,6 +211,11 @@ class AirtagKeyIn(BaseModel):
 
 class AirtagIn(BaseModel):
     name: str
+
+
+class AirtagAppearanceIn(BaseModel):
+    icon: str | None = None
+    color: str | None = None
 
 
 class SettingsIn(BaseModel):
@@ -506,7 +531,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             airtags = list_airtags(conn)
             keyed_ids = list_keyed_airtag_ids(conn)
-        return [{"id": a.id, "name": a.name, "has_key": a.id in keyed_ids} for a in airtags]
+        return [
+            {"id": a.id, "name": a.name, "has_key": a.id in keyed_ids, "icon": a.icon, "color": a.color}
+            for a in airtags
+        ]
 
     @app.post("/api/airtags")
     def create_airtag_route(body: AirtagIn):
@@ -522,7 +550,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 slug = f"{base_slug}-{suffix}"
                 suffix += 1
             record = create_airtag(conn, slug, name)
-        return {"id": record.id, "name": record.name, "has_key": False}
+        return {"id": record.id, "name": record.name, "has_key": False, "icon": record.icon, "color": record.color}
 
     @app.patch("/api/airtags/{airtag_id}")
     def rename_airtag_route(airtag_id: str, body: AirtagIn):
@@ -533,6 +561,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             _resolve_airtag_id(conn, airtag_id)
             record = rename_airtag(conn, airtag_id, name)
         return {"id": record.id, "name": record.name}
+
+    @app.patch("/api/airtags/{airtag_id}/appearance")
+    def set_airtag_appearance_route(airtag_id: str, body: AirtagAppearanceIn):
+        if body.icon is not None and body.icon not in AIRTAG_ICON_CHOICES:
+            raise HTTPException(status_code=400, detail=f"Unknown icon '{body.icon}'.")
+        if body.color is not None and not _COLOR_RE.match(body.color):
+            raise HTTPException(status_code=400, detail="color must be a '#rrggbb' hex string.")
+        with get_conn(cfg.database_url) as conn:
+            _resolve_airtag_id(conn, airtag_id)
+            record = set_airtag_appearance(conn, airtag_id, body.icon, body.color)
+        return {"id": record.id, "icon": record.icon, "color": record.color}
 
     @app.delete("/api/airtags/{airtag_id}")
     def delete_airtag_route(airtag_id: str):
@@ -649,6 +688,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
         return dataclasses.asdict(device)
 
+    @app.put("/api/owner-devices/{device_id}/primary")
+    def set_owner_device_primary_route(device_id: str):
+        """Marks `device_id` as the one device used for "moved without you"
+        away-correlation and the map's location trail - also enables it, since a
+        disabled device never gets a fresh location. Clears any previous primary."""
+        with get_conn(cfg.database_url) as conn:
+            device = owner_tracking.set_device_primary(conn, device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
+        return dataclasses.asdict(device)
+
+    @app.delete("/api/owner-devices/primary")
+    def clear_owner_device_primary_route():
+        with get_conn(cfg.database_url) as conn:
+            owner_tracking.set_device_primary(conn, None)
+        return {"ok": True}
+
     @app.get("/api/owner-device-locations")
     def get_owner_device_locations():
         """Latest known location of every *enabled* owner device, used to correlate
@@ -723,9 +779,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/apple/owner/status")
     def owner_apple_status():
-        """Whether the owner-device-tracking Apple session (see owner_tracking.py) is connected."""
+        """Whether the owner-device-tracking Apple session (see owner_tracking.py) is
+        connected, and which of the account's devices (if any) is currently marked
+        primary - see owner_tracking.connection_status()."""
         with get_conn(cfg.database_url) as conn:
-            return {"connected": owner_tracking.is_connected(conn)}
+            return owner_tracking.connection_status(conn)
 
     @app.post("/api/apple/owner/login")
     def owner_apple_login(body: OwnerLoginIn):

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
-import type { OwnerLocation, Report } from '../api'
+import type { Airtag, OwnerLocation, Report } from '../api'
 import { formatRelative } from '../format'
-import { airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { mapsUrl } from '../maps'
+import { LocationArrowIcon } from './icons'
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
@@ -77,28 +79,52 @@ export function NoReportsView() {
 
 export function MapCard({
   reports,
-  airtagId,
+  airtag,
   ownerLocations = [],
+  primaryLocationHistory = [],
 }: {
   reports: Report[]
-  airtagId: string
+  airtag: Airtag
+  // Current position of every *enabled* owner device (see OwnerDevicesPanel.tsx).
   ownerLocations?: OwnerLocation[]
+  // History of just the *primary* device - drawn as a dashed trail, matching
+  // the route the AirTag itself gets. Other tracked devices don't get a trail.
+  primaryLocationHistory?: OwnerLocation[]
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+  const ownerPositions: [number, number][] = primaryLocationHistory.map((l) => [l.lat, l.lon])
 
   if (positions.length === 0) {
     return <NoReportsView />
   }
 
+  const last = positions[positions.length - 1]
+
   return (
-    <MapContainer center={positions[positions.length - 1]} zoom={15} className="h-full w-full">
+    <MapContainer center={last} zoom={15} className="h-full w-full">
       <TileLayer
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Polyline positions={positions} pathOptions={{ color: '#0a84ff', weight: 4 }} />
-      <Marker position={positions[positions.length - 1]} icon={airtagPinIcon(airtagId)}>
-        <Popup>Letzte Position</Popup>
+      {ownerPositions.length > 1 && (
+        <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
+      )}
+      <Marker position={last} icon={airtagPinIcon(airtag)}>
+        <Popup>
+          <div className="text-sm">
+            <p className="mb-2 font-medium">Letzte Position</p>
+            <a
+              href={mapsUrl(last[0], last[1], airtag.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+            >
+              <LocationArrowIcon className="h-3.5 w-3.5" />
+              In Karten öffnen
+            </a>
+          </div>
+        </Popup>
       </Marker>
       {ownerLocations.map((loc) => (
         <Marker key={loc.device_id} position={[loc.lat, loc.lon]} icon={currentLocationIcon}>

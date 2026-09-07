@@ -26,7 +26,7 @@ from airtag_sentry.db import (
     get_conn,
     get_settings,
     insert_reports,
-    latest_owner_device_locations,
+    latest_primary_owner_device_location,
     list_airtags,
     record_alert,
     record_owner_device_location,
@@ -162,7 +162,7 @@ def _poll_airtag(
         notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
 
         away_distance = evaluate_away(
-            report, latest_owner_device_locations(conn), dt.datetime.now(dt.timezone.utc), movement_cfg
+            report, latest_primary_owner_device_location(conn), dt.datetime.now(dt.timezone.utc), movement_cfg
         )
         if away_distance is not None:
             record_alert(
