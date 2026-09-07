@@ -108,6 +108,27 @@ container access needed to reconnect. Then add each AirTag's key from its
 detail view. A tag without a key yet is simply skipped each poll (logged,
 not fatal) until you add one.
 
+#### Troubleshooting: login fails with `GSA request: 503`
+
+If connecting your Apple ID keeps failing 2FA submission with
+`findmy.errors.UnhandledProtocolError: Error response for GSA request: 503`
+(a raw rejection from Apple's own GrandSlam-auth endpoint), it's Apple's
+anti-automation defenses rejecting the login handshake, not a bug in this
+app - see `tasks/roadmap.md` #12. As a fallback, generate the session on a
+different machine (your own laptop is fine) and upload it instead of
+retrying the live login:
+
+```bash
+pip install findmy
+python scripts/generate_apple_session.py
+```
+
+This logs in the same way the dashboard does (email/password, then a 2FA
+code), but from that machine's own network and a fresh anisette identity -
+either of which may be what's getting flagged. It writes `account.json`;
+upload it in Settings ⚙️ → **Apple-Konten** → "Session-Datei hochladen"
+instead of using the email/password form.
+
 ### CLI reference
 
 ```

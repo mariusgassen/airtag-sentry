@@ -1496,3 +1496,167 @@ AirTags, not this device service - already trackable via the existing
   build. The device list, star/checkbox interaction, map markers, and
   trail should get a real-account check before this is considered fully
   settled.
+
+## v19: Fallback to import an existing Apple session, bypassing live login
+
+Trigger: real-user follow-up on v12.3/v12.4. Even after redeploying with
+v12.4's corrected anisette volume mount, AirTag-tracking login still failed
+with `findmy.errors.UnhandledProtocolError: Error response for GSA request:
+503` on both 2FA methods, across multiple attempts - confirming (per
+`tasks/roadmap.md` #12's own stated criterion) that the anisette
+persistence fix alone doesn't resolve this for this account, and it's time
+to build the documented fallback: generate the Apple session somewhere
+other than this app's own container, and upload it instead of performing
+the live handshake there. Built concurrently with v18 above in a separate
+session; rebased onto it here rather than v18's now-superseded shape -
+`AppleConnectPanel.tsx`'s device-picker plumbing that this originally
+piggybacked its `importSession` optionality comment on is gone in v18,
+replaced by the standalone `OwnerDevicesPanel.tsx`.
+
+Read `FindMy.py`'s actual `AppleAccount.to_json()`/`from_json()` (installed
+in a scratch venv, since it isn't vendored here) to confirm the exact shape
+needed and that `from_json()` accepts an already-parsed dict directly (not
+just a file path) - important, since `read_data_json()` treats a bare `str`
+argument as a filesystem path, not raw JSON text, so the new endpoint must
+hand it a parsed object, never a string. Also confirmed the account's
+anisette provider type/state travels *inside* the session JSON itself
+(`{"type": "aniRemote", ...}` vs `{"type": "aniLocal", "prov_data": ...}`),
+not from this app's own `ANISETTE_MODE` config - so a session imported this
+way uses whatever anisette identity it was generated with, independent of
+this container's `remote` anisette service entirely.
+
+- [x] `auth.py`: new `import_session(cfg, session_json: dict)` - validates
+      via `AppleAccount.from_json()`, wraps any failure as `ValueError`,
+      then writes it to `APPLE_STORE_PATH` via the same `account.to_json()`
+      call the live-login flow already uses.
+- [x] `web/app.py`: new `AppleSessionImportIn` model and
+      `POST /api/apple/session` route.
+- [x] `api.ts`: new `appleImportSession()`.
+- [x] `AppleConnectPanel.tsx`: `AppleConnectAdapter` gained optional
+      `importSession`, present for the AirTag-tracking adapter only, since
+      owner tracking's `pyicloud` session has an unrelated shape and isn't
+      affected by this issue. Credentials step gained a file picker below
+      the login form, reusing `AirtagDetail.tsx`'s `KeyForm` file-input
+      styling, reading the file client-side (`file.text()` + `JSON.parse`)
+      rather than a true multipart upload - consistent with how the
+      existing AirTag-key JSON upload already works. Resolved cleanly
+      against v18's reverted, adapter-agnostic version of this file (v18
+      removed the device-picker UI this originally sat next to; the
+      import-session addition is independent of that and needed no
+      rework).
+- [x] `SettingsPanel.tsx`: wired `importSession` for `AIRTAG_APPLE_ADAPTER`
+      only.
+- [x] `scripts/generate_apple_session.py`: new standalone script - login
+      with `LocalAnisetteProvider` on any machine (no macOS/Keychain access
+      needed, unlike the *AirTag key* extraction step this was modeled on)
+      and write `account.json` for upload. Deliberately runs the handshake
+      from a different network than the container (a home/residential IP
+      instead of wherever it's hosted) and with a completely fresh anisette
+      identity - either of which may be what Apple's abuse detection was
+      flagging, though which one (or both) can't be confirmed without a
+      real retry.
+- [x] README: new "Troubleshooting: login fails with `GSA request: 503`"
+      subsection documenting the workaround.
+- [x] `tasks/roadmap.md`: #12 marked done with the outcome.
+- [x] `test_auth.py`: new `_cfg` gains `anisette.libs_path`;
+      `test_import_session_writes_valid_session_to_store_path` (using a
+      hand-built minimal valid session dict, verified against the real
+      `findmy` package in a scratch venv) and
+      `test_import_session_rejects_malformed_session_json`.
+
+## Review (v19)
+- 8 files touched (2 backend, 1 new script, 3 frontend, 1 test, README +
+  roadmap docs), no new dependencies - `findmy`'s login primitives
+  (`AppleAccount`, `LocalAnisetteProvider`) were already a dependency, just
+  newly imported in the standalone script.
+- Verified before v18 landed: `pytest tests/` - 52 passed, 15 skipped
+  (Postgres-dependent, no live Postgres in this sandbox), including the 2
+  new tests. Confirmed the minimal session fixture and the
+  `from_json`/`read_data_json` path-vs-dict behavior directly against the
+  real `findmy` package installed in a scratch venv, not guessed from
+  docs. `cd frontend && npx tsc -b && npx vite build` clean; `npx oxlint`
+  clean apart from the two pre-existing `set-state-in-effect` warnings.
+  `docker compose config` (throwaway `.env`) parses cleanly.
+- Then rebased onto v18 (merge conflict in `AppleConnectPanel.tsx` -
+  resolved by dropping this branch's now-obsolete `OwnerDevice`/
+  `OwnerLocation`/`formatRelative` imports in favor of v18's leaner ones,
+  keeping this branch's `ChangeEvent` import and `importSession` addition
+  intact - and in this changelog, resolved by reordering to keep both
+  entries with v18 first). Re-ran the same checks against the merged tree:
+  `pytest tests/` - 51 passed, 20 skipped (still no live Postgres here, so
+  v18's own Postgres-backed tests count among the skips and its "69
+  passed" figure isn't independently reproduced by this rebase - only that
+  nothing broke among what could run); `tsc -b && vite build` clean;
+  `oxlint` shows the same three warnings v18's own review already noted
+  (two pre-existing, one from v18's clear-when-empty effect), nothing new
+  from this branch's changes.
+- Not verified in this sandbox (no real Apple ID, no way to trigger a real
+  GSA 503 here): that this fallback actually gets the specific reporting
+  user connected - the validation/round-trip logic is confirmed correct
+  against the real `findmy` package, but the end-to-end "run the script on
+  your own machine, upload the result, does Apple accept it" path needs a
+  real retry against their account to fully close this out.
+
+## v20: Fix silent hang on GET /api/owner-devices errors
+
+Trigger: real-user report right after v18 (multi-device owner tracking)
+deployed - "the device list is loading forever." Also saw a `GET
+/api/owner-location 404` in their logs, from v18's own removal of that
+route (superseded by `/api/owner-device-locations`) - almost certainly a
+stale already-open PWA session running pre-v18 JS rather than a code bug
+(the SW is already configured with `skipWaiting`/`clientsClaim` for
+exactly this, per `sw.ts`'s own comment, but that only takes effect on the
+*next* navigation/reload of an already-running page, not instantly for a
+backgrounded/resumed tab) - not otherwise actionable from this session
+without a live report of it recurring after a fresh reload.
+
+The "loading forever" part had a real, separate cause though:
+`owner_tracking.list_owner_devices()` does a *live*, uncached Apple call
+on every single request (rebuilds `PyiCloudService` fresh each time, per
+v18's own `_connect`/`_build_api`) - a lapsed pyicloud session trust, a
+transient network blip, or Apple-side rate limiting all raised uncaught
+through `GET /api/owner-devices`, producing a bare 500 with no detail.
+`OwnerDevicesPanel.tsx` had no `.catch()` on that fetch at all, so the
+promise rejection just left `devices` at `null` forever - "Lädt…" with no
+error, no retry, no way to tell what was wrong.
+
+- [x] `web/app.py`: `get_owner_devices()` now wraps the call in
+      try/except, logs it, and returns a 400 with the exception's message
+      - same pattern already used by the Apple login/2FA routes.
+- [x] `OwnerDevicesPanel.tsx`: new `devicesError` state; the fetch effect
+      now has a `.catch()`; on error, shows the message plus a "Erneut
+      versuchen" retry button (useful here specifically, since the
+      underlying call is a fresh live Apple request every time - a retry
+      can genuinely succeed where the last one didn't). Kept the
+      `setDevicesError` call inside the `.then()`/`.catch()` callbacks
+      rather than synchronously in the effect body - oxlint's
+      `set-state-in-effect` flagged an earlier draft that called a named
+      `async function loadDevices()` directly from the effect (it traces
+      into local function calls, not just literal `setState(...)` in the
+      effect's own body); resolved by keeping the effect's own fetch
+      chain fully inline and defining `loadDevices()` separately purely
+      for the retry button's `onClick`, matching this file's and
+      `App.tsx`'s existing convention for this exact lint rule.
+- [x] `test_web_auth.py`: new
+      `test_owner_devices_route_reports_apple_errors_instead_of_hanging`,
+      monkeypatching `owner_tracking.list_owner_devices` to raise and
+      confirming the route now returns 400 with the error detail instead
+      of an unhandled 500.
+
+## Review (v20)
+- 3 files touched (1 backend, 1 frontend, 1 test), no new dependencies.
+- Verified: `pytest tests/` - 52 passed, 20 skipped (Postgres-dependent,
+  no live Postgres in this sandbox), including the new regression test.
+  `cd frontend && npx tsc -b && npx vite build` clean; `npx oxlint` shows
+  only the same three pre-existing `set-state-in-effect` warnings from
+  v13/v14/v16/v17/v18, no new ones (after iterating past one new one an
+  earlier draft introduced - see above).
+- Not verified in this sandbox (no real owner-tracking Apple session, no
+  way to reproduce a real pyicloud failure here): that this specific fix
+  resolves the reporting user's actual "loading forever" symptom - the
+  error-handling path itself is covered by the new test, but whether their
+  underlying Apple call was in fact failing (versus, say, succeeding but
+  slowly) isn't confirmed. Also unconfirmed: whether the `/api/owner-location
+  404` in their logs was a one-time artifact of the v18 deploy transition
+  (stale already-open tab) or is still recurring after a fresh reload -
+  worth asking before assuming it's fully explained.

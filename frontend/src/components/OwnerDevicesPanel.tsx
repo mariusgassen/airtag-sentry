@@ -23,6 +23,7 @@ import { ChevronRightIcon, StarIcon } from './icons'
 export function OwnerDevicesPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [devices, setDevices] = useState<OwnerDevice[] | null>(null)
+  const [devicesError, setDevicesError] = useState<string | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [history, setHistory] = useState<Record<string, OwnerLocation[] | null>>({})
 
@@ -31,10 +32,23 @@ export function OwnerDevicesPanel() {
   }, [])
 
   useEffect(() => {
-    if (connected) {
-      getOwnerDevices().then(setDevices)
-    }
+    if (!connected) return
+    getOwnerDevices()
+      .then((d) => {
+        setDevicesError(null)
+        setDevices(d)
+      })
+      .catch((err) => setDevicesError((err as Error).message))
   }, [connected])
+
+  async function loadDevices() {
+    setDevicesError(null)
+    try {
+      setDevices(await getOwnerDevices())
+    } catch (err) {
+      setDevicesError((err as Error).message)
+    }
+  }
 
   async function toggle(device: OwnerDevice) {
     const updated = await setOwnerDeviceEnabled(device.id, !device.enabled)
@@ -70,7 +84,18 @@ export function OwnerDevicesPanel() {
         Eigene Geräte
       </p>
       <Section>
-        {devices === null ? (
+        {devicesError ? (
+          <div className="px-4 py-3">
+            <p className="text-[0.78rem] text-[var(--destructive)]">{devicesError}</p>
+            <button
+              type="button"
+              onClick={loadDevices}
+              className="mt-2 rounded-lg border border-[var(--divider)] px-3 py-1.5 text-sm"
+            >
+              Erneut versuchen
+            </button>
+          </div>
+        ) : devices === null ? (
           <p className="px-4 py-3 text-sm text-[var(--text-secondary)]">Lädt…</p>
         ) : devices.length === 0 ? (
           <p className="px-4 py-3 text-sm text-[var(--text-secondary)]">Keine Geräte gefunden.</p>

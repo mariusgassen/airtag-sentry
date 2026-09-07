@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AppSettings } from '../api'
 import {
   appleDisconnect,
+  appleImportSession,
   appleLogin,
   appleSelectTwoFactorMethod,
   appleSubmitTwoFactorCode,
@@ -24,6 +25,7 @@ import { OwnerDevicesPanel } from './OwnerDevicesPanel'
 const AIRTAG_APPLE_ADAPTER: AppleConnectAdapter = {
   getStatus: getAppleStatus,
   login: appleLogin,
+  importSession: appleImportSession,
   selectMethod: appleSelectTwoFactorMethod,
   submitCode: appleSubmitTwoFactorCode,
   disconnect: appleDisconnect,
