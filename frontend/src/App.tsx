@@ -208,7 +208,7 @@ export default function App() {
         {activeTab === 'objects' && showDetail && currentAirtag ? (
           <MapCard
             reports={reports}
-            airtagId={currentAirtag.id}
+            airtag={currentAirtag}
             ownerLocation={ownerLocation}
             ownerLocationHistory={ownerLocationHistory}
           />

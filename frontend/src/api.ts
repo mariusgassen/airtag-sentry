@@ -2,6 +2,8 @@ export interface Airtag {
   id: string
   name: string
   has_key: boolean
+  icon: string | null
+  color: string | null
 }
 
 export interface Report {
@@ -92,6 +94,19 @@ export async function renameAirtag(id: string, name: string): Promise<{ id: stri
 
 export async function deleteAirtag(id: string): Promise<void> {
   await apiFetch(`/api/airtags/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function setAirtagAppearance(
+  id: string,
+  icon: string | null,
+  color: string | null,
+): Promise<{ id: string; icon: string | null; color: string | null }> {
+  return (
+    await apiFetch(`/api/airtags/${encodeURIComponent(id)}/appearance`, {
+      method: 'PATCH',
+      body: JSON.stringify({ icon, color }),
+    })
+  ).json()
 }
 
 export async function setAirtagKeyB64(id: string, privateKeyB64: string): Promise<void> {

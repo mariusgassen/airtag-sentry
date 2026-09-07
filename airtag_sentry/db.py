@@ -19,6 +19,8 @@ import psycopg
 class AirtagRecord:
     id: str
     name: str
+    icon: str | None = None
+    color: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,7 +99,7 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
 def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO airtags (id, name) VALUES (%s, %s) RETURNING id, name",
+            "INSERT INTO airtags (id, name) VALUES (%s, %s) RETURNING id, name, icon, color",
             (airtag_id, name),
         )
         row = cur.fetchone()
@@ -107,15 +109,31 @@ def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> Airtag
 
 def list_airtags(conn: psycopg.Connection) -> list[AirtagRecord]:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, name FROM airtags ORDER BY created_at ASC")
+        cur.execute("SELECT id, name, icon, color FROM airtags ORDER BY created_at ASC")
         return [AirtagRecord(*row) for row in cur.fetchall()]
 
 
 def rename_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord | None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name",
+            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name, icon, color",
             (name, airtag_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return AirtagRecord(*row) if row else None
+
+
+def set_airtag_appearance(
+    conn: psycopg.Connection, airtag_id: str, icon: str | None, color: str | None
+) -> AirtagRecord | None:
+    """Set (or, with both args None, reset to automatic) an AirTag's chosen
+    icon/color. Both fields are always written together since the picker UI
+    always submits both current values."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE airtags SET icon = %s, color = %s WHERE id = %s RETURNING id, name, icon, color",
+            (icon, color, airtag_id),
         )
         row = cur.fetchone()
     conn.commit()

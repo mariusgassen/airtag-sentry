@@ -971,6 +971,45 @@ run command, which mounts this exact path for this exact reason).
   can be confirmed without watching a real deployment survive multiple
   redeploys without re-triggering it.
 
+## v12.4: fix v12.3's anisette volume - it mounted the wrong subdirectory
+Trigger: the 503 recurred hours after v12.3 deployed, on both 2FA methods.
+User asked directly: "does it only meet the lib folder?" - yes, and that
+was the bug. v12.3 mounted `anisette_data` at
+`.../anisette-v3/lib/`, matching the upstream project's own documented
+`docker run` example - but reading the actual server source
+(`source/app.d` in [Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server))
+shows `device.json` - the file holding the machine ID/UUID Apple actually
+keys trust off - is written directly into `configurationPath`
+(`~/.config/anisette-v3`), the *parent* of `lib/`. `lib/` itself only
+caches two downloadable Apple libraries (`libCoreADI.so`/
+`libstoreservicescore.so`), which aren't identity-bearing at all. So v12.3
+persisted the one thing that didn't matter and silently missed the one
+thing that did - every redeploy was still generating a brand-new device
+identity exactly as before, with no error to reveal it.
+
+Also audited: this prompted a full re-check of every env var in both
+`app`'s and `dashboard`'s `environment:` blocks against what `config.py`
+actually reads - none were stale. `APPLE_STORE_PATH`/
+`APPLE_OWNER_SESSION_PATH`/`ANISETTE_LIBS_PATH` are deliberately absent
+(code defaults, per earlier reviews) and still correctly so.
+
+- [x] `docker-compose.yml`: `anisette_data` now mounts at
+      `/home/Alcoholic/.config/anisette-v3/` (the parent), covering both
+      `device.json` and `lib/` in one volume. Comment updated with the
+      source-level explanation and an explicit warning not to trust the
+      upstream README's own example path without checking the source, in
+      case this image is ever updated again.
+
+## Review (v12.4)
+- One file touched, no application code changes.
+- Verified: `docker compose config` (throwaway `.env`) parses cleanly and
+  confirms the volume now mounts at the corrected parent path.
+- Not verified in this sandbox (no real Apple ID, no way to run the actual
+  anisette-v3-server binary here to inspect `device.json` being written):
+  that a real deployment's `device.json` now survives a restart and that
+  this actually stops the 503s in practice - confirmed by reading the
+  server's own source code, not by observing the file get written.
+
 ## v13: Top safe-area title bar (replaces dead decorative panel)
 
 Trigger: a follow-up round on v10's fix, done in a separate session and not
@@ -1097,7 +1136,93 @@ the UI, staying UI-first per `CLAUDE.md`.
   history list should be checked visually against a real connected account
   before considering this fully settled.
 
-## v15: Owner device in the main AirTags list
+## v15: Customizable per-AirTag icons + interactive map markers
+
+Every AirTag used to render with the same fixed ring glyph everywhere
+(list row, detail header, map pin), with only its accent color varying -
+and that color wasn't stored either, just a hash of the AirTag's `id`
+(`airtagColor.ts`). No way to tell "the bike" from "the backpack" at a
+glance beyond the name text. Adds a real per-device identity: a chosen
+icon (from a curated 12-icon set) and color, picked from the dashboard,
+reused consistently in the list/detail avatar and the map marker, plus an
+"In Karten öffnen" deep link on marker popups to hand off to the device's
+native Maps app.
+
+- [x] New migration (`8a7b73c5121e`): nullable `icon`/`color TEXT` columns
+      on `airtags`. `NULL` is a first-class "automatic" state (today's
+      hash-derived behavior), not a backfill target - every existing
+      AirTag renders unchanged until customized.
+- [x] `db.py`: `AirtagRecord` gained `icon`/`color`; `create_airtag`/
+      `list_airtags`/`rename_airtag` select the new columns; new
+      `set_airtag_appearance(conn, airtag_id, icon, color)`.
+- [x] `web/app.py`: new `PATCH /api/airtags/{airtag_id}/appearance`
+      (`AirtagAppearanceIn`), validated server-side against an
+      `AIRTAG_ICON_CHOICES` allow-list (kept in sync with
+      `deviceIcons.tsx`'s registry by comment) and a `#rrggbb` regex for
+      color - never trusts the client. `GET`/`POST /api/airtags` responses
+      extended with `icon`/`color`.
+- [x] `frontend/src/deviceIcons.tsx` (new): 12 hand-rolled device glyphs
+      (bike, backpack, car, wallet, suitcase, laptop, camera, pet,
+      headphones, book, box, plus the existing key icon reused for
+      "keys") - no icon library added, matching `icons.tsx`'s existing
+      "no dependency needed for this few" approach, and Leaflet's
+      `divIcon` needs raw SVG markup anyway.
+      `frontend/src/deviceIconRegistry.ts` (new): the name/component/label
+      registry, split into its own module so `deviceIcons.tsx` exports
+      only components (Fast Refresh requirement, caught by `oxlint`'s
+      `react/only-export-components`).
+- [x] `mapIcons.ts`: 1:1 raw-SVG-string mirror of the same 12 icons for
+      the map pin (divIcon content is plain HTML, not React - same reason
+      the ring glyph was already duplicated this way); `airtagPinIcon` now
+      takes `{ id, icon, color }` instead of just `id`.
+- [x] `AirtagAvatar.tsx`: takes the full `airtag` object instead of just
+      `airtagId`, resolving chosen icon/color with the automatic
+      fallback - shared by `AirtagList.tsx`'s row and `AirtagDetail.tsx`'s
+      header avatar.
+- [x] `AirtagDetail.tsx`: new "Symbol & Farbe" `Section`/`Row` (icon grid
+      + color swatches, immediate-apply per tap like `SettingsPanel.tsx`'s
+      `ThemeField` - no separate save button), plus a new `PaletteIcon` in
+      `icons.tsx` for the row.
+- [x] `frontend/src/maps.ts` (new): `mapsUrl(lat, lon, label)` - an Apple
+      Maps web link (hands off to the native app on iOS/macOS, or just
+      opens as a normal website otherwise) on Apple platforms, a Google
+      Maps universal link elsewhere.
+- [x] `MapCard.tsx`/`OverviewMap.tsx`: markers now pass the full airtag to
+      `airtagPinIcon`; popups gained an "In Karten öffnen" link next to
+      the existing "Details anzeigen" button.
+- [x] `test_db.py`: new `test_set_airtag_appearance_round_trip`.
+
+## Review (v15)
+- 14 files touched (1 migration, 2 backend, 10 frontend, 1 test), 2 new
+  frontend files (`deviceIcons.tsx`, `deviceIconRegistry.ts`, `maps.ts`),
+  no new dependencies (icons are hand-rolled SVG, matching the existing
+  convention).
+- Verified: `pytest` against a real local Postgres (started directly via
+  the sandbox's `postgresql` package, no Docker daemon available here) -
+  61 passed, including the new appearance round-trip test and the full
+  existing suite unaffected. `cd frontend && npx tsc -b && npx vite build`
+  clean; `npx oxlint` initially flagged 9 new `react/only-export-components`
+  warnings from mixing icon components with registry data in one file -
+  fixed by the `deviceIcons.tsx`/`deviceIconRegistry.ts` split, leaving
+  only the same two pre-existing `set-state-in-effect` warnings from
+  v13/v14 (untouched by this change). `docker compose config` parses
+  cleanly with a throwaway `.env`.
+- Live-verified in-browser (no Docker daemon in this sandbox either, so a
+  local Postgres 16 cluster + a `python -m airtag_sentry serve` process
+  stood in for `docker compose up`, with two seeded AirTags/reports and a
+  hand-minted dev-only session cookie to get past GitHub OAuth): opened
+  the "Symbol & Farbe" picker, picked the bike icon + green, confirmed the
+  list row, detail header, and both the detail map pin and the overview
+  map pin all updated to match; clicked a marker's popup and confirmed
+  "In Karten öffnen" renders with a correct
+  `google.com/maps/search/?api=1&query=<lat>,<lon>` link (headless
+  Chromium's UA isn't Apple, so the Google Maps branch was the one
+  exercised - the `maps.apple.com` branch is a one-line UA check, not
+  independently verified here). OpenStreetMap tile fetches themselves
+  failed in this sandbox (same outbound-proxy restriction noted since
+  v1's review) but don't affect the app's own marker rendering, which
+  doesn't depend on them.
+## v16: Owner device in the main AirTags list
 
 Trigger: v14 surfaced owner location on the map and in Settings ->
 Apple-Konten, but a connected owner device was otherwise invisible - you
@@ -1123,7 +1248,7 @@ tucked away in Settings.
       same mount effect as `ownerLocation`; both passed down to
       `AirtagList`.
 
-## Review (v15)
+## Review (v16)
 - 3 files touched, all frontend, no backend/schema change, no new
   dependencies.
 - Verified: `cd frontend && npx tsc -b && npx vite build` clean; `npx
@@ -1138,9 +1263,9 @@ tucked away in Settings.
   `OWNER_APPLE_ADAPTER` usage of the same `getOwnerAppleStatus`/
   `getOwnerLocation` calls, not by exercising the UI live.
 
-## v16: Explicit owner device selection + movement trail
+## v17: Explicit owner device selection + movement trail
 
-Trigger: two follow-ups to v14/v15. First, `owner_tracking.fetch_owner_location()`
+Trigger: two follow-ups to v14/v16. First, `owner_tracking.fetch_owner_location()`
 returned whichever device on the connected Apple account answered first
 with a location - not deterministic, and not something the user could
 choose. Second, owner location has had a full history in `owner_locations`
@@ -1193,7 +1318,7 @@ shipped.
       <name>" with a "Gerät ändern" action to reopen the same list.
 - [x] `SettingsPanel.tsx`: wired the two new adapter fields for
       `OWNER_APPLE_ADAPTER` only.
-- [x] `App.tsx` / `AirtagList.tsx`: the v15 "Du" row now shows the selected
+- [x] `App.tsx` / `AirtagList.tsx`: the v16 "Du" row now shows the selected
       device's name instead of the generic "Du" once one is picked, and
       "Gerät in Einstellungen auswählen" instead of "Kein Standort
       verfügbar" while connected but still unselected - directly naming
@@ -1216,14 +1341,14 @@ shipped.
       when disconnected, and a regression guard (a fake device exposing
       `location` as a `@property`) for the pyicloud fix.
 
-## Review (v16)
+## Review (v17)
 - 10 files touched (1 migration, 3 backend, 2 backend tests, 4 frontend),
   no new dependencies.
 - Verified: `pytest` against real local Postgres (migration applied via
   `alembic upgrade head`) - 50 passed, 14 skipped (unrelated), including
   the 4 new tests. `cd frontend && npx tsc -b && npx vite build` clean;
   `npx oxlint` shows only the same two pre-existing `set-state-in-effect`
-  warnings from v13-v15 (two new ones surfaced while writing the device
+  warnings from v13/v14/v16 (two new ones surfaced while writing the device
   picker's effects and were fixed by keeping `setState` calls inside
   `.then()`/`.catch()` rather than synchronously in the effect body, and
   by inlining the status-fetch effect instead of calling a named
@@ -1232,6 +1357,7 @@ shipped.
 - Not verified in this sandbox: a live Apple 2FA session, so the device
   list/selection UI and the map trail should get a visual check against
   the real connected account before considering this fully settled (same
-  standing caveat as v11/v13-v15) - that account is specifically the one
+  standing caveat as v11/v13/v14/v16) - that account is specifically the one
   that motivated this version, so re-selecting its device once this ships
   is a needed manual step, not optional polish.
+

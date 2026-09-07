@@ -1,6 +1,8 @@
 // Apple-system-style accent colors, used to give each AirTag a stable visual
-// identity shared between its list/detail avatar and its map pin.
-const PALETTE = [
+// identity shared between its list/detail avatar and its map pin. Exported
+// so the appearance picker (AirtagDetail.tsx) can offer the same colors as
+// explicit choices, rather than only ever landing on one by chance.
+export const PALETTE = [
   '#0a84ff', // blue
   '#ff9f0a', // orange
   '#32d74b', // green

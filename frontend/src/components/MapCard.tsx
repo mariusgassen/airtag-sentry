@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
-import type { OwnerLocation, Report } from '../api'
+import type { Airtag, OwnerLocation, Report } from '../api'
 import { formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { mapsUrl } from '../maps'
+import { LocationArrowIcon } from './icons'
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
@@ -77,12 +79,12 @@ export function NoReportsView() {
 
 export function MapCard({
   reports,
-  airtagId,
+  airtag,
   ownerLocation,
   ownerLocationHistory,
 }: {
   reports: Report[]
-  airtagId: string
+  airtag: Airtag
   ownerLocation?: OwnerLocation | null
   ownerLocationHistory?: OwnerLocation[]
 }) {
@@ -93,8 +95,10 @@ export function MapCard({
     return <NoReportsView />
   }
 
+  const last = positions[positions.length - 1]
+
   return (
-    <MapContainer center={positions[positions.length - 1]} zoom={15} className="h-full w-full">
+    <MapContainer center={last} zoom={15} className="h-full w-full">
       <TileLayer
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -103,8 +107,21 @@ export function MapCard({
       {ownerPositions.length > 1 && (
         <Polyline positions={ownerPositions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }} />
       )}
-      <Marker position={positions[positions.length - 1]} icon={airtagPinIcon(airtagId)}>
-        <Popup>Letzte Position</Popup>
+      <Marker position={last} icon={airtagPinIcon(airtag)}>
+        <Popup>
+          <div className="text-sm">
+            <p className="mb-2 font-medium">Letzte Position</p>
+            <a
+              href={mapsUrl(last[0], last[1], airtag.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+            >
+              <LocationArrowIcon className="h-3.5 w-3.5" />
+              In Karten öffnen
+            </a>
+          </div>
+        </Popup>
       </Marker>
       {ownerLocation && (
         <Marker position={[ownerLocation.lat, ownerLocation.lon]} icon={currentLocationIcon}>

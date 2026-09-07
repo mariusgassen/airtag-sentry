@@ -126,6 +126,23 @@ export function PersonIcon({ className }: IconProps) {
   )
 }
 
+export function PaletteIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M12 3a9 9 0 1 0 0 18h1.5a2 2 0 0 0 1.4-3.4 1 1 0 0 1 .7-1.7H17a4 4 0 0 0 4-4c0-5-4.5-8.9-9-8.9Z"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+      />
+      <circle cx="7.5" cy="11" r="1.2" fill="currentColor" />
+      <circle cx="10.5" cy="7.3" r="1.2" fill="currentColor" />
+      <circle cx="15.2" cy="7.8" r="1.2" fill="currentColor" />
+      <circle cx="17.2" cy="11.8" r="1.2" fill="currentColor" />
+    </svg>
+  )
+}
+
 /** The AirTag glyph: concentric rings, similar to Find My's item icon. */
 export function AirtagGlyph({ className }: IconProps) {
   return (

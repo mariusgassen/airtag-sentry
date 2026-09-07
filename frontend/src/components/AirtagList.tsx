@@ -143,7 +143,7 @@ export function AirtagList({
                     selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
                   } ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
                 >
-                  <AirtagAvatar airtagId={a.id} size={40} />
+                  <AirtagAvatar airtag={a} size={40} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[0.95rem] font-medium">{a.name}</span>
                     <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">{subtitle}</span>

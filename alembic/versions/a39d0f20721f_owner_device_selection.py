@@ -1,7 +1,7 @@
 """owner device selection
 
 Revision ID: a39d0f20721f
-Revises: 2498586179a9
+Revises: 8a7b73c5121e
 Create Date: 2026-09-07 17:23:58.475470
 
 owner_tracking.py's fetch_owner_location() used to just return whichever
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'a39d0f20721f'
-down_revision: Union[str, Sequence[str], None] = '2498586179a9'
+down_revision: Union[str, Sequence[str], None] = '8a7b73c5121e'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

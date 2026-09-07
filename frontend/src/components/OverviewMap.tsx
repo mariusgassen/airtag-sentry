@@ -2,7 +2,9 @@ import { MapContainer, TileLayer, Marker, Polyline, Popup } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { mapsUrl } from '../maps'
 import { FitBounds, InvalidateSizeOnResize, NoReportsView } from './MapCard'
+import { LocationArrowIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -36,18 +38,29 @@ export function OverviewMap({ airtags, statuses, onSelect, ownerLocation, ownerL
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {located.map(({ airtag, lastReport }) => (
-        <Marker key={airtag.id} position={[lastReport.lat, lastReport.lon]} icon={airtagPinIcon(airtag.id)}>
+        <Marker key={airtag.id} position={[lastReport.lat, lastReport.lon]} icon={airtagPinIcon(airtag)}>
           <Popup>
             <div className="text-sm">
               <p className="mb-1 font-medium">{airtag.name}</p>
               <p className="mb-2 text-[var(--text-secondary)]">{capitalize(formatRelative(lastReport.timestamp))}</p>
-              <button
-                type="button"
-                onClick={() => onSelect(airtag.id)}
-                className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white"
-              >
-                Details anzeigen
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelect(airtag.id)}
+                  className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white"
+                >
+                  Details anzeigen
+                </button>
+                <a
+                  href={mapsUrl(lastReport.lat, lastReport.lon, airtag.name)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+                >
+                  <LocationArrowIcon className="h-3.5 w-3.5" />
+                  In Karten öffnen
+                </a>
+              </div>
             </div>
           </Popup>
         </Marker>
