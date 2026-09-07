@@ -897,6 +897,45 @@ ran and tried `from pyicloud import PyiCloudService`.
   failure (import-time `ModuleNotFoundError`) is fully reproduced and fixed
   independent of reaching Apple's servers at all.
 
+## v12.2: fix wrong "use an app-specific password" README guidance
+Trigger: real-user bug report with the v12.1 logging fix now in place -
+the actual traceback showed `pyicloud.exceptions.PyiCloudFailedLoginException:
+Invalid email/password combination` (Apple's `-20101`), i.e. a genuine auth
+rejection, not a code bug. Root cause: v11's README told users to generate
+and use an **app-specific password** for owner tracking - security-sensible
+advice in general, but wrong for `pyicloud` specifically. Confirmed against
+[picklepete/pyicloud#349](https://github.com/picklepete/pyicloud/issues/349):
+`pyicloud` authenticates the same way signing into `icloud.com`/Find My
+does (real account password + a live 2FA code) and cannot use an
+app-specific password at all - it doesn't produce the tokens that login
+step needs. Apple's server returns the exact same generic "-20101 Invalid
+email/password combination" for this as for an actually-wrong password,
+so a user following the old README instructions had no way to tell what
+was actually wrong.
+
+- [x] README: "Owner device tracking" section corrected - use your real
+      Apple ID password, with an explanation of why an app-specific one
+      fails and what error it produces, so this is diagnosable from the
+      docs alone next time.
+- [x] `owner_tracking.py`: `_build_api()` now catches
+      `pyicloud.exceptions.PyiCloudFailedLoginException` specifically and
+      re-raises with the app-specific-password hint appended, so the
+      dashboard's error message (not just the README) points at the actual
+      likely cause instead of repeating Apple's opaque `-20101` text
+      verbatim.
+- [x] `tests/test_owner_tracking.py`: new test mocking `PyiCloudService` to
+      raise `PyiCloudFailedLoginException`, confirming `_build_api()` wraps
+      it with the hint - real Apple auth still isn't exercisable here, but
+      this pins down the wrapping logic itself.
+
+## Review (v12.2)
+- Verified: full `pytest` (59 passed) against real local Postgres,
+  including the new mocked-failure test. No dependency/schema changes.
+- Not verified in this sandbox (no real Apple ID available): that using the
+  *correct* real-password flow actually succeeds end-to-end against Apple's
+  live service - only that the specific wrong-password-type failure mode is
+  now correctly explained both in the docs and in the error message itself.
+
 ## v13: Top safe-area title bar (replaces dead decorative panel)
 
 Trigger: a follow-up round on v10's fix, done in a separate session and not
