@@ -23,10 +23,22 @@ services:
     # window (e.g. several redeploys while iterating on a fix) can trip
     # Apple's abuse detection and produce transient 503s on unrelated
     # requests (GSA auth, 2FA submission) that have nothing to do with this
-    # app's own code - this path is the image's own documented requirement
-    # (github.com/Dadoum/anisette-v3-server) for exactly that reason.
+    # app's own code.
+    #
+    # Mounted at .../anisette-v3/ itself, NOT .../anisette-v3/lib/: per the
+    # image's own source (source/app.d), the persistent device identity
+    # (device.json, holding the machine ID/UUID Apple actually keys trust
+    # off) is written directly into configurationPath (~/.config/anisette-v3),
+    # while lib/ underneath it only caches two downloadable Apple libraries
+    # (libCoreADI.so/libstoreservicescore.so) - not identity-bearing at all.
+    # A previous version of this mount only covered lib/, silently missing
+    # device.json and defeating the whole point of this volume without
+    # erroring - every redeploy was still generating a fresh device each
+    # time. The upstream README's own example (github.com/Dadoum/anisette-v3-server)
+    # mounts only lib/ too, so don't copy that without checking the source
+    # first if this image is ever updated.
     volumes:
-      - anisette_data:/home/Alcoholic/.config/anisette-v3/lib/
+      - anisette_data:/home/Alcoholic/.config/anisette-v3/
 
   app:
     build: .
