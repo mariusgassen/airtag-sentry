@@ -44,8 +44,21 @@ _pending_password: str | None = None
 
 def _build_api(apple_id: str, password: str, session_dir: str):
     from pyicloud import PyiCloudService
+    from pyicloud.exceptions import PyiCloudFailedLoginException
 
-    return PyiCloudService(apple_id, password, cookie_directory=session_dir)
+    try:
+        return PyiCloudService(apple_id, password, cookie_directory=session_dir)
+    except PyiCloudFailedLoginException as exc:
+        # Apple's own error here ("-20101: Invalid email/password combination") is
+        # the same generic message for a genuinely wrong password AND for the most
+        # common real mistake: entering an app-specific password. pyicloud
+        # authenticates the same way icloud.com/find does and needs the real
+        # account password + a live 2FA code - it doesn't support app-specific
+        # passwords at all (they don't produce the tokens this login step needs).
+        raise RuntimeError(
+            f"{exc} If you used an app-specific password, use your real Apple ID "
+            "password instead - pyicloud doesn't support app-specific passwords."
+        ) from exc
 
 
 def _persist(cfg: Config, conn, apple_id: str, password: str) -> None:

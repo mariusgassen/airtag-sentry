@@ -134,17 +134,17 @@ independent Apple session from the AirTag one above - its own login, its own
 2FA, its own persisted session - and it's entirely optional.
 
 To enable it, in the dashboard's Settings ⚙️ → **Apple-Konten**, connect
-"Eigener Standort (optional)":
-
-1. Generate an **app-specific password** for your Apple ID at
-   [appleid.apple.com](https://appleid.apple.com) -> Sign-In and Security ->
-   App-Specific Passwords. Use this, not your real Apple ID password - it can
-   be revoked independently if you ever need to.
-2. Enter your Apple ID and that app-specific password, then a 2FA code if
-   prompted. The password is encrypted and stored in Postgres (never in
-   `.env`) - pyicloud has no "resume from a session token alone" mode like
-   `FindMy.py` does, so it needs to stay available for every poll, not just
-   this one login.
+"Eigener Standort (optional)" with your **real Apple ID password**, not an
+app-specific one - `pyicloud` authenticates the same way signing into
+`icloud.com`/the Find My app does (password + a live 2FA code), and does
+not support app-specific passwords for this at all: it needs tokens from
+that same login step that an app-specific password never produces, so
+using one fails outright with Apple's generic "Invalid email/password
+combination" (`-20101`) error, not a clearer "wrong password type" message.
+Enter your Apple ID and that password, then a 2FA code if prompted - it's
+encrypted and stored in Postgres (never in `.env`), since `pyicloud` has no
+"resume from a session token alone" mode like `FindMy.py` does, so it needs
+to stay available for every poll, not just this one login.
 
 Once connected, every poll also records your device's current location and,
 when a normal movement alert fires *and* the tag's new position is far from
@@ -227,8 +227,11 @@ then arrive as real OS notifications, even when the app isn't open.
    fill them in there.
 3. Uncomment `SERVICE_FQDN_DASHBOARD_8000` — Coolify assigns a public
    domain + TLS to the `dashboard` service.
-4. Deploy. Coolify persists the `postgres_data` and `app_data` volumes
-   across redeploys.
+4. Deploy. Coolify persists the `postgres_data`, `app_data`, and
+   `anisette_data` volumes across redeploys - the last one matters more than
+   it looks: without it, every redeploy re-provisions the `anisette`
+   container's device identity from scratch, and Apple can rate-limit that
+   (transient 503s on login/2FA) if it happens repeatedly in a short time.
 5. Open the deployed dashboard, log in with GitHub, and connect your Apple
    ID(s) from Settings ⚙️ → Apple-Konten (see [Getting started](#3-start-it-up)) -
    no container terminal access needed.
