@@ -227,8 +227,11 @@ then arrive as real OS notifications, even when the app isn't open.
    fill them in there.
 3. Uncomment `SERVICE_FQDN_DASHBOARD_8000` — Coolify assigns a public
    domain + TLS to the `dashboard` service.
-4. Deploy. Coolify persists the `postgres_data` and `app_data` volumes
-   across redeploys.
+4. Deploy. Coolify persists the `postgres_data`, `app_data`, and
+   `anisette_data` volumes across redeploys - the last one matters more than
+   it looks: without it, every redeploy re-provisions the `anisette`
+   container's device identity from scratch, and Apple can rate-limit that
+   (transient 503s on login/2FA) if it happens repeatedly in a short time.
 5. Open the deployed dashboard, log in with GitHub, and connect your Apple
    ID(s) from Settings ⚙️ → Apple-Konten (see [Getting started](#3-start-it-up)) -
    no container terminal access needed.

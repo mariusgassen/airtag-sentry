@@ -17,6 +17,16 @@ services:
   anisette:
     image: dadoum/anisette-v3-server
     restart: unless-stopped
+    # Without this, every container restart/redeploy wipes its provisioned
+    # device identity, forcing it to register as a brand-new "device" with
+    # Apple from scratch on the next request. A burst of restarts in a short
+    # window (e.g. several redeploys while iterating on a fix) can trip
+    # Apple's abuse detection and produce transient 503s on unrelated
+    # requests (GSA auth, 2FA submission) that have nothing to do with this
+    # app's own code - this path is the image's own documented requirement
+    # (github.com/Dadoum/anisette-v3-server) for exactly that reason.
+    volumes:
+      - anisette_data:/home/Alcoholic/.config/anisette-v3/lib/
 
   app:
     build: .
@@ -104,3 +114,4 @@ services:
 volumes:
   postgres_data:
   app_data:
+  anisette_data:

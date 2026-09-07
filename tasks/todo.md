@@ -936,6 +936,41 @@ was actually wrong.
   live service - only that the specific wrong-password-type failure mode is
   now correctly explained both in the docs and in the error message itself.
 
+## v12.3: persist the anisette container's device identity across restarts
+Trigger: real-user bug report - a fresh AirTag-tracking login (not owner
+tracking this time) failed 2FA submission with
+`findmy.errors.UnhandledProtocolError: Error response for GSA request: 503`,
+a raw HTTP 503 from Apple's own GrandSlam-auth endpoint, on three separate
+attempts including a freshly-restarted login. Root cause: `docker-compose.yml`'s
+`anisette` service had no persistent volume, so every container
+restart/redeploy wipes its provisioned device identity, forcing it to
+register as a brand-new "device" with Apple from scratch on the next
+request - and several redeploys happened in quick succession while chasing
+the two fixes just before this one. Repeated re-provisioning from the same
+IP in a short window is exactly the kind of thing Apple's abuse detection
+flags with a transient 503, unrelated to any actual bug in this app's own
+authentication code (confirmed against the documented, official
+[Dadoum/anisette-v3-server](https://github.com/Dadoum/anisette-v3-server)
+run command, which mounts this exact path for this exact reason).
+
+- [x] `docker-compose.yml`: `anisette` service now mounts a new
+      `anisette_data` volume at `/home/Alcoholic/.config/anisette-v3/lib/`
+      (the image's own documented persistent-data path).
+- [x] README: Coolify section updated to list `anisette_data` among the
+      volumes that must persist across redeploys, with the reason.
+
+## Review (v12.3)
+- One file (plus README) touched, no application code changes - purely a
+  compose/infra fix.
+- Verified: `docker compose config` (throwaway `.env`) parses cleanly and
+  confirms the new volume mounts at the documented path.
+- Not verified in this sandbox (no real Apple ID, no ability to run this
+  compose stack for real here): that this actually stops the 503s in
+  practice - the fix addresses a real, documented misconfiguration, but
+  Apple's own rate-limiting/abuse-detection behavior isn't something that
+  can be confirmed without watching a real deployment survive multiple
+  redeploys without re-triggering it.
+
 ## v13: Top safe-area title bar (replaces dead decorative panel)
 
 Trigger: a follow-up round on v10's fix, done in a separate session and not
