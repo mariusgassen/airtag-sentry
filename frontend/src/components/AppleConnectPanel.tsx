@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppleLoginResult, AppleTwoFactorMethod, OwnerDevice, OwnerLocation } from '../api'
-import { formatRelative } from '../format'
+import type { AppleLoginResult, AppleTwoFactorMethod } from '../api'
 import { ChevronRightIcon, KeyIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 
@@ -9,8 +8,11 @@ type Step = 'credentials' | 'select-method' | 'code'
 export interface AppleConnectAdapter {
   getStatus: () => Promise<{
     connected: boolean
-    selected_device_id?: string | null
-    selected_device_name?: string | null
+    // Only meaningful for the owner-tracking adapter - which of its
+    // (possibly several) devices is currently primary, see
+    // OwnerDevicesPanel.tsx and owner_tracking.set_device_primary().
+    primary_device_id?: string | null
+    primary_device_name?: string | null
   }>
   login: (email: string, password: string) => Promise<AppleLoginResult>
   // Absent for adapters whose underlying login never offers a method choice
@@ -18,15 +20,6 @@ export interface AppleConnectAdapter {
   selectMethod?: (methodIndex: number) => Promise<void>
   submitCode: (code: string) => Promise<void>
   disconnect: () => Promise<void>
-  // Only present for adapters that track a location (owner tracking) - the
-  // AirTag-tracking adapter has no location concept of its own.
-  getLocation?: () => Promise<OwnerLocation | null>
-  getHistory?: (limit?: number) => Promise<OwnerLocation[]>
-  // Only present for adapters where "which device" is a meaningful, explicit
-  // choice (owner tracking - an Apple ID can have several devices). When
-  // present, connecting isn't considered fully done until a device is picked.
-  getDevices?: () => Promise<OwnerDevice[]>
-  selectDevice?: (device: OwnerDevice) => Promise<void>
 }
 
 interface Props {
@@ -39,8 +32,7 @@ const METHOD_LABEL = (m: AppleTwoFactorMethod) =>
 
 export function AppleConnectPanel({ title, adapter }: Props) {
   const [connected, setConnected] = useState<boolean | null>(null)
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
-  const [selectedDeviceName, setSelectedDeviceName] = useState<string | null>(null)
+  const [primaryDeviceName, setPrimaryDeviceName] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>('credentials')
   const [email, setEmail] = useState('')
@@ -49,72 +41,18 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   const [code, setCode] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [location, setLocation] = useState<OwnerLocation | null>(null)
-  const [historyOpen, setHistoryOpen] = useState(false)
-  const [history, setHistory] = useState<OwnerLocation[] | null>(null)
-  const [devicePickerOpen, setDevicePickerOpen] = useState(false)
-  const [devices, setDevices] = useState<OwnerDevice[] | null>(null)
-  const [deviceError, setDeviceError] = useState<string | null>(null)
 
   useEffect(() => {
     adapter.getStatus().then((s) => {
       setConnected(s.connected)
-      setSelectedDeviceId(s.selected_device_id ?? null)
-      setSelectedDeviceName(s.selected_device_name ?? null)
+      setPrimaryDeviceName(s.primary_device_name ?? null)
     })
   }, [adapter])
-
-  useEffect(() => {
-    if (connected && adapter.getLocation) {
-      adapter.getLocation().then(setLocation)
-    }
-  }, [connected, adapter])
-
-  // Not connected to something with a device concept, or no device selected
-  // yet: connecting isn't done until one is picked, so the picker shows
-  // itself rather than waiting for the user to open it.
-  const showDevicePicker = Boolean(connected && adapter.getDevices && (!selectedDeviceId || devicePickerOpen))
-
-  useEffect(() => {
-    if (showDevicePicker && devices === null && adapter.getDevices) {
-      adapter
-        .getDevices()
-        .then((d) => {
-          setDeviceError(null)
-          setDevices(d)
-        })
-        .catch((err) => setDeviceError((err as Error).message))
-    }
-  }, [showDevicePicker, devices, adapter])
 
   async function refreshStatus() {
     const s = await adapter.getStatus()
     setConnected(s.connected)
-    setSelectedDeviceId(s.selected_device_id ?? null)
-    setSelectedDeviceName(s.selected_device_name ?? null)
-    // The device list belongs to whichever account is connected right now -
-    // never reuse one fetched before a login/logout/device change.
-    setDevices(null)
-  }
-
-  async function handleSelectDevice(device: OwnerDevice) {
-    if (!adapter.selectDevice) return
-    setDeviceError(null)
-    try {
-      await adapter.selectDevice(device)
-      await refreshStatus()
-      setDevicePickerOpen(false)
-    } catch (err) {
-      setDeviceError((err as Error).message)
-    }
-  }
-
-  async function toggleHistory() {
-    const next = !historyOpen
-    setHistoryOpen(next)
-    if (next && history === null && adapter.getHistory) {
-      setHistory(await adapter.getHistory())
-    }
+    setPrimaryDeviceName(s.primary_device_name ?? null)
   }
 
   function reset() {
@@ -206,8 +144,8 @@ export function AppleConnectPanel({ title, adapter }: Props) {
               {connected === null
                 ? '…'
                 : connected
-                  ? selectedDeviceName
-                    ? `Verbunden · ${selectedDeviceName}`
+                  ? primaryDeviceName
+                    ? `Verbunden · ${primaryDeviceName}`
                     : 'Verbunden'
                   : 'Nicht verbunden'}
             </span>
@@ -225,58 +163,6 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         bordered={false}
       />
 
-      {connected && adapter.getDevices && (
-        <>
-          {selectedDeviceId && (
-            <Row
-              label="Gerät ändern"
-              trailing={
-                <ChevronRightIcon className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${devicePickerOpen ? 'rotate-90' : ''}`} />
-              }
-              onClick={() => setDevicePickerOpen((v) => !v)}
-            />
-          )}
-          {showDevicePicker && (
-            <div className="border-t border-[var(--divider)] p-3">
-              {!selectedDeviceId && (
-                <p className="mb-2 text-sm text-[var(--text-secondary)]">
-                  Welches Gerät bestimmt deinen Standort?
-                </p>
-              )}
-              {devices === null ? (
-                <p className="text-sm text-[var(--text-secondary)]">Lädt…</p>
-              ) : devices.length === 0 ? (
-                <p className="text-sm text-[var(--text-secondary)]">Keine Geräte gefunden.</p>
-              ) : (
-                <div className="flex flex-col gap-2">
-                  {devices.map((d) => (
-                    <button
-                      key={d.id}
-                      type="button"
-                      onClick={() => handleSelectDevice(d)}
-                      className={`rounded-lg border px-3 py-2 text-left text-sm hover:bg-white/5 ${
-                        d.id === selectedDeviceId ? 'border-[var(--accent)]' : 'border-[var(--divider)]'
-                      }`}
-                    >
-                      {d.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {deviceError && <p className="mt-2 text-[0.78rem] text-[var(--destructive)]">{deviceError}</p>}
-            </div>
-          )}
-        </>
-      )}
-
-      {connected && adapter.getLocation && (
-        <p className="border-t border-[var(--divider)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-          {location
-            ? `Standort: ${location.lat.toFixed(4)}, ${location.lon.toFixed(4)} · ${formatRelative(location.recorded_at)}`
-            : 'Noch kein Standort erfasst.'}
-        </p>
-      )}
-
       {connected && (
         <div className="border-t border-[var(--divider)] p-3">
           <button
@@ -287,20 +173,6 @@ export function AppleConnectPanel({ title, adapter }: Props) {
             Trennen
           </button>
         </div>
-      )}
-
-      {connected && adapter.getHistory && (
-        <>
-          <Row
-            icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
-            label="Verlauf"
-            trailing={
-              <ChevronRightIcon className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
-            }
-            onClick={toggleHistory}
-          />
-          {historyOpen && <OwnerLocationHistoryList entries={history} />}
-        </>
       )}
 
       {open && !connected && (
@@ -377,37 +249,5 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         </div>
       )}
     </Section>
-  )
-}
-
-function OwnerLocationHistoryList({ entries }: { entries: OwnerLocation[] | null }) {
-  if (entries === null) {
-    return (
-      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
-        Lädt…
-      </div>
-    )
-  }
-  if (entries.length === 0) {
-    return (
-      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
-        Noch kein Standortverlauf vorhanden.
-      </div>
-    )
-  }
-  return (
-    <div className="max-h-64 overflow-y-auto border-t border-[var(--divider)]">
-      {entries.map((loc, i) => (
-        <div
-          key={loc.recorded_at}
-          className={`flex items-center justify-between px-4 py-2 text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
-        >
-          <span>{new Date(loc.recorded_at).toLocaleString()}</span>
-          <span className="text-[var(--text-secondary)]">
-            {loc.lat.toFixed(4)}, {loc.lon.toFixed(4)}
-          </span>
-        </div>
-      ))}
-    </div>
   )
 }

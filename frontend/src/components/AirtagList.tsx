@@ -18,10 +18,13 @@ interface Props {
   // is the first place a connected owner device becomes visible, not just
   // the Settings panel it started in (see tasks/todo.md v15).
   ownerConnected: boolean
+  // The *primary* tracked device's latest location (see
+  // owner_tracking.set_device_primary) - other tracked-but-not-primary
+  // devices (Settings -> Eigene Geräte) don't show up here.
   ownerLocation: OwnerLocation | null
-  // Name of the device selected in Settings -> Apple-Konten (see
-  // owner_tracking.set_selected_device) - null while connected but not yet
-  // chosen, which fetch_owner_location() treats as "nothing to fetch".
+  // Name of the primary device - null while connected but none has been
+  // marked primary yet, which movement.evaluate_away() treats as "nothing
+  // to correlate against".
   ownerDeviceName: string | null
 }
 

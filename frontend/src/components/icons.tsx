@@ -19,6 +19,20 @@ export function ChevronRightIcon({ className }: IconProps) {
   )
 }
 
+export function StarIcon({ className, filled }: IconProps & { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} className={className}>
+      <path
+        d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.8 2.6-5.4Z"
+        stroke="currentColor"
+        strokeWidth={filled ? 0 : 1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 export function BellIcon({ className, filled }: IconProps & { filled?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} className={className}>

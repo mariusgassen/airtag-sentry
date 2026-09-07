@@ -1361,3 +1361,138 @@ shipped.
   that motivated this version, so re-selecting its device once this ships
   is a needed manual step, not optional polish.
 
+## v18: Multi-device owner tracking with a single primary device
+
+Trigger: user asked for multiple trackable devices ("not AirTags, like
+AirPods, macs etc"), built concurrently with v17 in a separate session -
+both touched the same "which Apple device is the owner" problem from
+different angles and landed within minutes of each other, so this version
+reconciles them via a real merge conflict rather than picking one wholesale.
+User's resolution when asked: "I want a single device as 'my' location but
+have multiple devices in the location list" - i.e. v17's "exactly one
+device, chosen explicitly" instinct was right for away-correlation, but
+the account should still show every device it can see, each independently
+trackable/historized like v17's location trail already treats one.
+
+Supersedes v17's `owner_apple_credentials.selected_device_id/_name`
+mechanism entirely - replaced by a proper device registry
+(`owner_devices`) where any number of devices can be enabled (tracked,
+each with its own history) and at most one of those is additionally
+*primary* (a partial unique index enforces this in Postgres itself). The
+primary device is the one used for "moved without you" away-correlation
+and the map's dashed location trail - both v17 features, now sourced from
+`owner_devices.is_primary` instead of the dropped columns. Every other
+enabled device is still listed with its own history and its own map
+marker; it just doesn't affect either. Independently rediscovered v17's
+`.location()`-vs-`.location`-property bug fix and found + fixed a second,
+real bug on the same path: `PyiCloudService(...)` starts a background
+thread re-polling Apple every 5 minutes on first `.devices` access, never
+stopped - since a fresh instance is built every poll (`_build_api()`),
+forever, the process was leaking one live thread per poll. Fixed by
+collecting everything needed from `.devices` in one pass, then calling
+`api.devices.stop_event.set()` as the very last thing touching it.
+
+AirPods stay explicitly out of scope (unchanged from v17's framing): Find
+My-capable AirPods (Pro/Max) use the same offline-finding network as
+AirTags, not this device service - already trackable via the existing
+"Manage AirTags" key-upload flow. User confirmed this scope split.
+
+- [x] New migration `bf40cb34ac74` (revises `a39d0f20721f`): drops
+      `owner_locations` (never held usable data - v17's own investigation
+      found the same fetch bug) and v17's `selected_device_id`/`_name`
+      columns on `owner_apple_credentials`; adds `owner_devices` (id, name,
+      device_type, `enabled`, `is_primary` with a `WHERE is_primary` partial
+      unique index) and `owner_device_locations` (per-device history,
+      mirrors `location_reports`, FK'd `ON DELETE CASCADE`).
+- [x] `db.py`: `OwnerDevice` dataclass (`enabled` + `is_primary`);
+      `OwnerLocation` gained `device_id`. New `upsert_owner_devices`,
+      `list_owner_devices`, `set_owner_device_enabled` (clears
+      `is_primary` when disabling - a disabled device never gets a fresh
+      location, so leaving it primary would silently stop
+      away-correlation with no visible signal why), `set_owner_device_primary`
+      (exclusive - clears any previous primary first - and force-enables
+      the new one), `record_owner_device_location`,
+      `latest_owner_device_locations` (one row per enabled device),
+      `latest_primary_owner_device_location` (feeds away-correlation),
+      `fetch_owner_device_location_history`. Removed v17's
+      `selected_device`-shaped fields/functions.
+- [x] `owner_tracking.py`: new `_snapshot_devices(api)` - one pass over
+      `api.devices` collecting `(id, name, device_type, location)` into
+      plain data, fixing both bugs above in one place (reads `.location`
+      as a property; stops the monitor thread last). `list_owner_devices`
+      live-refreshes identity (DB `enabled`/`is_primary` flags intact);
+      `set_device_enabled`/`set_device_primary`; `fetch_owner_device_locations`
+      returns every enabled device's current location.
+      `connection_status()` now reports `primary_device_id`/`_name`
+      instead of v17's `selected_device_id`/`_name`.
+- [x] `movement.py`: `evaluate_away` keeps its v14-era single-`OwnerLocation`
+      signature (per the user's "single device as my location" call) -
+      just now always sourced from the primary device specifically, not
+      an arbitrary/first one.
+- [x] `tracker.py`: `_update_owner_devices` records every enabled device's
+      location each poll; away-correlation reads
+      `latest_primary_owner_device_location(conn)`.
+- [x] `web/app.py`: replaced v17's `GET /api/apple/owner/devices` +
+      `POST /api/apple/owner/device` with `GET/PUT /api/owner-devices`,
+      `PUT /api/owner-devices/{id}/primary`, `DELETE
+      /api/owner-devices/primary`, `GET /api/owner-device-locations`
+      (latest per enabled device, joined with device name for map
+      popups), `GET /api/owner-devices/{id}/history`. `owner_apple_status()`
+      keeps calling `connection_status()`, now primary-shaped.
+- [x] Frontend: new `OwnerDevicesPanel.tsx` (Settings -> Eigener Standort)
+      - the actual device list/history UI, superseding v17's in-panel
+      picker inside `AppleConnectPanel.tsx`. Each device gets an enable
+      checkbox (list membership) and a star toggle (`StarIcon`, new in
+      `icons.tsx`) for primary (exclusive - picking one clears any other).
+      `AppleConnectPanel.tsx` reverted to a plain, adapter-agnostic
+      connect/disconnect wizard - device management doesn't belong in a
+      component shared with the AirTag-tracking adapter, which has no
+      device concept at all. `MapCard.tsx`/`OverviewMap.tsx` keep v17's
+      dashed trail, now drawn once per *enabled* device (`ownerLocationHistories`,
+      keyed by `device_id` - user pushed back on an earlier draft that only
+      trailed the primary device: "the location trail should be active for
+      all devices") plus one marker per enabled device (`ownerLocations`,
+      was a single conditional marker). Only away-correlation and the "Du"
+      row stay primary-only, matching the user's actual ask ("single device
+      as my location, but multiple in the location list"). `App.tsx`
+      derives the primary device's own location from the enabled-devices
+      array for `AirtagList`'s "Du" row rather than a separate fetch, and
+      fetches every enabled device's history in parallel for the trails.
+- [x] Tests: `test_db.py` replaced v17's selected-device test with
+      registry + primary-exclusivity + per-device-history round-trips
+      (including that disabling the primary clears `is_primary`, and that
+      `latest_primary_owner_device_location` ignores enabled-but-not-primary
+      devices even with a recorded location). `test_movement.py` unchanged
+      from v14 (signature reverted to match). `test_owner_tracking.py`
+      kept v17's "not connected" guard, replaced its selected-device
+      fetch tests with a fake-`api.devices` regression test proving
+      `_snapshot_devices` reads `.location` without calling it and always
+      stops the monitor thread.
+
+## Review (v18)
+- 17 files touched (5 backend + 1 migration, 7 frontend, 3 tests, this
+  changelog), one new migration, no new dependencies. Net effect after
+  reconciling with v17: same file set v17 touched, plus `movement.py`
+  untouched (signature already matched what v17 needed) and
+  `OwnerDevicesPanel.tsx`/`icons.tsx` as the only genuinely new files.
+- Verified: recreated the local Postgres test database from scratch
+  before the full suite (the persistent one had a stale `alembic_version`
+  pointer from mid-reconciliation migration-chain edits, which silently
+  skipped the intervening migrations rather than erroring - worth
+  remembering if a future session sees mysteriously-missing columns
+  against a long-lived local test DB). `pytest` - 69 passed, including all
+  new/updated tests. `cd frontend && npx tsc -b && npx vite build` clean;
+  `npx oxlint` shows three `set-state-in-effect` warnings - the two
+  pre-existing ones from v13/v14/v16/v17, plus one new one on the
+  owner-location-histories clear-when-empty effect, which follows the
+  exact same early-return-then-setState shape as the already-accepted
+  `setReports([])` one a few lines below it rather than introducing a new
+  pattern. `docker compose config` parses cleanly with a throwaway `.env`.
+- Not verified in this sandbox: true end-to-end with a real multi-device
+  Apple account (no real Apple ID with several real devices available
+  here, same limitation noted in every prior owner-tracking review,
+  v17 included) - confirmed instead against the real Postgres round-trip
+  tests, a targeted fake-API regression test for both bugs, and a clean
+  build. The device list, star/checkbox interaction, map markers, and
+  trail should get a real-account check before this is considered fully
+  settled.

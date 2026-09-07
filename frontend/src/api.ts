@@ -33,16 +33,23 @@ export interface AppSettings {
   owner_location_max_age_minutes: number
 }
 
+export interface OwnerDevice {
+  id: string
+  name: string
+  device_type: string
+  enabled: boolean
+  is_primary: boolean
+}
+
 export interface OwnerLocation {
+  device_id: string
+  // Only present on /api/owner-device-locations (a per-device history entry
+  // already has its device context from the panel showing it).
+  name?: string
   recorded_at: string
   lat: number
   lon: number
   horizontal_accuracy: number | null
-}
-
-export interface OwnerDevice {
-  id: string
-  name: string
 }
 
 export interface AppleTwoFactorMethod {
@@ -147,12 +154,35 @@ export async function updateSettings(settings: AppSettings): Promise<AppSettings
   ).json()
 }
 
-export async function getOwnerLocation(): Promise<OwnerLocation | null> {
-  return (await apiFetch('/api/owner-location')).json()
+export async function getOwnerDevices(): Promise<OwnerDevice[]> {
+  return (await apiFetch('/api/owner-devices')).json()
 }
 
-export async function getOwnerLocationHistory(limit = 200): Promise<OwnerLocation[]> {
-  return (await apiFetch(`/api/owner-location/history?limit=${limit}`)).json()
+export async function setOwnerDeviceEnabled(id: string, enabled: boolean): Promise<OwnerDevice> {
+  return (
+    await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    })
+  ).json()
+}
+
+export async function setOwnerDevicePrimary(id: string): Promise<OwnerDevice> {
+  return (await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}/primary`, { method: 'PUT' })).json()
+}
+
+export async function clearOwnerDevicePrimary(): Promise<void> {
+  await apiFetch('/api/owner-devices/primary', { method: 'DELETE' })
+}
+
+export async function getOwnerDeviceLocations(): Promise<OwnerLocation[]> {
+  return (await apiFetch('/api/owner-device-locations')).json()
+}
+
+export async function getOwnerDeviceHistory(id: string, limit = 200): Promise<OwnerLocation[]> {
+  return (
+    await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}/history?limit=${limit}`)
+  ).json()
 }
 
 export async function getAppleStatus(): Promise<{ connected: boolean }> {
@@ -182,21 +212,10 @@ export async function appleDisconnect(): Promise<void> {
 
 export async function getOwnerAppleStatus(): Promise<{
   connected: boolean
-  selected_device_id: string | null
-  selected_device_name: string | null
+  primary_device_id: string | null
+  primary_device_name: string | null
 }> {
   return (await apiFetch('/api/apple/owner/status')).json()
-}
-
-export async function getOwnerDevices(): Promise<OwnerDevice[]> {
-  return (await apiFetch('/api/apple/owner/devices')).json()
-}
-
-export async function selectOwnerDevice(device: OwnerDevice): Promise<void> {
-  await apiFetch('/api/apple/owner/device', {
-    method: 'POST',
-    body: JSON.stringify({ device_id: device.id, device_name: device.name }),
-  })
 }
 
 export async function ownerAppleLogin(appleId: string, password: string): Promise<AppleLoginResult> {
