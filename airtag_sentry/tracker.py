@@ -81,7 +81,7 @@ def poll_once(cfg: Config) -> None:
 
     with get_conn(cfg.database_url) as conn:
         settings = get_settings(conn)
-        notifiers = build_notifiers(cfg)
+        notifiers = build_notifiers(cfg, conn)
         _update_owner_devices(cfg, conn)
         for airtag in list_airtags(conn):
             try:

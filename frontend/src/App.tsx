@@ -314,7 +314,7 @@ export default function App() {
           </button>
           <div className="min-h-0 flex-1">
             {activeTab === 'settings' ? (
-              <SettingsPanel />
+              <SettingsPanel pushStatus={push.status} onEnablePush={push.enable} />
             ) : showDetail && currentAirtag ? (
               <AirtagDetail
                 airtag={currentAirtag}
@@ -328,8 +328,6 @@ export default function App() {
                   await refreshAirtags()
                   setShowDetail(false)
                 }}
-                pushStatus={push.status}
-                onEnablePush={push.enable}
               />
             ) : (
               <AirtagList
@@ -338,8 +336,6 @@ export default function App() {
                 currentId={currentId}
                 onSelect={handleSelect}
                 onCreate={handleCreate}
-                pushStatus={push.status}
-                onEnablePush={push.enable}
                 ownerConnected={ownerConnected}
                 ownerLocation={ownerLocation}
                 ownerDeviceName={ownerDeviceName}

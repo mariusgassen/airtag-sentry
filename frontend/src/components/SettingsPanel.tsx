@@ -16,11 +16,12 @@ import {
 } from '../api'
 import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
-import { LogoutIcon } from './icons'
+import { BellIcon, LogoutIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 import type { AppleConnectAdapter } from './AppleConnectPanel'
 import { AppleConnectPanel } from './AppleConnectPanel'
 import { OwnerDevicesPanel } from './OwnerDevicesPanel'
+import { TelegramPanel } from './TelegramPanel'
 
 const AIRTAG_APPLE_ADAPTER: AppleConnectAdapter = {
   getStatus: getAppleStatus,
@@ -130,7 +131,12 @@ function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
   return errors
 }
 
-export function SettingsPanel() {
+interface Props {
+  pushStatus: 'idle' | 'active' | 'error'
+  onEnablePush: () => void
+}
+
+export function SettingsPanel({ pushStatus, onEnablePush }: Props) {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({})
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -207,6 +213,26 @@ export function SettingsPanel() {
           <Section>
             <ThemeField />
           </Section>
+        </div>
+
+        <div className="px-3">
+          <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+            Benachrichtigungen
+          </p>
+          <Section>
+            <Row
+              icon={<BellIcon className="h-5 w-5" filled={pushStatus === 'active'} />}
+              label="Push-Benachrichtigungen"
+              trailing={
+                <span className={`text-sm ${pushStatus === 'active' ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
+                  {pushStatus === 'active' ? 'Aktiv' : 'Aktivieren'}
+                </span>
+              }
+              onClick={pushStatus === 'active' ? undefined : onEnablePush}
+              bordered={false}
+            />
+          </Section>
+          <TelegramPanel />
         </div>
 
         <div className="px-3">

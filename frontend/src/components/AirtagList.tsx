@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { BellIcon, ChevronRightIcon, PersonIcon, PlusIcon } from './icons'
+import { ChevronRightIcon, PersonIcon, PlusIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -11,8 +11,6 @@ interface Props {
   currentId: string | null
   onSelect: (id: string) => void
   onCreate: (name: string) => Promise<void>
-  pushStatus: 'idle' | 'active' | 'error'
-  onEnablePush: () => void
   // Only rendered when the owner-tracking Apple account (see
   // owner_tracking.py / Settings -> Apple-Konten) is connected - this list
   // is the first place a connected owner device becomes visible, not just
@@ -34,8 +32,6 @@ export function AirtagList({
   currentId,
   onSelect,
   onCreate,
-  pushStatus,
-  onEnablePush,
   ownerConnected,
   ownerLocation,
   ownerDeviceName,
@@ -62,16 +58,6 @@ export function AirtagList({
       <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">AirTags</h1>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onEnablePush}
-            disabled={pushStatus === 'active'}
-            aria-label="Benachrichtigungen aktivieren"
-            title="Benachrichtigungen aktivieren"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--accent)] hover:bg-[var(--surface)] disabled:text-[var(--success)]"
-          >
-            <BellIcon className="h-5 w-5" filled={pushStatus === 'active'} />
-          </button>
           <button
             type="button"
             onClick={() => setAdding((v) => !v)}

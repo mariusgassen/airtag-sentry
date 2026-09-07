@@ -50,12 +50,6 @@ class NtfyConfig:
 
 
 @dataclasses.dataclass
-class TelegramConfig:
-    bot_token: str
-    chat_id: str
-
-
-@dataclasses.dataclass
 class WebPushConfig:
     public_key: str
     private_key: str
@@ -65,7 +59,10 @@ class WebPushConfig:
 @dataclasses.dataclass
 class NotificationsConfig:
     ntfy: NtfyConfig | None
-    telegram: TelegramConfig | None
+    # Telegram is not here: it's entered via the dashboard's Settings panel
+    # and stored encrypted in Postgres (see db.get_telegram_credentials),
+    # not read from the environment at startup - same treatment owner-
+    # tracking's Apple password got.
     webpush: WebPushConfig | None
 
 
@@ -176,10 +173,6 @@ def load_config() -> Config:
     ntfy_url = _env("NTFY_TOPIC_URL")
     ntfy = NtfyConfig(topic_url=ntfy_url) if ntfy_url else None
 
-    tg_token = _env("TELEGRAM_BOT_TOKEN")
-    tg_chat = _env("TELEGRAM_CHAT_ID")
-    telegram = TelegramConfig(bot_token=tg_token, chat_id=tg_chat) if tg_token and tg_chat else None
-
     vapid_public = _env("VAPID_PUBLIC_KEY")
     vapid_private = _env("VAPID_PRIVATE_KEY")
     vapid_subject = _env("VAPID_SUBJECT")
@@ -189,11 +182,12 @@ def load_config() -> Config:
         else None
     )
 
-    notifications = NotificationsConfig(ntfy=ntfy, telegram=telegram, webpush=webpush)
-    if not any([ntfy, telegram, webpush]):
+    notifications = NotificationsConfig(ntfy=ntfy, webpush=webpush)
+    if not any([ntfy, webpush]):
         logger.warning(
-            "No notifier configured (ntfy/telegram/webpush) - movement alerts will "
-            "only show up in the logs and the dashboard's alert list."
+            "Neither NTFY_TOPIC_URL nor VAPID web push is configured, and Telegram "
+            "is set up separately in the dashboard's Settings panel - movement "
+            "alerts may only show up in the logs and the dashboard's alert list."
         )
 
     return Config(

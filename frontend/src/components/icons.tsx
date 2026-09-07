@@ -157,6 +157,21 @@ export function PaletteIcon({ className }: IconProps) {
   )
 }
 
+export function PaperPlaneIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M21 3 3 10.5l7 2.5 2.5 7L21 3Z"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 13 21 3" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** The AirTag glyph: concentric rings, similar to Find My's item icon. */
 export function AirtagGlyph({ className }: IconProps) {
   return (

@@ -19,7 +19,9 @@ class Notifier(Protocol):
     def send(self, title: str, message: str) -> None: ...
 
 
-def build_notifiers(cfg: Config) -> list[Notifier]:
+def build_notifiers(cfg: Config, conn) -> list[Notifier]:
+    from airtag_sentry import keystore
+    from airtag_sentry.db import get_telegram_credentials
     from airtag_sentry.notifiers.ntfy import NtfyNotifier
     from airtag_sentry.notifiers.telegram import TelegramNotifier
     from airtag_sentry.notifiers.webpush import WebPushNotifier
@@ -27,10 +29,10 @@ def build_notifiers(cfg: Config) -> list[Notifier]:
     notifiers: list[Notifier] = []
     if cfg.notifications.ntfy:
         notifiers.append(NtfyNotifier(cfg.notifications.ntfy.topic_url))
-    if cfg.notifications.telegram:
-        notifiers.append(
-            TelegramNotifier(cfg.notifications.telegram.bot_token, cfg.notifications.telegram.chat_id)
-        )
+    telegram = get_telegram_credentials(conn)
+    if telegram:
+        bot_token = keystore.decrypt(cfg.key_encryption_key, telegram.bot_token_encrypted)
+        notifiers.append(TelegramNotifier(bot_token, telegram.chat_id))
     if cfg.notifications.webpush:
         notifiers.append(WebPushNotifier(cfg.database_url, cfg.notifications.webpush))
     return notifiers

@@ -35,10 +35,12 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
     get_settings,
+    get_telegram_credentials,
     latest_alert,
     latest_owner_device_locations,
     list_airtags,
@@ -48,6 +50,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_key,
+    set_telegram_credentials,
     update_settings,
 )
 
@@ -252,6 +255,11 @@ class OwnerLoginIn(BaseModel):
 
 class OwnerDeviceEnabledIn(BaseModel):
     enabled: bool
+
+
+class TelegramCredentialsIn(BaseModel):
+    bot_token: str
+    chat_id: str
 
 
 def _slugify(name: str) -> str:
@@ -832,6 +840,30 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def owner_apple_disconnect():
         with get_conn(cfg.database_url) as conn:
             owner_tracking.disconnect(conn)
+        return {"ok": True}
+
+    @app.get("/api/notifications/telegram")
+    def telegram_status():
+        """Whether Telegram notifications are configured (see notifiers/telegram.py) -
+        entered via the dashboard's Settings panel, not TELEGRAM_BOT_TOKEN/
+        TELEGRAM_CHAT_ID env vars. The bot token itself is never returned."""
+        with get_conn(cfg.database_url) as conn:
+            creds = get_telegram_credentials(conn)
+        return {"connected": creds is not None, "chat_id": creds.chat_id if creds else None}
+
+    @app.post("/api/notifications/telegram")
+    def telegram_connect(body: TelegramCredentialsIn):
+        if not body.bot_token.strip() or not body.chat_id.strip():
+            raise HTTPException(status_code=400, detail="Bot-Token und Chat-ID dürfen nicht leer sein.")
+        encrypted = keystore.encrypt(cfg.key_encryption_key, body.bot_token.strip())
+        with get_conn(cfg.database_url) as conn:
+            set_telegram_credentials(conn, encrypted, body.chat_id.strip())
+        return {"connected": True, "chat_id": body.chat_id.strip()}
+
+    @app.delete("/api/notifications/telegram")
+    def telegram_disconnect():
+        with get_conn(cfg.database_url) as conn:
+            delete_telegram_credentials(conn)
         return {"ok": True}
 
     @app.get("/api/push/vapid-public-key")
