@@ -24,6 +24,7 @@ from airtag_sentry.db import (
     list_keyed_airtag_ids,
     record_owner_location,
     rename_airtag,
+    set_airtag_appearance,
     set_airtag_key,
     set_owner_apple_credentials,
     update_settings,
@@ -134,6 +135,21 @@ def test_create_list_rename_delete_airtag(conn):
 
     delete_airtag(conn, "trolley")
     assert list_airtags(conn) == []
+
+
+def test_set_airtag_appearance_round_trip(conn):
+    assert next(a for a in list_airtags(conn) if a.id == "bike").icon is None
+
+    updated = set_airtag_appearance(conn, "bike", "bike", "#0a84ff")
+    assert updated.icon == "bike"
+    assert updated.color == "#0a84ff"
+    stored = next(a for a in list_airtags(conn) if a.id == "bike")
+    assert stored.icon == "bike"
+    assert stored.color == "#0a84ff"
+
+    reset = set_airtag_appearance(conn, "bike", None, None)
+    assert reset.icon is None
+    assert reset.color is None
 
 
 def test_delete_airtag_cascades_to_reports_alerts_and_key(conn):

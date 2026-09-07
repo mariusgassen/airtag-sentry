@@ -1135,3 +1135,90 @@ the UI, staying UI-first per `CLAUDE.md`.
   the real Postgres round-trip test and a clean build. The map marker and
   history list should be checked visually against a real connected account
   before considering this fully settled.
+
+## v15: Customizable per-AirTag icons + interactive map markers
+
+Every AirTag used to render with the same fixed ring glyph everywhere
+(list row, detail header, map pin), with only its accent color varying -
+and that color wasn't stored either, just a hash of the AirTag's `id`
+(`airtagColor.ts`). No way to tell "the bike" from "the backpack" at a
+glance beyond the name text. Adds a real per-device identity: a chosen
+icon (from a curated 12-icon set) and color, picked from the dashboard,
+reused consistently in the list/detail avatar and the map marker, plus an
+"In Karten öffnen" deep link on marker popups to hand off to the device's
+native Maps app.
+
+- [x] New migration (`8a7b73c5121e`): nullable `icon`/`color TEXT` columns
+      on `airtags`. `NULL` is a first-class "automatic" state (today's
+      hash-derived behavior), not a backfill target - every existing
+      AirTag renders unchanged until customized.
+- [x] `db.py`: `AirtagRecord` gained `icon`/`color`; `create_airtag`/
+      `list_airtags`/`rename_airtag` select the new columns; new
+      `set_airtag_appearance(conn, airtag_id, icon, color)`.
+- [x] `web/app.py`: new `PATCH /api/airtags/{airtag_id}/appearance`
+      (`AirtagAppearanceIn`), validated server-side against an
+      `AIRTAG_ICON_CHOICES` allow-list (kept in sync with
+      `deviceIcons.tsx`'s registry by comment) and a `#rrggbb` regex for
+      color - never trusts the client. `GET`/`POST /api/airtags` responses
+      extended with `icon`/`color`.
+- [x] `frontend/src/deviceIcons.tsx` (new): 12 hand-rolled device glyphs
+      (bike, backpack, car, wallet, suitcase, laptop, camera, pet,
+      headphones, book, box, plus the existing key icon reused for
+      "keys") - no icon library added, matching `icons.tsx`'s existing
+      "no dependency needed for this few" approach, and Leaflet's
+      `divIcon` needs raw SVG markup anyway.
+      `frontend/src/deviceIconRegistry.ts` (new): the name/component/label
+      registry, split into its own module so `deviceIcons.tsx` exports
+      only components (Fast Refresh requirement, caught by `oxlint`'s
+      `react/only-export-components`).
+- [x] `mapIcons.ts`: 1:1 raw-SVG-string mirror of the same 12 icons for
+      the map pin (divIcon content is plain HTML, not React - same reason
+      the ring glyph was already duplicated this way); `airtagPinIcon` now
+      takes `{ id, icon, color }` instead of just `id`.
+- [x] `AirtagAvatar.tsx`: takes the full `airtag` object instead of just
+      `airtagId`, resolving chosen icon/color with the automatic
+      fallback - shared by `AirtagList.tsx`'s row and `AirtagDetail.tsx`'s
+      header avatar.
+- [x] `AirtagDetail.tsx`: new "Symbol & Farbe" `Section`/`Row` (icon grid
+      + color swatches, immediate-apply per tap like `SettingsPanel.tsx`'s
+      `ThemeField` - no separate save button), plus a new `PaletteIcon` in
+      `icons.tsx` for the row.
+- [x] `frontend/src/maps.ts` (new): `mapsUrl(lat, lon, label)` - an Apple
+      Maps web link (hands off to the native app on iOS/macOS, or just
+      opens as a normal website otherwise) on Apple platforms, a Google
+      Maps universal link elsewhere.
+- [x] `MapCard.tsx`/`OverviewMap.tsx`: markers now pass the full airtag to
+      `airtagPinIcon`; popups gained an "In Karten öffnen" link next to
+      the existing "Details anzeigen" button.
+- [x] `test_db.py`: new `test_set_airtag_appearance_round_trip`.
+
+## Review (v15)
+- 14 files touched (1 migration, 2 backend, 10 frontend, 1 test), 2 new
+  frontend files (`deviceIcons.tsx`, `deviceIconRegistry.ts`, `maps.ts`),
+  no new dependencies (icons are hand-rolled SVG, matching the existing
+  convention).
+- Verified: `pytest` against a real local Postgres (started directly via
+  the sandbox's `postgresql` package, no Docker daemon available here) -
+  61 passed, including the new appearance round-trip test and the full
+  existing suite unaffected. `cd frontend && npx tsc -b && npx vite build`
+  clean; `npx oxlint` initially flagged 9 new `react/only-export-components`
+  warnings from mixing icon components with registry data in one file -
+  fixed by the `deviceIcons.tsx`/`deviceIconRegistry.ts` split, leaving
+  only the same two pre-existing `set-state-in-effect` warnings from
+  v13/v14 (untouched by this change). `docker compose config` parses
+  cleanly with a throwaway `.env`.
+- Live-verified in-browser (no Docker daemon in this sandbox either, so a
+  local Postgres 16 cluster + a `python -m airtag_sentry serve` process
+  stood in for `docker compose up`, with two seeded AirTags/reports and a
+  hand-minted dev-only session cookie to get past GitHub OAuth): opened
+  the "Symbol & Farbe" picker, picked the bike icon + green, confirmed the
+  list row, detail header, and both the detail map pin and the overview
+  map pin all updated to match; clicked a marker's popup and confirmed
+  "In Karten öffnen" renders with a correct
+  `google.com/maps/search/?api=1&query=<lat>,<lon>` link (headless
+  Chromium's UA isn't Apple, so the Google Maps branch was the one
+  exercised - the `maps.apple.com` branch is a one-line UA check, not
+  independently verified here). OpenStreetMap tile fetches themselves
+  failed in this sandbox (same outbound-proxy restriction noted since
+  v1's review) but don't affect the app's own marker rendering, which
+  doesn't depend on them.
