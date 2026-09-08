@@ -56,8 +56,9 @@ function useCurrentPosition() {
 
 /** Pans (without changing zoom) to an explicitly-selected report's position -
  * separate from FitBounds, which only reframes the whole trail when the
- * report list itself changes, not on every selection. */
-function PanToSelection({ position }: { position: [number, number] | null }) {
+ * report list itself changes, not on every selection. Exported for
+ * DeviceMapCard.tsx, which shares this same selection behavior. */
+export function PanToSelection({ position }: { position: [number, number] | null }) {
   const map = useMap()
   const lat = position?.[0]
   const lon = position?.[1]
@@ -73,8 +74,9 @@ function PanToSelection({ position }: { position: [number, number] | null }) {
 const addressCache = new Map<string, string | null>()
 
 /** Best-effort address line for a marker popup - starts blank, fills in (or
- * silently stays empty) once the lookup resolves, never blocks the popup. */
-function AddressLine({ lat, lon }: { lat: number; lon: number }) {
+ * silently stays empty) once the lookup resolves, never blocks the popup.
+ * Exported for DeviceMapCard.tsx, which shares this same popup content. */
+export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   const key = `${lat},${lon}`
   const [address, setAddress] = useState<string | null | undefined>(() => addressCache.get(key))
 

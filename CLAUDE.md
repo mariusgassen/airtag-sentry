@@ -54,6 +54,40 @@ just the selected AirTag's name, falling back to "AirTags" - so future
 per-AirTag meta (battery level, last-seen time, an alert badge, etc.) has
 an obvious place to go without a layout change.
 
+## Hard constraint: AirTags and owner devices get the same user-facing features
+
+An AirTag (`airtag_sentry`'s original object, tracked via `FindMy.py`) and a
+tracked owner device (`owner_tracking.py`'s Apple devices, via `pyicloud`)
+are different data sources under the hood - separate Apple sessions, separate
+tables, separate ordering (`fetch_reports` is oldest-first,
+`fetch_owner_device_location_history` is newest-first) - but from the user's
+side they're both just "an object with a location history on the map", shown
+side by side in `ObjectsList.tsx`. **Any map/history/detail feature added for
+one must be added for the other in the same change**, not left as a
+follow-up: this has already happened twice (v31's "Owner devices reach
+parity with AirTags", and the map-navigation-experience feature initially
+shipping AirTag-only and needing a follow-up pass for devices) - don't make
+it a third time.
+
+Concretely, these pairs are expected to stay in lockstep:
+- `AirtagDetail.tsx` / `DeviceDetail.tsx` (rename, symbol & color, history list)
+- `MapCard.tsx` / `DeviceMapCard.tsx` (trail, marker selection, popup content,
+  Previous/Next trail stepping) - `DeviceMapCard.tsx` deliberately imports
+  `PanToSelection`/`AddressLine`/`FitBounds`/`InvalidateSizeOnResize`/
+  `NoReportsView` from `MapCard.tsx` rather than duplicating them, so fixing
+  or extending one of those helpers fixes both call sites.
+- `api.ts`'s Airtag/Report routes and OwnerDevice/OwnerLocation routes
+- `telegram_bot.py`'s `/list` (already lists devices and AirTags together)
+
+The two data shapes differ in real ways that don't disappear under this
+constraint - most importantly, AirTag `Report`s have a numeric `id` and
+arrive oldest-first, while owner-device `OwnerLocation`s have no `id` in the
+API response and arrive newest-first (`recorded_at` is what
+`DeviceHistoryList`/`DeviceMapCard.tsx` key and select by instead, and
+"older"/"newer" step in the *opposite* index direction from the AirTag
+case). Mirror the *feature and UI*, not the implementation line-for-line -
+but never skip a side because its plumbing is different.
+
 ## Project shape
 
 - `airtag_sentry/` — Python backend, all one `dashboard` service/container:
