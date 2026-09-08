@@ -6,15 +6,16 @@ import { deviceLabel } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import {
+  AddressLine,
   FitBounds,
+  InfoRow,
   InvalidateSizeOnResize,
   MapClickHandler,
   NoReportsView,
   PanToSelection,
-  PopupStepper,
   POPUP_WIDTH_CLASS,
 } from './MapCard'
-import { LocationArrowIcon } from './icons'
+import { ClockIcon, LocationArrowIcon } from './icons'
 
 /** Single-device counterpart to MapCard - one owner device's own location
  * trail, drilled into from ObjectsList (device selected -> DeviceDetail).
@@ -27,7 +28,6 @@ export function DeviceMapCard({
   device,
   locations,
   selectedLocationKey = null,
-  onSelectLocation,
   onMapClick,
 }: {
   device: OwnerDevice
@@ -35,10 +35,10 @@ export function DeviceMapCard({
   // The location shown as the device's marker/popup - null falls back to
   // the latest one. `recorded_at` is the identity key: owner-device
   // locations have no id in the API response, and DeviceHistoryList already
-  // keys its rows by it. Selecting a history-list row and stepping
-  // Previous/Next in the popup both flow through this same prop.
+  // keys its rows by it. Selecting a history-list row or stepping
+  // older/newer in the mobile title bar (see App.tsx) both flow through
+  // this same prop.
   selectedLocationKey?: string | null
-  onSelectLocation?: (recordedAt: string) => void
   // Fired when the map background (not a marker/popup) is tapped - lets the
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
@@ -46,8 +46,10 @@ export function DeviceMapCard({
   const positions: [number, number][] = locations.map((l) => [l.lat, l.lon])
   const markerRef = useRef<L.Marker>(null)
 
+  // Open the marker's popup as soon as there's a position to show it for -
+  // mirrors MapCard.tsx's own effect exactly, see the comment there for why.
   useEffect(() => {
-    if (selectedLocationKey != null) markerRef.current?.openPopup()
+    markerRef.current?.openPopup()
   }, [selectedLocationKey])
 
   if (positions.length === 0) {
@@ -62,8 +64,6 @@ export function DeviceMapCard({
   const displayedIndex = selectedIndex >= 0 ? selectedIndex : 0
   const displayed = locations[displayedIndex]
   const displayedPosition: [number, number] = [displayed.lat, displayed.lon]
-  const older = displayedIndex < locations.length - 1 ? locations[displayedIndex + 1] : null
-  const newer = displayedIndex > 0 ? locations[displayedIndex - 1] : null
 
   return (
     <MapContainer center={displayedPosition} zoom={15} className="h-full w-full">
@@ -80,13 +80,10 @@ export function DeviceMapCard({
         <Popup autoPan={false}>
           <div className={POPUP_WIDTH_CLASS}>
             <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
-            <PopupStepper
-              timestamp={displayed.recorded_at}
-              lat={displayed.lat}
-              lon={displayed.lon}
-              onOlder={onSelectLocation ? (older ? () => onSelectLocation(older.recorded_at) : null) : undefined}
-              onNewer={onSelectLocation ? (newer ? () => onSelectLocation(newer.recorded_at) : null) : undefined}
-            />
+            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+              {new Date(displayed.recorded_at).toLocaleString()}
+            </InfoRow>
+            <AddressLine lat={displayed.lat} lon={displayed.lon} />
             <a
               href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
               target="_blank"
