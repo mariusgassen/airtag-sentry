@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
+import { CircleMarker, MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
-import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
+import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
@@ -149,6 +149,41 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   )
 }
 
+/** Small, low-opacity dots along a trail for every history point other than
+ * the one currently displayed (which already has its own full pin/popup) -
+ * lets a point be picked directly on the map, not just via the sidebar
+ * history list. Exported for DeviceMapCard.tsx, which shares this same
+ * behavior (see CLAUDE.md's AirTag/device parity constraint). */
+export function HistoryPoints<T extends { lat: number; lon: number }>({
+  points,
+  displayedIndex,
+  color,
+  getKey,
+  onSelect,
+}: {
+  points: T[]
+  displayedIndex: number
+  color: string
+  getKey: (point: T, index: number) => string | number
+  onSelect?: (point: T) => void
+}) {
+  return (
+    <>
+      {points.map((point, i) =>
+        i === displayedIndex ? null : (
+          <CircleMarker
+            key={getKey(point, i)}
+            center={[point.lat, point.lon]}
+            radius={4}
+            pathOptions={{ color, weight: 1, fillColor: color, fillOpacity: 0.45, opacity: 0.6 }}
+            eventHandlers={onSelect ? { click: () => onSelect(point) } : undefined}
+          />
+        ),
+      )}
+    </>
+  )
+}
+
 export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) {
   const here = useCurrentPosition()
 
@@ -202,6 +237,7 @@ export function MapCard({
   ownerLocationHistories = {},
   onSelectDevice,
   selectedReportId = null,
+  onSelectReport,
   onMapClick,
 }: {
   reports: Report[]
@@ -216,6 +252,11 @@ export function MapCard({
   // latest one. Selecting a history-list row or stepping older/newer in the
   // mobile title bar (see App.tsx) both flow through this same prop.
   selectedReportId?: number | null
+  // Fired when one of the trail's subtle history-point dots is clicked -
+  // same selection App.tsx wires up for the sidebar history list, so picking
+  // a point on the map behaves identically (centers on it, minimizes the
+  // sheet on mobile).
+  onSelectReport?: (id: number) => void
   // Fired when the map background (not a marker/popup) is tapped - lets the
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
@@ -248,6 +289,10 @@ export function MapCard({
   }
 
   const last = positions[positions.length - 1]
+  // This AirTag's own chosen (or hash-derived) color - matches its pin badge
+  // so the route it's drawn once selected reads as visually "its own" rather
+  // than a generic accent blue (see mapIcons.ts's deviceColor).
+  const trailColor = deviceColor(airtag)
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -255,7 +300,14 @@ export function MapCard({
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <Polyline positions={positions} pathOptions={{ color: '#0a84ff', weight: 4 }} />
+      <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
+      <HistoryPoints
+        points={reports}
+        displayedIndex={displayedIndex}
+        color={trailColor}
+        getKey={(r) => r.id}
+        onSelect={onSelectReport ? (r) => onSelectReport(r.id) : undefined}
+      />
       {Object.entries(ownerLocationHistories).map(([deviceId, history]) => {
         const ownerPositions: [number, number][] = history.map((l) => [l.lat, l.lon])
         if (ownerPositions.length < 2) return null

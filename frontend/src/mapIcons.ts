@@ -88,12 +88,20 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
   </svg>`,
 }
 
+/** Same chosen (or, if unset, hash-derived) color used for an AirTag/device's
+ * list/detail avatar and map pin - also used for its own history trail once
+ * selected, so the route on the map reads as visually "theirs" rather than a
+ * generic accent blue. */
+export function deviceColor(item: { id: string; color?: string | null }): string {
+  return item.color ?? airtagColor(item.id)
+}
+
 /** A colored circular badge pin for an AirTag's map marker, matching the
  * same chosen (or, if unset, hash-derived) icon/color used for its
  * list/detail avatar so an item reads as the same item on the map as it
  * does in the list. */
 export function airtagPinIcon(airtag: { id: string; icon?: string | null; color?: string | null }): L.DivIcon {
-  const color = airtag.color ?? airtagColor(airtag.id)
+  const color = deviceColor(airtag)
   const glyph = (airtag.icon && DEVICE_GLYPH_SVGS[airtag.icon as DeviceIconName]) || GLYPH_SVG
   return L.divIcon({
     className: 'airtag-pin',
