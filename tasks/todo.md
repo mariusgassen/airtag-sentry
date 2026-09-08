@@ -1838,3 +1838,101 @@ this codebase's control at every layer.
   routes accept and forward a slash-containing id correctly, but the
   original report was diagnosed from a raw request line, not reproduced
   against a real pyicloud session here.
+
+## v24: Fix owner devices never getting a location; unify them into Objekte
+
+Trigger: real-user report - "no location is present" for tracked owner
+devices, plus "few to no logging" in the backend to debug it with. Also
+folded in three UI requirements: every tracked device should appear in the
+main list (not just Settings), grouped separately from AirTags; a device's
+history should only render there, once selected, not in Settings; and
+polling/persisting cadence should match AirTags (already true - see below).
+
+Root cause, confirmed by installing the real `pyicloud==2.7.0` package in a
+scratch venv and reading `services/findmyiphone.py` directly rather than
+guessing: `owner_tracking._build_api()` builds a fresh `PyiCloudService`
+every poll, and the very *first* `.devices` access only ever performs
+Apple's `initClient` call. The block in `_refresh_client()` that sets
+`isUpdatingAllLocations`/`shouldLocate`/`selectedDevice` - i.e. the part
+that actually asks Apple to locate the devices - is gated behind
+`if self._server_ctx:`, which is `None` on that first call and therefore
+unreachable. Since this app never touches `.devices` a second time before
+killing the background monitor thread (the v18 fix for a real thread
+leak, which must stay), it has only ever sent the identity-only call -
+`location`/`location_available` reflected whatever Apple happened to have
+cached, often nothing. `FindMyiPhoneServiceManager.refresh(locate=True)` is
+the library's own public method for forcing that second, locate-flagged
+round trip once a `_server_ctx` exists (it does, right after the first
+access) - the fix is one explicit call to it.
+
+Separately, `tracker.py::poll_once` already calls `_update_owner_devices()`
+in the same per-cycle sweep as the AirTag polling loop, both driven by
+`scheduler.py`'s one `polling_interval_minutes` - so the interval
+requirement was already met; it just had nothing to persist.
+
+- [x] `owner_tracking.py`: `_snapshot_devices()` now calls
+      `api.devices.refresh(locate=True)` before reading any device's
+      location, with a docstring addition explaining why the constructor's
+      own implicit first call can't do this. Added `logger.info`/`.debug`
+      throughout (`_connect`, `_snapshot_devices`, `list_owner_devices`,
+      `fetch_owner_device_locations`) - device counts, enabled-device
+      counts, and per-device *why* a location is missing (feature flag vs.
+      missing content key) - this module had almost no logging before,
+      unlike `tracker.py`'s AirTag path.
+- [x] Frontend: `AirtagList.tsx` renamed `ObjectsList.tsx` - now renders
+      two labeled groups, "Geräte" (every *enabled* owner device, primary
+      one star-badged, tapping selects it) above "AirTags" (unchanged).
+      Replaces the old single hardcoded "Du" summary row entirely - the
+      primary device is now just the badged row within "Geräte". New
+      `DeviceDetail.tsx` (mirrors `AirtagDetail.tsx`, trimmed to a header
+      + an expandable "Verlauf" list - device identity/enable/primary
+      stay Settings-only) and `DeviceMapCard.tsx` (mirrors `MapCard.tsx`
+      for one device's trail, reusing its exported `FitBounds`/
+      `InvalidateSizeOnResize`/`NoReportsView`/`currentLocationIcon`
+      rather than duplicating them). `OwnerDevicesPanel.tsx` (Settings ->
+      Eigene Geräte) dropped its "Verlauf" row/state entirely - Settings
+      now only manages which devices are enabled/primary.
+      `App.tsx` now also fetches `getOwnerDevices()` (previously only
+      `getOwnerDeviceLocations()`, which omits an enabled device with no
+      recorded fix yet - a real visibility gap in its own right, now
+      fixed) and generalizes `showDetail: boolean` into
+      `detail: 'airtag' | 'device' | null` plus `selectedDeviceId` to
+      route the map pane and sheet content to either detail view.
+      No backend route changes needed - `getOwnerDevices`,
+      `getOwnerDeviceLocations`, and `getOwnerDeviceHistory` already
+      covered everything the new UI needs.
+- [x] `test_owner_tracking.py`: `_FakeDeviceList` gained a `refresh()`
+      recording its calls; new
+      `test_snapshot_devices_forces_a_live_locate_before_reading_locations`
+      asserts `_snapshot_devices` calls it with `locate=True`.
+
+## Review (v24)
+- 8 files touched (1 backend, 1 test, 6 frontend: 1 renamed, 2 new, 3
+  edited), no new dependencies, no migration.
+- Verified: installed `pyicloud==2.7.0` for real in a scratch venv and read
+  its `findmyiphone.py` directly to confirm the `_server_ctx` gating claim
+  above, rather than guessing at the fix. `pytest tests/` - 54 passed (53
+  prior + the new `refresh(locate=True)` regression test), 21 skipped
+  (Postgres-dependent, no live Postgres in this sandbox); confirmed via
+  `git stash` that a pre-existing, unrelated fixture conflict between
+  `test_app_shell_is_never_cached` and `test_fingerprinted_asset_is_cached_immutably`
+  in this same sandbox (this repo's checked-in `web/static/icons/` means
+  `test_web_auth.py`'s "stand in a placeholder index.html if absent"
+  fixture never triggers, so one or the other fails depending on whether a
+  real frontend build happened to run first) reproduces identically on
+  the unmodified repo - unrelated to this change, not fixed here. `cd
+  frontend && npx tsc -b && npx vite build` clean; `npx oxlint` shows only
+  the same three pre-existing `set-state-in-effect` warnings, no new ones.
+  `docker compose config` parses cleanly with a throwaway `.env`.
+- Not verified in this sandbox (no real owner-tracking Apple account, same
+  standing limitation as every prior owner-tracking entry): that the
+  `refresh(locate=True)` fix actually produces a location end-to-end
+  against a live account. The fix is grounded in reading the real
+  installed library's source rather than speculation, and the new
+  `_snapshot_devices` debug logging (`docker logs app` after a poll, once
+  deployed) will show exactly what Apple returned per device
+  (`location_available` plus, when false, whether the `LOC` feature flag
+  or the `location` content key itself was missing) if it's still empty -
+  that's the next diagnostic step if this alone doesn't fully resolve it.
+  The new grouped Objekte list and DeviceDetail's map trail/history also
+  need a real-account visual check.

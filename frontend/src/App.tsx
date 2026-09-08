@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { Airtag, OwnerLocation, Report, Status } from './api'
+import type { Airtag, OwnerDevice, OwnerLocation, Report, Status } from './api'
 import {
   createAirtag,
   getAirtags,
   getOwnerAppleStatus,
   getOwnerDeviceHistory,
   getOwnerDeviceLocations,
+  getOwnerDevices,
   getReports,
   getStatus,
 } from './api'
-import { AirtagList } from './components/AirtagList'
+import { ObjectsList } from './components/ObjectsList'
 import { AirtagDetail } from './components/AirtagDetail'
+import { DeviceDetail } from './components/DeviceDetail'
+import { DeviceMapCard } from './components/DeviceMapCard'
 import { MapCard } from './components/MapCard'
 import { OverviewMap } from './components/OverviewMap'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -59,10 +62,15 @@ export default function App() {
   const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
   const [ownerLocationHistories, setOwnerLocationHistories] = useState<Record<string, OwnerLocation[]>>({})
   const [ownerConnected, setOwnerConnected] = useState(false)
-  const [ownerDeviceId, setOwnerDeviceId] = useState<string | null>(null)
-  const [ownerDeviceName, setOwnerDeviceName] = useState<string | null>(null)
+  // Every *enabled* (tracked) owner device - see ObjectsList.tsx, which is
+  // the first place a tracked device becomes visible outside Settings.
+  const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
-  const [showDetail, setShowDetail] = useState(false)
+  // Which detail screen (if any) the sheet/map are drilled into - an AirTag's
+  // or a tracked device's. Only one of the two `current*Id` values below is
+  // ever "the selected one" at a time; this disambiguates which.
+  const [detail, setDetail] = useState<'airtag' | 'device' | null>(null)
   const [sheetState, setSheetState] = useState<SheetState>('default')
   const push = usePushNotifications()
   const sheetRef = useRef<HTMLDivElement>(null)
@@ -101,29 +109,27 @@ export default function App() {
       .then(setOwnerLocations)
       .catch(() => setOwnerLocations([]))
     getOwnerAppleStatus()
-      .then((s) => {
-        setOwnerConnected(s.connected)
-        setOwnerDeviceId(s.primary_device_id ?? null)
-        setOwnerDeviceName(s.primary_device_name ?? null)
-      })
-      .catch(() => {
-        setOwnerConnected(false)
-        setOwnerDeviceId(null)
-        setOwnerDeviceName(null)
-      })
+      .then((s) => setOwnerConnected(s.connected))
+      .catch(() => setOwnerConnected(false))
+    // Full enabled/disabled registry, not just devices with a recorded fix -
+    // without this, a freshly-enabled device with no location yet is
+    // invisible everywhere outside Settings (see tasks/todo.md).
+    getOwnerDevices()
+      .then((ds) => setOwnerDevices(ds.filter((d) => d.enabled)))
+      .catch(() => setOwnerDevices([]))
   }, [])
 
   useEffect(() => {
-    if (ownerLocations.length === 0) {
+    if (ownerDevices.length === 0) {
       setOwnerLocationHistories({})
       return
     }
     let cancelled = false
     Promise.all(
-      ownerLocations.map((loc) =>
-        getOwnerDeviceHistory(loc.device_id)
-          .then((rows) => [loc.device_id, rows] as const)
-          .catch(() => [loc.device_id, []] as const),
+      ownerDevices.map((d) =>
+        getOwnerDeviceHistory(d.id)
+          .then((rows) => [d.id, rows] as const)
+          .catch(() => [d.id, []] as const),
       ),
     ).then((entries) => {
       if (!cancelled) setOwnerLocationHistories(Object.fromEntries(entries))
@@ -131,7 +137,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [ownerLocations])
+  }, [ownerDevices])
 
   useEffect(() => {
     if (!currentId) {
@@ -148,15 +154,25 @@ export default function App() {
   }, [currentId])
 
   const currentAirtag = airtags.find((a) => a.id === currentId) ?? null
-  const ownerLocation = ownerLocations.find((l) => l.device_id === ownerDeviceId) ?? null
-  const title = currentAirtag ? `AirTagSentry — ${currentAirtag.name}` : 'AirTagSentry'
+  const selectedDevice = ownerDevices.find((d) => d.id === selectedDeviceId) ?? null
+  const deviceLocationsById: Record<string, OwnerLocation> = Object.fromEntries(
+    ownerLocations.map((l) => [l.device_id, l]),
+  )
+  const detailName = detail === 'airtag' ? currentAirtag?.name : detail === 'device' ? selectedDevice?.name : null
+  const title = detailName ? `AirTagSentry — ${detailName}` : 'AirTagSentry'
   useEffect(() => {
     document.title = title
   }, [title])
 
   function handleSelect(id: string) {
     setCurrentId(id)
-    setShowDetail(true)
+    setDetail('airtag')
+    setActiveTab('objects')
+  }
+
+  function handleSelectDevice(id: string) {
+    setSelectedDeviceId(id)
+    setDetail('device')
     setActiveTab('objects')
   }
 
@@ -230,13 +246,15 @@ export default function App() {
           escape this wrapper and paint over the sheet below despite DOM
           order and the sheet's own z-10. */}
       <div className="absolute inset-0 isolate md:relative md:flex-1">
-        {activeTab === 'objects' && showDetail && currentAirtag ? (
+        {activeTab === 'objects' && detail === 'airtag' && currentAirtag ? (
           <MapCard
             reports={reports}
             airtag={currentAirtag}
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
           />
+        ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
+          <DeviceMapCard device={selectedDevice} locations={ownerLocationHistories[selectedDevice.id] ?? []} />
         ) : (
           <OverviewMap
             airtags={airtags}
@@ -261,13 +279,14 @@ export default function App() {
           index.css) adds --header-h on top of its existing
           safe-area-inset-top push so the zoom control clears this bar
           instead of sitting underneath it. Currently just the selected
-          AirTag's name (or "AirTags" with none selected/on the overview
-          map) - reusing the same fallback as `title` above - but the slot
-          is deliberately generic so future per-AirTag meta (e.g. battery,
-          last-seen) can go here without a layout change. */}
+          AirTag's or tracked device's name (or "AirTags" with none
+          selected/on the overview map) - reusing the same fallback as
+          `title` above - but the slot is deliberately generic so future
+          per-item meta (e.g. battery, last-seen) can go here without a
+          layout change. */}
       <div className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-10 flex h-[var(--header-h)] items-center justify-center border-b border-[var(--divider)] chrome-blur md:hidden">
         <span className="truncate px-12 text-[15px] font-semibold text-[var(--text)]">
-          {currentAirtag?.name ?? 'AirTags'}
+          {detailName ?? 'AirTags'}
         </span>
       </div>
 
@@ -315,30 +334,39 @@ export default function App() {
           <div className="min-h-0 flex-1">
             {activeTab === 'settings' ? (
               <SettingsPanel pushStatus={push.status} onEnablePush={push.enable} />
-            ) : showDetail && currentAirtag ? (
+            ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail
                 airtag={currentAirtag}
                 status={statuses[currentAirtag.id] ?? null}
                 reports={reports}
-                onBack={() => setShowDetail(false)}
+                onBack={() => setDetail(null)}
                 onChanged={async () => {
                   await refreshAirtags()
                 }}
                 onDeleted={async () => {
                   await refreshAirtags()
-                  setShowDetail(false)
+                  setDetail(null)
                 }}
               />
+            ) : detail === 'device' && selectedDevice ? (
+              <DeviceDetail
+                device={selectedDevice}
+                location={deviceLocationsById[selectedDevice.id] ?? null}
+                history={ownerLocationHistories[selectedDevice.id] ?? null}
+                onBack={() => setDetail(null)}
+              />
             ) : (
-              <AirtagList
+              <ObjectsList
                 airtags={airtags}
                 statuses={statuses}
                 currentId={currentId}
-                onSelect={handleSelect}
+                onSelectAirtag={handleSelect}
                 onCreate={handleCreate}
                 ownerConnected={ownerConnected}
-                ownerLocation={ownerLocation}
-                ownerDeviceName={ownerDeviceName}
+                devices={ownerDevices}
+                deviceLocations={deviceLocationsById}
+                selectedDeviceId={selectedDeviceId}
+                onSelectDevice={handleSelectDevice}
               />
             )}
           </div>
