@@ -11,7 +11,7 @@ import logging
 from findmy import FindMyAccessory, KeyPair
 
 from airtag_sentry import keystore
-from airtag_sentry.auth import restore_account
+from airtag_sentry.auth import is_connected, restore_account
 from airtag_sentry.config import Config
 from airtag_sentry.db import (
     Alert as DbAlert,
@@ -77,12 +77,21 @@ def _update_owner_devices(cfg: Config, conn) -> None:
 
 
 def poll_once(cfg: Config) -> None:
-    account = restore_account(cfg)
-
+    """Owner-device tracking and AirTag tracking are two independent Apple
+    sessions (see owner_tracking.py's module docstring) - connecting only one
+    of them must not stop the other from polling. _update_owner_devices() runs
+    unconditionally; the AirTag session is only restored/polled if one has
+    actually been connected via the dashboard."""
     with get_conn(cfg.database_url) as conn:
         settings = get_settings(conn)
         notifiers = build_notifiers(cfg, conn)
         _update_owner_devices(cfg, conn)
+
+        if not is_connected(cfg):
+            logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
+            return
+
+        account = restore_account(cfg)
         for airtag in list_airtags(conn):
             try:
                 _poll_airtag(cfg, account, airtag, conn, notifiers, settings)
