@@ -2184,3 +2184,71 @@ in Coolify), and it meant only `dashboard` had a Docker healthcheck since
   after the fix. Started a local Postgres and ran the full suite for
   real: `pytest` → 83 passed, 0 skipped. `docker compose config`
   (throwaway `.env`) parses cleanly.
+
+## v30: Grouped Settings sub-panels, real toggle switches, push notifications now off-able
+
+Trigger: `SettingsPanel.tsx` had grown into one long flat scroll - Darstellung,
+Benachrichtigungen, Apple-Konten, Eigene Geräte, Abfrage, Bewegungserkennung,
+Standort-Korrelation, Abmelden, eight sections stacked vertically. User asked
+for Apple-typical grouped sub-menus instead, and called out a real bug while
+at it: push notifications had no off switch. `usePushNotifications.ts` only
+ever exposed `enable()`; the backend's `/api/push/unsubscribe` route
+(`app.py`) already worked but nothing on the frontend called it, and `status`
+always reset to `'idle'` on every reload regardless of whether a subscription
+actually existed.
+
+- [x] `SettingsPanel.tsx` rewritten as a small in-place router (`page: 'root'
+      | 'notifications' | 'apple' | 'tracking'`, no URL/route change - same
+      pattern `AirtagDetail.tsx` already uses for its own back-navigation).
+      Root menu is now just: Erscheinungsbild (unchanged inline control) +
+      one grouped `Section` of three nav rows (Benachrichtigungen,
+      Apple-Konten, Tracking) + Abmelden - matching Apple's own short
+      top-level Settings list that drills into dedicated screens.
+- [x] Three new sub-screens, each with a `BackHeader` (reuses
+      `AirtagDetail.tsx`'s existing chevron-back pattern): moved verbatim
+      out of `SettingsPanel.tsx` - `SettingsNotifications.tsx` (push row +
+      `TelegramPanel`), `SettingsAppleAccounts.tsx` (both
+      `AppleConnectPanel`s + `OwnerDevicesPanel`), `SettingsTracking.tsx`
+      (Abfrage/Bewegungserkennung/Standort-Korrelation, still owns nothing -
+      `settings`/`errors`/`update` stay lifted in `SettingsPanel.tsx` and
+      flow down as props, same as before).
+- [x] New `Switch` component (`AirtagDetail.tsx`, alongside the existing
+      `Section`/`Row` primitives): standard iOS pill switch,
+      `role="switch"`/`aria-checked`, green when on. Replaces, one for one:
+      the `movement_alert_on_backfill` checkbox, `OwnerDevicesPanel`'s
+      per-device enable checkbox, and `TelegramPanel`'s Aktivieren/
+      Deaktivieren pill button for bot commands. ("Trennen"/disconnect stays
+      a plain button - it's an action, not a boolean state.)
+- [x] Push notifications actually toggleable now:
+      `usePushNotifications.ts` checks for an existing subscription on
+      mount (`pushManager.getSubscription()`) instead of always starting
+      `'idle'`; added `disable()` (calls the new `unsubscribePush()` in
+      `api.ts`, then the browser-side `subscription.unsubscribe()`); added
+      a `busy` flag so the switch can't be double-fired mid-flight. The
+      push row in `SettingsNotifications.tsx` is now a real two-way
+      `Switch` instead of a one-way "Aktivieren" button.
+
+## Review (v30)
+- 10 files touched (7 frontend components/hooks/api, 1 changelog), no
+  backend changes - `/api/push/unsubscribe` already existed and needed no
+  modification, no new dependencies.
+- Verified: `cd frontend && npm install && npx tsc -b && npx vite build`
+  clean; `npx oxlint` shows the same three pre-existing `set-state-in-effect`
+  warnings in `App.tsx`, none new (confirmed via `git diff --stat` that
+  those lines aren't part of this change). Started a local Postgres 16 in
+  this sandbox, created `airtag_sentry`/`airtag_sentry_test`, ran the full
+  suite in a scratch venv - `pytest`: 81 passed, 22 skipped (live
+  Apple/owner-tracking tests needing real credentials, as documented
+  elsewhere in this file), 1 failed
+  (`test_fingerprinted_asset_is_cached_immutably`) - pre-existing and
+  unrelated to this change: it assumes `airtag_sentry/web/static/assets/`
+  (gitignored, normally empty) starts empty, which it wasn't after running
+  `vite build` for this same verification pass. `docker compose config`
+  parses cleanly with a throwaway `.env`.
+- Not verified in a real browser: this app has no dev-mode auth bypass -
+  every dashboard route requires a real GitHub OAuth login - so a full
+  logged-in click-through (navigate root → each sub-screen → back, flip
+  every new `Switch`) couldn't be done in this sandbox. User confirmed
+  `tsc`/`build`/`lint`/`pytest` were sufficient for this change. Click
+  through the new Settings screens and toggles once in a real browser
+  before relying on this.

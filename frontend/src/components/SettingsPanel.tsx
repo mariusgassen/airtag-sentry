@@ -1,43 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { AppSettings } from '../api'
-import {
-  appleDisconnect,
-  appleImportSession,
-  appleLogin,
-  appleSelectTwoFactorMethod,
-  appleSubmitTwoFactorCode,
-  getAppleStatus,
-  getOwnerAppleStatus,
-  getSettings,
-  ownerAppleDisconnect,
-  ownerAppleLogin,
-  ownerAppleSubmitTwoFactorCode,
-  updateSettings,
-} from '../api'
+import { getSettings, updateSettings } from '../api'
 import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
-import { BellIcon, LogoutIcon } from './icons'
+import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, KeyIcon, LogoutIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
-import type { AppleConnectAdapter } from './AppleConnectPanel'
-import { AppleConnectPanel } from './AppleConnectPanel'
-import { OwnerDevicesPanel } from './OwnerDevicesPanel'
-import { TelegramPanel } from './TelegramPanel'
-
-const AIRTAG_APPLE_ADAPTER: AppleConnectAdapter = {
-  getStatus: getAppleStatus,
-  login: appleLogin,
-  importSession: appleImportSession,
-  selectMethod: appleSelectTwoFactorMethod,
-  submitCode: appleSubmitTwoFactorCode,
-  disconnect: appleDisconnect,
-}
-
-const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
-  getStatus: getOwnerAppleStatus,
-  login: ownerAppleLogin,
-  submitCode: ownerAppleSubmitTwoFactorCode,
-  disconnect: ownerAppleDisconnect,
-}
+import { SettingsAppleAccounts } from './SettingsAppleAccounts'
+import { SettingsNotifications } from './SettingsNotifications'
+import type { FieldKey } from './SettingsTracking'
+import { SettingsTracking } from './SettingsTracking'
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'system', label: 'System' },
@@ -68,50 +40,6 @@ function ThemeField() {
   )
 }
 
-function Field({
-  label,
-  suffix,
-  value,
-  error,
-  onChange,
-}: {
-  label: string
-  suffix: string
-  value: number
-  error?: string
-  onChange: (v: number) => void
-}) {
-  return (
-    <div className="border-t border-[var(--divider)] px-4 py-3 first:border-t-0">
-      <div className="flex items-center justify-between gap-3">
-        <span className="flex-1 text-[0.95rem]">{label}</span>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <input
-            type="number"
-            min={0}
-            step="any"
-            value={Number.isFinite(value) ? value : ''}
-            onChange={(e) => onChange(e.target.valueAsNumber)}
-            className={`w-20 rounded-lg border bg-[var(--surface-2)] px-2 py-1.5 text-right text-sm outline-none focus:border-[var(--accent)] ${
-              error ? 'border-[var(--destructive)]' : 'border-[var(--divider)]'
-            }`}
-          />
-          <span className="text-sm text-[var(--text-secondary)]">{suffix}</span>
-        </div>
-      </div>
-      {error && <p className="mt-1.5 text-right text-[0.72rem] text-[var(--destructive)]">{error}</p>}
-    </div>
-  )
-}
-
-type FieldKey =
-  | 'polling_interval_minutes'
-  | 'movement_distance_threshold_meters'
-  | 'movement_stillstand_hours'
-  | 'movement_stillstand_movement_meters'
-  | 'movement_away_distance_meters'
-  | 'owner_location_max_age_minutes'
-
 const FIELD_ERROR = 'Muss größer als 0 sein.'
 
 function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
@@ -131,15 +59,39 @@ function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
   return errors
 }
 
-interface Props {
-  pushStatus: 'idle' | 'active' | 'error'
-  onEnablePush: () => void
+function BackHeader({ title, onBack, status }: { title: string; onBack: () => void; status?: ReactNode }) {
+  return (
+    <div className="shrink-0">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex items-center gap-0.5 px-3 pb-1 pt-[0.6rem] text-[0.95rem] text-[var(--accent)]"
+      >
+        <ChevronLeftIcon className="h-5 w-5" />
+        Einstellungen
+      </button>
+      <div className="flex items-baseline justify-between px-4 pb-2">
+        <h1 className="text-[1.7rem] font-bold tracking-tight">{title}</h1>
+        {status}
+      </div>
+    </div>
+  )
 }
 
-export function SettingsPanel({ pushStatus, onEnablePush }: Props) {
+type Page = 'root' | 'notifications' | 'apple' | 'tracking'
+
+interface Props {
+  pushStatus: 'idle' | 'active' | 'error'
+  pushBusy: boolean
+  onEnablePush: () => void
+  onDisablePush: () => void
+}
+
+export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePush }: Props) {
+  const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({})
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const debounceRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -153,14 +105,14 @@ export function SettingsPanel({ pushStatus, onEnablePush }: Props) {
   }, [])
 
   async function persist(next: AppSettings) {
-    setStatus('saving')
+    setSaveStatus('saving')
     try {
       const saved = await updateSettings(next)
       setSettings(saved)
-      setStatus('saved')
-      window.setTimeout(() => setStatus((s) => (s === 'saved' ? 'idle' : s)), 1500)
+      setSaveStatus('saved')
+      window.setTimeout(() => setSaveStatus((s) => (s === 'saved' ? 'idle' : s)), 1500)
     } catch {
-      setStatus('error')
+      setSaveStatus('error')
     }
   }
 
@@ -189,20 +141,63 @@ export function SettingsPanel({ pushStatus, onEnablePush }: Props) {
     }
   }
 
+  if (page === 'notifications') {
+    return (
+      <div className="flex h-full flex-col">
+        <BackHeader title="Benachrichtigungen" onBack={() => setPage('root')} />
+        <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
+          <SettingsNotifications
+            pushStatus={pushStatus}
+            pushBusy={pushBusy}
+            onEnablePush={onEnablePush}
+            onDisablePush={onDisablePush}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (page === 'apple') {
+    return (
+      <div className="flex h-full flex-col">
+        <BackHeader title="Apple-Konten" onBack={() => setPage('root')} />
+        <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
+          <SettingsAppleAccounts />
+        </div>
+      </div>
+    )
+  }
+
+  if (page === 'tracking') {
+    return (
+      <div className="flex h-full flex-col">
+        <BackHeader
+          title="Tracking"
+          onBack={() => setPage('root')}
+          status={
+            <span
+              aria-live="polite"
+              className={`text-[0.78rem] transition-opacity ${
+                saveStatus === 'idle' ? 'opacity-0' : 'opacity-100'
+              } ${saveStatus === 'error' ? 'text-[var(--destructive)]' : 'text-[var(--text-secondary)]'}`}
+            >
+              {saveStatus === 'saving' && 'Speichert…'}
+              {saveStatus === 'saved' && 'Gespeichert'}
+              {saveStatus === 'error' && 'Fehler beim Speichern'}
+            </span>
+          }
+        />
+        <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
+          <SettingsTracking settings={settings} errors={errors} update={update} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-baseline justify-between px-4 pb-2 pt-[0.9rem]">
+      <div className="shrink-0 px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Einstellungen</h1>
-        <span
-          aria-live="polite"
-          className={`text-[0.78rem] transition-opacity ${
-            status === 'idle' ? 'opacity-0' : 'opacity-100'
-          } ${status === 'error' ? 'text-[var(--destructive)]' : 'text-[var(--text-secondary)]'}`}
-        >
-          {status === 'saving' && 'Speichert…'}
-          {status === 'saved' && 'Gespeichert'}
-          {status === 'error' && 'Fehler beim Speichern'}
-        </span>
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
@@ -213,116 +208,38 @@ export function SettingsPanel({ pushStatus, onEnablePush }: Props) {
           <Section>
             <ThemeField />
           </Section>
-        </div>
 
-        <div className="px-3">
-          <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-            Benachrichtigungen
-          </p>
           <Section>
             <Row
-              icon={<BellIcon className="h-5 w-5" filled={pushStatus === 'active'} />}
-              label="Push-Benachrichtigungen"
-              trailing={
-                <span className={`text-sm ${pushStatus === 'active' ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
-                  {pushStatus === 'active' ? 'Aktiv' : 'Aktivieren'}
-                </span>
-              }
-              onClick={pushStatus === 'active' ? undefined : onEnablePush}
-              bordered={false}
+              icon={<BellIcon className="h-5 w-5" />}
+              label="Benachrichtigungen"
+              trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
+              onClick={() => setPage('notifications')}
+            />
+            <Row
+              icon={<KeyIcon className="h-5 w-5" />}
+              label="Apple-Konten"
+              trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
+              onClick={() => setPage('apple')}
+            />
+            <Row
+              icon={<GearIcon className="h-5 w-5" />}
+              label="Tracking"
+              trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
+              onClick={() => setPage('tracking')}
             />
           </Section>
-          <TelegramPanel />
         </div>
-
-        <div className="px-3">
-          <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-            Apple-Konten
-          </p>
-          <AppleConnectPanel title="AirTag-Tracking" adapter={AIRTAG_APPLE_ADAPTER} />
-          <AppleConnectPanel title="Eigener Standort (optional)" adapter={OWNER_APPLE_ADAPTER} />
-        </div>
-
-        <OwnerDevicesPanel />
-
-        {!settings ? (
-          <p className="px-4 text-sm text-[var(--text-secondary)]">Lädt…</p>
-        ) : (
-          <div className="px-3">
-            <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-              Abfrage
-            </p>
-            <Section>
-              <Field
-                label="Abfrageintervall"
-                suffix="min"
-                value={settings.polling_interval_minutes}
-                error={errors.polling_interval_minutes}
-                onChange={(v) => update({ polling_interval_minutes: v })}
-              />
-            </Section>
-
-            <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-              Bewegungserkennung
-            </p>
-            <Section>
-              <Field
-                label="Distanzschwelle"
-                suffix="m"
-                value={settings.movement_distance_threshold_meters}
-                error={errors.movement_distance_threshold_meters}
-                onChange={(v) => update({ movement_distance_threshold_meters: v })}
-              />
-              <Field
-                label="Stillstandsdauer"
-                suffix="h"
-                value={settings.movement_stillstand_hours}
-                error={errors.movement_stillstand_hours}
-                onChange={(v) => update({ movement_stillstand_hours: v })}
-              />
-              <Field
-                label="Bewegung nach Stillstand"
-                suffix="m"
-                value={settings.movement_stillstand_movement_meters}
-                error={errors.movement_stillstand_movement_meters}
-                onChange={(v) => update({ movement_stillstand_movement_meters: v })}
-              />
-              <label className="flex items-center justify-between gap-3 border-t border-[var(--divider)] px-4 py-3">
-                <span className="flex-1 text-[0.95rem]">Alarm beim ersten Abruf</span>
-                <input
-                  type="checkbox"
-                  checked={settings.movement_alert_on_backfill}
-                  onChange={(e) => update({ movement_alert_on_backfill: e.target.checked }, { immediate: true })}
-                  className="h-5 w-5 accent-[var(--accent)]"
-                />
-              </label>
-            </Section>
-
-            <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-              Standort-Korrelation
-            </p>
-            <Section>
-              <Field
-                label="Abstand für „ohne dich“"
-                suffix="m"
-                value={settings.movement_away_distance_meters}
-                error={errors.movement_away_distance_meters}
-                onChange={(v) => update({ movement_away_distance_meters: v })}
-              />
-              <Field
-                label="Max. Alter deines Standorts"
-                suffix="min"
-                value={settings.owner_location_max_age_minutes}
-                error={errors.owner_location_max_age_minutes}
-                onChange={(v) => update({ owner_location_max_age_minutes: v })}
-              />
-            </Section>
-          </div>
-        )}
 
         <div className="mt-auto px-3 pt-2">
           <Section>
-            <Row icon={<LogoutIcon className="h-5 w-5" />} label="Abmelden" destructive onClick={() => (window.location.href = '/logout')} bordered={false} />
+            <Row
+              icon={<LogoutIcon className="h-5 w-5" />}
+              label="Abmelden"
+              destructive
+              onClick={() => (window.location.href = '/logout')}
+              bordered={false}
+            />
           </Section>
         </div>
       </div>

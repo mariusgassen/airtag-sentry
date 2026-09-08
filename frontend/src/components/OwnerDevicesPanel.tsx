@@ -7,7 +7,7 @@ import {
   setOwnerDeviceEnabled,
   setOwnerDevicePrimary,
 } from '../api'
-import { Row, Section } from './AirtagDetail'
+import { Row, Section, Switch } from './AirtagDetail'
 import { StarIcon } from './icons'
 
 /** Lists the owner's Apple devices (Macs, iPhones, iPads, Watches - see
@@ -112,12 +112,7 @@ export function OwnerDevicesPanel() {
                   >
                     <StarIcon className="h-4 w-4" filled={d.is_primary} />
                   </button>
-                  <input
-                    type="checkbox"
-                    checked={d.enabled}
-                    onChange={() => toggle(d)}
-                    className="h-5 w-5 accent-[var(--accent)]"
-                  />
+                  <Switch checked={d.enabled} onChange={() => toggle(d)} />
                 </div>
               }
             />
