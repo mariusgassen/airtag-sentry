@@ -180,7 +180,6 @@ Each backend is optional and independent:
 
 | Backend  | Enable by setting                                                                                             |
 |----------|-----------------------------------------------------------------------------------------------------------------|
-| ntfy.sh  | `NTFY_TOPIC_URL` (e.g. `https://ntfy.sh/your-secret-topic`) in `.env`                                          |
 | Telegram | Bot token + chat ID, connected from the dashboard's Settings ⚙️ → **Benachrichtigungen** panel                |
 | Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` in `.env`, then click "Enable notifications" on the dashboard |
 
