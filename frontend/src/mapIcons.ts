@@ -75,6 +75,17 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
     <path d="M3.5 8.5V16L12 20.5 20.5 16V8.5" stroke="white" stroke-width="1.7" stroke-linejoin="round"/>
     <path d="M12 13v7.5" stroke="white" stroke-width="1.7"/>
   </svg>`,
+  iphone: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.3" stroke="white" stroke-width="1.8"/>
+    <path d="M10.5 5h3" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+    <circle cx="12" cy="18.2" r="0.9" fill="white"/>
+  </svg>`,
+  airpods: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+    <path d="M9 4.5c1.4 0 2.5 1.1 2.5 2.5v7.2c0 1.7-1.3 3.3-3 3.3S5.5 15.9 5.5 14.2V9" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+    <rect x="7.7" y="6.3" width="2.3" height="3.6" rx="1.15" fill="white"/>
+    <path d="M15 4.5c-1.4 0-2.5 1.1-2.5 2.5v7.2c0 1.7 1.3 3.3 3 3.3s3-1.6 3-3.3V9" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+    <rect x="14" y="6.3" width="2.3" height="3.6" rx="1.15" fill="white"/>
+  </svg>`,
 }
 
 /** A colored circular badge pin for an AirTag's map marker, matching the

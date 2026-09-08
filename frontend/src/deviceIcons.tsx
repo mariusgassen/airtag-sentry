@@ -21,6 +21,8 @@ export type DeviceIconName =
   | 'headphones'
   | 'book'
   | 'box'
+  | 'iphone'
+  | 'airpods'
 
 export function BikeIcon({ className }: IconProps) {
   return (
@@ -148,6 +150,37 @@ export function BoxIcon({ className }: IconProps) {
       <path d="M3.5 8.5 12 4l8.5 4.5-8.5 4.5-8.5-4.5Z" stroke="currentColor" strokeWidth={1.7} strokeLinejoin="round" />
       <path d="M3.5 8.5V16L12 20.5 20.5 16V8.5" stroke="currentColor" strokeWidth={1.7} strokeLinejoin="round" />
       <path d="M12 13v7.5" stroke="currentColor" strokeWidth={1.7} />
+    </svg>
+  )
+}
+
+export function IphoneIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2.3" stroke="currentColor" strokeWidth={1.8} />
+      <path d="M10.5 5h3" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+      <circle cx="12" cy="18.2" r="0.9" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function AirpodsIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M9 4.5c1.4 0 2.5 1.1 2.5 2.5v7.2c0 1.7-1.3 3.3-3 3.3S5.5 15.9 5.5 14.2V9"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+      <rect x="7.7" y="6.3" width="2.3" height="3.6" rx="1.15" fill="currentColor" />
+      <path
+        d="M15 4.5c-1.4 0-2.5 1.1-2.5 2.5v7.2c0 1.7 1.3 3.3 3 3.3s3-1.6 3-3.3V9"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+      <rect x="14" y="6.3" width="2.3" height="3.6" rx="1.15" fill="currentColor" />
     </svg>
   )
 }

@@ -2,6 +2,7 @@ import type { ComponentType } from 'react'
 import { KeyIcon } from './components/icons'
 import type { DeviceIconName } from './deviceIcons'
 import {
+  AirpodsIcon,
   BackpackIcon,
   BikeIcon,
   BookIcon,
@@ -9,6 +10,7 @@ import {
   CameraIcon,
   CarIcon,
   HeadphonesIcon,
+  IphoneIcon,
   LaptopIcon,
   PetIcon,
   SuitcaseIcon,
@@ -28,6 +30,8 @@ export const DEVICE_ICON_NAMES: DeviceIconName[] = [
   'headphones',
   'book',
   'box',
+  'iphone',
+  'airpods',
 ]
 
 export const DEVICE_ICON_COMPONENTS: Record<DeviceIconName, ComponentType<{ className?: string }>> = {
@@ -43,6 +47,8 @@ export const DEVICE_ICON_COMPONENTS: Record<DeviceIconName, ComponentType<{ clas
   headphones: HeadphonesIcon,
   book: BookIcon,
   box: BoxIcon,
+  iphone: IphoneIcon,
+  airpods: AirpodsIcon,
 }
 
 export const DEVICE_ICON_LABELS: Record<DeviceIconName, string> = {
@@ -58,4 +64,6 @@ export const DEVICE_ICON_LABELS: Record<DeviceIconName, string> = {
   headphones: 'Kopfhörer',
   book: 'Buch',
   box: 'Paket',
+  iphone: 'iPhone',
+  airpods: 'AirPods',
 }
