@@ -68,14 +68,13 @@ python scripts/generate_vapid_keys.py
 
 Then, in your OIDC provider, register an OAuth2/OIDC application for the
 dashboard (redirect URI `https://<your-domain>/auth/callback`, grant type
-"Authorization code", scopes `openid`, `email`, `profile`) and add its
-credentials:
+"Authorization code", scopes `openid`, `profile`) and add its credentials:
 
 ```
 OIDC_ISSUER=https://<authentik-host>/application/o/<application-slug>/
 OIDC_CLIENT_ID=...
 OIDC_CLIENT_SECRET=...
-OIDC_ALLOWED_EMAIL=you@example.com   # only this account may log in
+OIDC_ALLOWED_USERNAME=your-username   # only this account may log in
 SESSION_SECRET_KEY=...   # e.g. `openssl rand -hex 32`
 ```
 

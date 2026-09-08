@@ -41,7 +41,7 @@ class AuthConfig:
     oidc_issuer: str
     oidc_client_id: str
     oidc_client_secret: str
-    oidc_allowed_email: str
+    oidc_allowed_username: str
     session_secret_key: str
 
 
@@ -130,7 +130,7 @@ def load_config() -> Config:
     oidc_issuer = _env("OIDC_ISSUER")
     oidc_client_id = _env("OIDC_CLIENT_ID")
     oidc_client_secret = _env("OIDC_CLIENT_SECRET")
-    oidc_allowed_email = _env("OIDC_ALLOWED_EMAIL")
+    oidc_allowed_username = _env("OIDC_ALLOWED_USERNAME")
     session_secret_key = _env("SESSION_SECRET_KEY")
     missing_auth = [
         name
@@ -138,7 +138,7 @@ def load_config() -> Config:
             ("OIDC_ISSUER", oidc_issuer),
             ("OIDC_CLIENT_ID", oidc_client_id),
             ("OIDC_CLIENT_SECRET", oidc_client_secret),
-            ("OIDC_ALLOWED_EMAIL", oidc_allowed_email),
+            ("OIDC_ALLOWED_USERNAME", oidc_allowed_username),
             ("SESSION_SECRET_KEY", session_secret_key),
         ]
         if not value
@@ -151,7 +151,7 @@ def load_config() -> Config:
         oidc_issuer=oidc_issuer,
         oidc_client_id=oidc_client_id,
         oidc_client_secret=oidc_client_secret,
-        oidc_allowed_email=oidc_allowed_email,
+        oidc_allowed_username=oidc_allowed_username,
         session_secret_key=session_secret_key,
     )
 

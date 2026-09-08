@@ -36,7 +36,7 @@ def cfg(monkeypatch):
     monkeypatch.setenv("OIDC_ISSUER", "https://authentik.example.com/application/o/airtag-sentry/")
     monkeypatch.setenv("OIDC_CLIENT_ID", "client-id")
     monkeypatch.setenv("OIDC_CLIENT_SECRET", "client-secret")
-    monkeypatch.setenv("OIDC_ALLOWED_EMAIL", "octocat@example.com")
+    monkeypatch.setenv("OIDC_ALLOWED_USERNAME", "octocat")
     monkeypatch.setenv("SESSION_SECRET_KEY", "session-secret")
     monkeypatch.setenv(
         "AIRTAG_KEY_ENCRYPTION_KEY", "PTx2A3nrHR9wKR_hqK0YtxHZgHqEeZOo8VvV3XwZjxA="
@@ -70,7 +70,7 @@ def _extract_state(auth_login_resp) -> str:
     return parse_qs(urlparse(location).query)["state"][0]
 
 
-def _mock_oidc(client, monkeypatch, email: str = "octocat@example.com"):
+def _mock_oidc(client, monkeypatch, username: str = "octocat"):
     """Stub the two calls that actually leave the process during the OIDC
     exchange (token endpoint + userinfo endpoint), while leaving authlib's
     own state/PKCE/nonce validation in authorize_access_token() to run for
@@ -81,11 +81,13 @@ def _mock_oidc(client, monkeypatch, email: str = "octocat@example.com"):
         "fetch_access_token",
         AsyncMock(return_value={"access_token": "tok", "token_type": "Bearer"}),
     )
-    monkeypatch.setattr(authentik, "userinfo", AsyncMock(return_value={"email": email}))
+    monkeypatch.setattr(
+        authentik, "userinfo", AsyncMock(return_value={"preferred_username": username})
+    )
 
 
-def _login(client, monkeypatch, email: str = "octocat@example.com") -> None:
-    _mock_oidc(client, monkeypatch, email=email)
+def _login(client, monkeypatch, username: str = "octocat") -> None:
+    _mock_oidc(client, monkeypatch, username=username)
     state = _extract_state(client.get("/auth/login"))
     client.get(f"/auth/callback?code=abc&state={state}")
 
@@ -151,7 +153,7 @@ def test_callback_state_is_single_use(client, monkeypatch):
 
 
 def test_callback_rejects_a_disallowed_account(client, monkeypatch):
-    _mock_oidc(client, monkeypatch, email="someone-else@example.com")
+    _mock_oidc(client, monkeypatch, username="someone-else")
     state = _extract_state(client.get("/auth/login"))
 
     resp = client.get(f"/auth/callback?code=abc&state={state}")

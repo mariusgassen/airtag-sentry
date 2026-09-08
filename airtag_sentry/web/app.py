@@ -165,7 +165,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if _is_public(request.url.path):
             return await call_next(request)
-        if request.session.get("user") != self._cfg.auth.oidc_allowed_email:
+        if request.session.get("user") != self._cfg.auth.oidc_allowed_username:
             if request.url.path.startswith("/api/"):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             # The PWA service worker precaches the app shell ("/", "/assets/*")
@@ -322,7 +322,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         server_metadata_url=f"{cfg.auth.oidc_issuer.rstrip('/')}/.well-known/openid-configuration",
         client_id=cfg.auth.oidc_client_id,
         client_secret=cfg.auth.oidc_client_secret,
-        client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"},
+        client_kwargs={"scope": "openid profile", "code_challenge_method": "S256"},
     )
     app.state.oauth = oauth
 
@@ -526,11 +526,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Invalid OIDC state") from exc
 
         userinfo = await oauth.authentik.userinfo(token=token)
-        email = userinfo.get("email")
-        if not email or email != cfg.auth.oidc_allowed_email:
+        username = userinfo.get("preferred_username")
+        if not username or username != cfg.auth.oidc_allowed_username:
             raise HTTPException(status_code=403, detail="This account is not authorized")
 
-        request.session["user"] = email
+        request.session["user"] = username
         return RedirectResponse(url="/", status_code=302)
 
     @app.get("/logout")

@@ -2531,25 +2531,27 @@ against Authentik, with an application/provider already set up there.
 
 - [x] `config.py`'s `AuthConfig`: `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`/
       `GITHUB_ALLOWED_LOGIN` replaced with `OIDC_ISSUER`/`OIDC_CLIENT_ID`/
-      `OIDC_CLIENT_SECRET`/`OIDC_ALLOWED_EMAIL` (`SESSION_SECRET_KEY`
+      `OIDC_CLIENT_SECRET`/`OIDC_ALLOWED_USERNAME` (`SESSION_SECRET_KEY`
       unchanged). No compat shim for the old names - breaking config change,
       per this repo's established convention.
 - [x] `web/app.py`: registers an `authlib` `OAuth` client
       (`authlib.integrations.starlette_client`) against
       `<OIDC_ISSUER>/.well-known/openid-configuration` - discovers
       authorize/token/userinfo/jwks endpoints instead of hardcoding a
-      provider's URLs, with PKCE (S256) and the `openid email profile`
-      scope. Exposed on `app.state.oauth` so tests can seed fake discovery
-      metadata and stub the token/userinfo HTTP calls without a real IdP.
+      provider's URLs, with PKCE (S256) and the `openid profile` scope
+      (`profile` is what carries `preferred_username`). Exposed on
+      `app.state.oauth` so tests can seed fake discovery metadata and stub
+      the token/userinfo HTTP calls without a real IdP.
 - [x] `/login`'s branded page now links to a new `/auth/login` (starts the
       authlib redirect) instead of embedding a provider-specific authorize
       link with a hand-minted state; `/auth/callback` exchanges the code via
-      authlib, fetches userinfo, and gates on `OIDC_ALLOWED_EMAIL`. Dropped
-      the hand-rolled pending-OAuth-state list (`_prune_oauth_states` et
-      al.) - authlib owns state/nonce/PKCE-verifier storage in the session
-      now. `/logout` unchanged (local session clear only - no RP-initiated
-      Authentik logout, since that needs a post-logout redirect URI we
-      can't assume is registered).
+      authlib, fetches userinfo, and gates on `OIDC_ALLOWED_USERNAME`
+      against the `preferred_username` claim. Dropped the hand-rolled
+      pending-OAuth-state list (`_prune_oauth_states` et al.) - authlib owns
+      state/nonce/PKCE-verifier storage in the session now. `/logout`
+      unchanged (local session clear only - no RP-initiated Authentik
+      logout, since that needs a post-logout redirect URI we can't assume
+      is registered).
 - [x] Dropped `authlib<1.8` pin reasoning documented inline in
       `pyproject.toml`: 1.8 moves its httpx integration to a separate
       `httpx2` package, falling back to `httpx` with a deprecation warning
@@ -2557,7 +2559,7 @@ against Authentik, with an application/provider already set up there.
       directly.
 - [x] `.env.example`, `docker-compose.yml`, `README.md` updated for the new
       env vars and an Authentik-flavored setup flow (issuer, client id/
-      secret, allowed email, redirect URI).
+      secret, allowed username, redirect URI).
 
 ## Review (v36)
 

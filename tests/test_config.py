@@ -47,7 +47,7 @@ def required_env(postgres_env, monkeypatch):
     monkeypatch.setenv("OIDC_ISSUER", "https://authentik.example.com/application/o/airtag-sentry/")
     monkeypatch.setenv("OIDC_CLIENT_ID", "client-id")
     monkeypatch.setenv("OIDC_CLIENT_SECRET", "client-secret")
-    monkeypatch.setenv("OIDC_ALLOWED_EMAIL", "me@example.com")
+    monkeypatch.setenv("OIDC_ALLOWED_USERNAME", "me")
     monkeypatch.setenv("SESSION_SECRET_KEY", "session-secret")
     monkeypatch.setenv(
         "AIRTAG_KEY_ENCRYPTION_KEY",
