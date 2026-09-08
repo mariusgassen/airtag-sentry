@@ -1,5 +1,4 @@
-import { useEffect, useRef } from 'react'
-import type L from 'leaflet'
+import { useMemo } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
@@ -44,17 +43,6 @@ export function DeviceMapCard({
   onMapClick?: () => void
 }) {
   const positions: [number, number][] = locations.map((l) => [l.lat, l.lon])
-  const markerRef = useRef<L.Marker>(null)
-
-  // Open the marker's popup as soon as there's a position to show it for -
-  // mirrors MapCard.tsx's own effect exactly, see the comment there for why.
-  useEffect(() => {
-    markerRef.current?.openPopup()
-  }, [selectedLocationKey])
-
-  if (positions.length === 0) {
-    return <NoReportsView onMapClick={onMapClick} />
-  }
 
   // /api/owner-devices/history is newest-first (see
   // fetch_owner_device_location_history), unlike AirTag reports - index 0 is
@@ -62,8 +50,19 @@ export function DeviceMapCard({
   const selectedIndex =
     selectedLocationKey != null ? locations.findIndex((l) => l.recorded_at === selectedLocationKey) : -1
   const displayedIndex = selectedIndex >= 0 ? selectedIndex : 0
-  const displayed = locations[displayedIndex]
-  const displayedPosition: [number, number] = [displayed.lat, displayed.lon]
+  // Undefined when there are no locations at all - only read once positions
+  // is confirmed non-empty below, but the hook call itself (Rules of Hooks)
+  // has to run unconditionally either way.
+  const displayed = locations[displayedIndex] as OwnerLocation | undefined
+  // Memoized: see MapCard.tsx's identical comment on its own displayedPosition.
+  const displayedPosition = useMemo<[number, number]>(
+    () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
+    [displayed?.lat, displayed?.lon],
+  )
+
+  if (positions.length === 0 || !displayed) {
+    return <NoReportsView onMapClick={onMapClick} />
+  }
 
   return (
     <MapContainer center={displayedPosition} zoom={15} className="h-full w-full">
@@ -74,33 +73,28 @@ export function DeviceMapCard({
       {positions.length > 1 && (
         <Polyline positions={positions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 4 }} />
       )}
-      <Marker
-        ref={markerRef}
-        position={displayedPosition}
-        icon={airtagPinIcon(device)}
-        eventHandlers={{ click: centerMarkerOnClick }}
-      >
-        {/* autoPan off: mirrors MapCard.tsx's selected-pin popup exactly -
-            see the comment there for why. */}
-        <Popup autoPan={false}>
-          <div className={POPUP_WIDTH_CLASS}>
-            <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
-            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-              {new Date(displayed.recorded_at).toLocaleString()}
-            </InfoRow>
-            <AddressLine lat={displayed.lat} lon={displayed.lon} />
-            <a
-              href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
-            >
-              <LocationArrowIcon className="h-3.5 w-3.5" />
-              In Karten öffnen
-            </a>
-          </div>
-        </Popup>
-      </Marker>
+      <Marker position={displayedPosition} icon={airtagPinIcon(device)} eventHandlers={{ click: centerMarkerOnClick }} />
+      {/* Standalone (not nested in the Marker above) and explicitly
+          position-controlled - mirrors MapCard.tsx's selected-pin popup
+          exactly, see the comment there for why. */}
+      <Popup position={displayedPosition} autoPan={false}>
+        <div className={POPUP_WIDTH_CLASS}>
+          <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
+          <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+            {new Date(displayed.recorded_at).toLocaleString()}
+          </InfoRow>
+          <AddressLine lat={displayed.lat} lon={displayed.lon} />
+          <a
+            href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
+          >
+            <LocationArrowIcon className="h-3.5 w-3.5" />
+            In Karten öffnen
+          </a>
+        </div>
+      </Popup>
       <PanToSelection position={selectedIndex >= 0 ? displayedPosition : null} />
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
