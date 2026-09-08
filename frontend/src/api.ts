@@ -293,3 +293,7 @@ export async function getVapidPublicKey(): Promise<string | null> {
 export async function subscribePush(subscription: PushSubscription): Promise<void> {
   await apiFetch('/api/push/subscribe', { method: 'POST', body: JSON.stringify(subscription.toJSON()) })
 }
+
+export async function unsubscribePush(subscription: PushSubscription): Promise<void> {
+  await apiFetch('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: subscription.endpoint }) })
+}

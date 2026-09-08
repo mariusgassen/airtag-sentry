@@ -333,7 +333,12 @@ export default function App() {
           </button>
           <div className="min-h-0 flex-1">
             {activeTab === 'settings' ? (
-              <SettingsPanel pushStatus={push.status} onEnablePush={push.enable} />
+              <SettingsPanel
+                pushStatus={push.status}
+                pushBusy={push.busy}
+                onEnablePush={push.enable}
+                onDisablePush={push.disable}
+              />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail
                 airtag={currentAirtag}

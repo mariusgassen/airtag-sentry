@@ -7,7 +7,7 @@ import {
   setTelegramCredentials,
 } from '../api'
 import { ChevronRightIcon, PaperPlaneIcon } from './icons'
-import { Row, Section } from './AirtagDetail'
+import { Row, Section, Switch } from './AirtagDetail'
 
 export function TelegramPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -119,18 +119,7 @@ export function TelegramPanel() {
                 /list und /where direkt im Chat abfragen.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleToggleCommands}
-              disabled={commandsBusy}
-              className={`rounded-lg border px-3 py-1.5 text-sm disabled:opacity-60 ${
-                botCommandsEnabled
-                  ? 'border-[var(--destructive)] text-[var(--destructive)]'
-                  : 'border-[var(--accent)] text-[var(--accent)]'
-              }`}
-            >
-              {botCommandsEnabled ? 'Deaktivieren' : 'Aktivieren'}
-            </button>
+            <Switch checked={botCommandsEnabled} onChange={handleToggleCommands} disabled={commandsBusy} />
           </div>
           {commandsError && <p className="mt-2 text-[0.78rem] text-[var(--destructive)]">{commandsError}</p>}
 

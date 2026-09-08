@@ -28,6 +28,35 @@ export function Section({ children }: { children: ReactNode }) {
   return <div className="mb-6 overflow-hidden rounded-2xl bg-[var(--surface)]">{children}</div>
 }
 
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative h-[1.7rem] w-[2.85rem] shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+        checked ? 'bg-[var(--success)]' : 'bg-[var(--surface-2)]'
+      }`}
+    >
+      <span
+        className={`absolute top-[2px] h-[1.45rem] w-[1.45rem] rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-[1.25rem]' : 'translate-x-[2px]'
+        }`}
+      />
+    </button>
+  )
+}
+
 export function Row({
   icon,
   label,
