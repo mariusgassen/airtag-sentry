@@ -49,8 +49,8 @@ export function Switch({
       }`}
     >
       <span
-        className={`absolute top-[2px] h-[1.45rem] w-[1.45rem] rounded-full bg-white shadow transition-transform ${
-          checked ? 'translate-x-[1.25rem]' : 'translate-x-[2px]'
+        className={`absolute top-[2px] h-[1.45rem] w-[1.45rem] rounded-full bg-white shadow transition-[left] ${
+          checked ? 'left-[20px]' : 'left-[2px]'
         }`}
       />
     </button>
