@@ -2,7 +2,9 @@ import contextlib
 import dataclasses
 import datetime as dt
 import shutil
-from unittest.mock import Mock
+import time
+from unittest.mock import AsyncMock, Mock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,9 +33,10 @@ def cfg(monkeypatch):
     monkeypatch.setenv("POSTGRES_USER", "airtag")
     monkeypatch.setenv("POSTGRES_PASSWORD", "change-me")
     monkeypatch.setenv("POSTGRES_DB", "airtag_sentry")
-    monkeypatch.setenv("GITHUB_CLIENT_ID", "client-id")
-    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "client-secret")
-    monkeypatch.setenv("GITHUB_ALLOWED_LOGIN", "octocat")
+    monkeypatch.setenv("OIDC_ISSUER", "https://authentik.example.com/application/o/airtag-sentry/")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("OIDC_ALLOWED_EMAIL", "octocat@example.com")
     monkeypatch.setenv("SESSION_SECRET_KEY", "session-secret")
     monkeypatch.setenv(
         "AIRTAG_KEY_ENCRYPTION_KEY", "PTx2A3nrHR9wKR_hqK0YtxHZgHqEeZOo8VvV3XwZjxA="
@@ -43,30 +46,53 @@ def cfg(monkeypatch):
 
 @pytest.fixture()
 def client(cfg):
-    return TestClient(
-        app_module.create_app(cfg), base_url="https://testserver", follow_redirects=False
+    app = app_module.create_app(cfg)
+    # Real discovery (fetching /.well-known/openid-configuration from
+    # Authentik) is lazy - it only happens on the first real login attempt.
+    # Pre-seed it here (with `_loaded_at` already set) so tests exercise
+    # authlib's real state/PKCE/nonce handling without ever hitting the
+    # network; only the actual token exchange and userinfo calls are
+    # stubbed per-test via _mock_oidc.
+    app.state.oauth.authentik.server_metadata.update(
+        {
+            "issuer": "https://authentik.example.com/application/o/airtag-sentry/",
+            "authorization_endpoint": "https://authentik.example.com/application/o/authorize/",
+            "token_endpoint": "https://authentik.example.com/application/o/token/",
+            "userinfo_endpoint": "https://authentik.example.com/application/o/userinfo/",
+            "_loaded_at": time.time(),
+        }
     )
+    return TestClient(app, base_url="https://testserver", follow_redirects=False)
 
 
-def _extract_state(login_html: str) -> str:
-    marker = "state="
-    start = login_html.index(marker) + len(marker)
-    end = login_html.index('"', start)
-    return login_html[start:end]
+def _extract_state(auth_login_resp) -> str:
+    location = auth_login_resp.headers["location"]
+    return parse_qs(urlparse(location).query)["state"][0]
 
 
-def _mock_github(monkeypatch):
-    token_res = Mock(json=lambda: {"access_token": "tok"})
-    token_res.raise_for_status = lambda: None
-    user_res = Mock(json=lambda: {"login": "octocat"})
-    user_res.raise_for_status = lambda: None
-    monkeypatch.setattr(app_module.requests, "post", lambda *a, **kw: token_res)
-    monkeypatch.setattr(app_module.requests, "get", lambda *a, **kw: user_res)
+def _mock_oidc(client, monkeypatch, email: str = "octocat@example.com"):
+    """Stub the two calls that actually leave the process during the OIDC
+    exchange (token endpoint + userinfo endpoint), while leaving authlib's
+    own state/PKCE/nonce validation in authorize_access_token() to run for
+    real - that's what the state-handling regression tests below exercise."""
+    authentik = client.app.state.oauth.authentik
+    monkeypatch.setattr(
+        authentik,
+        "fetch_access_token",
+        AsyncMock(return_value={"access_token": "tok", "token_type": "Bearer"}),
+    )
+    monkeypatch.setattr(authentik, "userinfo", AsyncMock(return_value={"email": email}))
+
+
+def _login(client, monkeypatch, email: str = "octocat@example.com") -> None:
+    _mock_oidc(client, monkeypatch, email=email)
+    state = _extract_state(client.get("/auth/login"))
+    client.get(f"/auth/callback?code=abc&state={state}")
 
 
 def test_login_then_callback_succeeds(client, monkeypatch):
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
+    _mock_oidc(client, monkeypatch)
+    state = _extract_state(client.get("/auth/login"))
 
     resp = client.get(f"/auth/callback?code=abc&state={state}")
 
@@ -75,33 +101,38 @@ def test_login_then_callback_succeeds(client, monkeypatch):
 
 
 def test_login_page_is_never_cached(client):
-    # Each visit mints a fresh, single-use state baked into the page's link.
-    # A cached copy would hand out a stale state that no longer matches
-    # anything pending, once the browser or a proxy served it from cache
-    # instead of hitting the server again.
     resp = client.get("/login")
 
     assert resp.headers["cache-control"] == "no-store"
 
 
-def test_concurrent_login_hit_does_not_invalidate_in_flight_state(client, monkeypatch):
-    # Regression test: a background fetch to /login (e.g. the PWA service
-    # worker's Workbox precache hitting a protected path and getting
-    # redirected here) must not invalidate a login already in flight.
-    _mock_github(monkeypatch)
+def test_second_login_link_supersedes_the_first(client, monkeypatch):
+    # authlib's Starlette integration keeps only the most recently minted
+    # state per session (it drops older _state_authentik_* keys itself, to
+    # bound the signed session cookie's size) - unlike the old hand-rolled
+    # GitHub flow, which had to tolerate many concurrent pending states
+    # because every hit to /login (including background PWA wake-ups
+    # redirected there while logged out) minted a fresh one. That's no
+    # longer true here: only an explicit click on /auth/login's button mints
+    # a state, so this single-slot behavior is a non-issue in practice, not
+    # a regression to guard against - this test just documents it.
+    _mock_oidc(client, monkeypatch)
 
-    state = _extract_state(client.get("/login").text)
-    client.get("/login")  # incidental second hit, races with the user's own flow
+    first_state = _extract_state(client.get("/auth/login"))
+    second_state = _extract_state(client.get("/auth/login"))
+    assert first_state != second_state
 
-    resp = client.get(f"/auth/callback?code=abc&state={state}")
+    stale = client.get(f"/auth/callback?code=abc&state={first_state}")
+    assert stale.status_code == 403
 
-    assert resp.status_code == 302
-    assert resp.headers["location"] == "/"
+    current = client.get(f"/auth/callback?code=abc&state={second_state}")
+    assert current.status_code == 302
+    assert current.headers["location"] == "/"
 
 
 def test_callback_rejects_unknown_state(client, monkeypatch):
-    _mock_github(monkeypatch)
-    client.get("/login")
+    _mock_oidc(client, monkeypatch)
+    client.get("/auth/login")
 
     resp = client.get("/auth/callback?code=abc&state=forged")
 
@@ -109,14 +140,23 @@ def test_callback_rejects_unknown_state(client, monkeypatch):
 
 
 def test_callback_state_is_single_use(client, monkeypatch):
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
+    _mock_oidc(client, monkeypatch)
+    state = _extract_state(client.get("/auth/login"))
 
     first = client.get(f"/auth/callback?code=abc&state={state}")
     assert first.status_code == 302
 
     replay = client.get(f"/auth/callback?code=abc&state={state}")
     assert replay.status_code == 403
+
+
+def test_callback_rejects_a_disallowed_account(client, monkeypatch):
+    _mock_oidc(client, monkeypatch, email="someone-else@example.com")
+    state = _extract_state(client.get("/auth/login"))
+
+    resp = client.get(f"/auth/callback?code=abc&state={state}")
+
+    assert resp.status_code == 403
 
 
 def test_background_fetch_to_protected_path_gets_401_not_login_redirect(client):
@@ -130,10 +170,11 @@ def test_background_fetch_to_protected_path_gets_401_not_login_redirect(client):
 
 def test_repeated_background_fetches_do_not_evict_in_flight_state(client, monkeypatch):
     # fetch() follows redirects by default, so a real service worker's
-    # background hit to a protected path would previously chase the 302
-    # all the way to /login and regenerate the state there too.
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
+    # background hit to a protected path would chase the 302 all the way to
+    # /login - which no longer touches any OAuth state at all (that only
+    # happens on /auth/login), so this can't evict an in-flight login.
+    _mock_oidc(client, monkeypatch)
+    state = _extract_state(client.get("/auth/login"))
 
     for _ in range(10):
         client.get("/", headers={"sec-fetch-mode": "cors"}, follow_redirects=True)
@@ -157,10 +198,7 @@ def test_navigation_without_user_gesture_still_redirects_to_login(client):
     # Sec-Fetch-User: ?1. A plain browser reload of "/" *also* never carries
     # Sec-Fetch-User: ?1 (it's a reload, not a link/bookmark activation), so
     # gating the redirect on that header 401'd real users reloading the
-    # dashboard instead of sending them to /login. Both cases now redirect;
-    # what actually needed fixing was the OAuth state list evicting an
-    # in-flight login under a burst of these (see
-    # test_repeated_background_navigations_do_not_evict_in_flight_state).
+    # dashboard instead of sending them to /login. Both cases now redirect.
     resp = client.get("/", headers={"sec-fetch-mode": "navigate"})
 
     assert resp.status_code == 302
@@ -168,8 +206,8 @@ def test_navigation_without_user_gesture_still_redirects_to_login(client):
 
 
 def test_repeated_background_navigations_do_not_evict_in_flight_state(client, monkeypatch):
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
+    _mock_oidc(client, monkeypatch)
+    state = _extract_state(client.get("/auth/login"))
 
     for _ in range(10):
         client.get("/", headers={"sec-fetch-mode": "navigate"}, follow_redirects=True)
@@ -211,9 +249,7 @@ def test_health_reports_503_when_database_is_unreachable(cfg):
 def test_fingerprinted_asset_is_cached_immutably(client, monkeypatch):
     # Vite fingerprints everything under /assets/ with a content hash, so a
     # given filename's content never changes - safe to cache forever.
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
-    client.get(f"/auth/callback?code=abc&state={state}")
+    _login(client, monkeypatch)
 
     assets_dir = app_module.STATIC_DIR / "assets"
     assets_dir.mkdir(exist_ok=True)
@@ -234,9 +270,7 @@ def test_app_shell_is_never_cached(client, monkeypatch):
     # assets on every build, so a browser holding a stale cached index.html
     # after a new deploy gets 404s on its own <script>/<link> tags until a
     # hard refresh - it must always be revalidated.
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
-    client.get(f"/auth/callback?code=abc&state={state}")
+    _login(client, monkeypatch)
 
     resp = client.get("/")
 
@@ -264,9 +298,7 @@ def test_owner_devices_route_reads_persisted_devices_without_a_live_apple_call(c
     # Identity is now persisted by the background poller instead
     # (owner_tracking.fetch_owner_device_locations), so this route just reads
     # Postgres and can't fail because of Apple at all.
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
-    client.get(f"/auth/callback?code=abc&state={state}")
+    _login(client, monkeypatch)
 
     monkeypatch.setattr(
         app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock())
@@ -323,9 +355,7 @@ def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):
     # happened to collide with another route's static segments/methods).
     # device_id now travels in the body (PUT routes) or as a query param (GET
     # history), neither of which treats "/" as a delimiter.
-    _mock_github(monkeypatch)
-    state = _extract_state(client.get("/login").text)
-    client.get(f"/auth/callback?code=abc&state={state}")
+    _login(client, monkeypatch)
 
     monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
 

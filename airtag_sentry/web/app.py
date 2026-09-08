@@ -17,12 +17,12 @@ import json
 import logging
 import re
 import secrets
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import requests
+from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -115,6 +115,7 @@ class _CacheControlledStaticFiles(StaticFiles):
 
 _PUBLIC_PATHS = {
     "/login",
+    "/auth/login",
     "/auth/callback",
     "/logout",
     "/manifest.webmanifest",
@@ -150,25 +151,6 @@ def _is_public(path: str) -> bool:
     return path in _PUBLIC_PATHS or path.startswith("/icons/")
 
 
-_GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
-_GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
-_GITHUB_USER_URL = "https://api.github.com/user"
-
-# Comfortably longer than a GitHub consent-screen round trip. Pending states
-# used to be capped to the last 5 instead of expired by age, which broke down
-# whenever more than 5 background hits to /login (e.g. iOS waking the
-# installed PWA in the background) landed during a single in-flight login,
-# evicting the real state before the user got back from GitHub. Expiring by
-# time tolerates any number of those, since they aren't the state a real
-# login is waiting on.
-_OAUTH_STATE_TTL_SECONDS = 600
-
-
-def _prune_oauth_states(pending: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    cutoff = time.time() - _OAUTH_STATE_TTL_SECONDS
-    return [p for p in pending if p["minted_at"] >= cutoff]
-
-
 class AuthMiddleware(BaseHTTPMiddleware):
     """Requires a logged-in session for every route except the login/callback/logout ones.
 
@@ -183,26 +165,28 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if _is_public(request.url.path):
             return await call_next(request)
-        if request.session.get("user") != self._cfg.auth.allowed_login:
+        if request.session.get("user") != self._cfg.auth.oidc_allowed_email:
             if request.url.path.startswith("/api/"):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             # The PWA service worker precaches the app shell ("/", "/assets/*")
             # in the background, independent of whatever page is open, and
-            # redirecting those fetches to /login re-ran the login route as
-            # if the user had clicked it, regenerating the OAuth state.
-            # Browsers only ever send Sec-Fetch-Mode: navigate for an actual
-            # top-level navigation (never from fetch()/a service worker), so
-            # reject anything else outright instead of touching /login.
+            # redirecting those fetches to /login used to re-run the login
+            # route as if the user had clicked it, regenerating the OAuth
+            # state - back when /login itself minted one on every hit.
+            # /login is now a static informational page; only an explicit
+            # click on its button hits /auth/login and mints a state, so a
+            # background wake-up landing here can no longer touch an
+            # in-flight login no matter how it's dispatched. Still: browsers
+            # only ever send Sec-Fetch-Mode: navigate for an actual top-level
+            # navigation (never from fetch()/a service worker), so reject
+            # anything else outright instead of touching /login.
             #
             # A previous version also required Sec-Fetch-User: ?1 here to
             # filter out iOS's background PWA wake-ups (a genuine top-level
             # navigation with no user present, still Sec-Fetch-Mode:
             # navigate). That header is never sent for a plain page reload
             # either, though, so it also silently 401'd real users reloading
-            # the dashboard instead of sending them to /login. The OAuth
-            # state list below is now time-based rather than count-capped,
-            # which is what actually needed fixing to tolerate background
-            # wake-ups - see _prune_oauth_states.
+            # the dashboard instead of sending them to /login.
             sec_fetch_mode = request.headers.get("sec-fetch-mode")
             if sec_fetch_mode is not None and sec_fetch_mode != "navigate":
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
@@ -327,6 +311,21 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app = FastAPI(title="AirTagSentry", lifespan=lifespan)
 
+    # Discovers Authentik's endpoints (authorize/token/userinfo/jwks) from its
+    # OIDC well-known document instead of hardcoding them, since Authentik's
+    # exact URLs depend on how its application/provider slugs were set up.
+    # Exposed on app.state so tests can seed a fake server_metadata dict and
+    # stub out the token/userinfo HTTP calls without needing a real IdP.
+    oauth = OAuth()
+    oauth.register(
+        name="authentik",
+        server_metadata_url=f"{cfg.auth.oidc_issuer.rstrip('/')}/.well-known/openid-configuration",
+        client_id=cfg.auth.oidc_client_id,
+        client_secret=cfg.auth.oidc_client_secret,
+        client_kwargs={"scope": "openid email profile", "code_challenge_method": "S256"},
+    )
+    app.state.oauth = oauth
+
     def _resolve_airtag_id(conn, airtag_id: str | None) -> str:
         airtags = list_airtags(conn)
         if not airtags:
@@ -357,31 +356,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page(request: Request):
-        # A single overwritten slot breaks whenever something other than the
-        # user's own click reaches this route while a login is in flight -
-        # e.g. the PWA service worker's Workbox precache fetching "/" while
-        # logged out, which AuthMiddleware redirects here. That silently
-        # replaced the state the user was about to come back with, so
-        # /auth/callback rejected an otherwise valid login. Keeping a list of
-        # pending states (expired by age, see _prune_oauth_states) tolerates
-        # that without weakening the check: each one is still random,
-        # single-use, and tied to this session.
-        state = secrets.token_urlsafe(24)
-        pending_states = _prune_oauth_states(request.session.get("oauth_states", []))
-        pending_states.append({"state": state, "minted_at": time.time()})
-        request.session["oauth_states"] = pending_states
-        logger.info(
-            "oauth login: minted state=%s… (pending now %d) sec-fetch-mode=%s ua=%s",
-            state[:8],
-            len(pending_states),
-            request.headers.get("sec-fetch-mode"),
-            request.headers.get("user-agent"),
-        )
-        authorize_url = (
-            f"{_GITHUB_AUTHORIZE_URL}?client_id={cfg.auth.github_client_id}"
-            f"&scope=read:user&state={state}"
-        )
-        html = f"""<!doctype html>
+        html = """<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
@@ -390,7 +365,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 <link rel="icon" href="/favicon.ico" sizes="any">
 <title>AirTagSentry - Anmelden</title>
 <style>
-  :root {{
+  :root {
     color-scheme: dark;
     --bg: #000000;
     --card: rgba(28, 28, 30, 0.72);
@@ -399,9 +374,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     --accent-2: #5e5ce6;
     --text: #ffffff;
     --text-secondary: #8e8e93;
-  }}
-  @media (prefers-color-scheme: light) {{
-    :root:not([data-theme="dark"]) {{
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
       color-scheme: light;
       --bg: #f2f2f7;
       --card: rgba(255, 255, 255, 0.72);
@@ -410,9 +385,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
       --accent-2: #5856d6;
       --text: #000000;
       --text-secondary: #8e8e93;
-    }}
-  }}
-  :root[data-theme="light"] {{
+    }
+  }
+  :root[data-theme="light"] {
     color-scheme: light;
     --bg: #f2f2f7;
     --card: rgba(255, 255, 255, 0.72);
@@ -421,10 +396,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     --accent-2: #5856d6;
     --text: #000000;
     --text-secondary: #8e8e93;
-  }}
-  * {{ box-sizing: border-box; }}
-  html, body {{ height: 100%; margin: 0; }}
-  body {{
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -433,8 +408,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     justify-content: center;
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
-  }}
-  .backdrop {{
+  }
+  .backdrop {
     position: fixed;
     inset: -20%;
     z-index: 0;
@@ -442,8 +417,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
       radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 55%),
       radial-gradient(circle at 80% 75%, color-mix(in srgb, var(--accent-2) 30%, transparent), transparent 55%);
     filter: blur(60px);
-  }}
-  .card {{
+  }
+  .card {
     position: relative;
     z-index: 1;
     width: min(340px, calc(100vw - 3rem));
@@ -458,25 +433,25 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     flex-direction: column;
     align-items: center;
     text-align: center;
-  }}
-  .glyph {{
+  }
+  .glyph {
     width: 64px;
     height: 64px;
     margin-bottom: 1rem;
     color: var(--accent);
-  }}
-  h1 {{
+  }
+  h1 {
     font-size: 1.4rem;
     font-weight: 700;
     letter-spacing: -0.01em;
     margin: 0 0 0.4rem;
-  }}
-  p.tagline {{
+  }
+  p.tagline {
     font-size: 0.9rem;
     color: var(--text-secondary);
     margin: 0 0 1.75rem;
-  }}
-  .btn {{
+  }
+  .btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -490,18 +465,18 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     font-size: 1rem;
     font-weight: 600;
     transition: transform 0.15s ease, opacity 0.15s ease;
-  }}
-  .btn:active {{
+  }
+  .btn:active {
     transform: scale(0.97);
     opacity: 0.85;
-  }}
-  .btn svg {{ width: 20px; height: 20px; flex-shrink: 0; }}
+  }
+  .btn svg { width: 20px; height: 20px; flex-shrink: 0; }
 </style>
 <script>
-  try {{
+  try {
     var t = localStorage.getItem('airtagsentry.theme')
     if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
-  }} catch (e) {{}}
+  } catch (e) {}
 </script>
 </head>
 <body>
@@ -514,79 +489,48 @@ def create_app(cfg: Config | None = None) -> FastAPI:
   </svg>
   <h1>AirTagSentry</h1>
   <p class="tagline">Standort-Historie und Bewegungs-Alarm für deine AirTags.</p>
-  <a class="btn" href="{authorize_url}">
-    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
-        -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66
-        .07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15
-        -.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0
-        1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82
-        1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01
-        1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+  <a class="btn" href="/auth/login">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="11" width="18" height="10" rx="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
     </svg>
-    Mit GitHub anmelden
+    Mit Authentik anmelden
   </a>
 </div>
 </body>
 </html>"""
-        # This page mints a fresh, single-use OAuth state every time it's
-        # rendered. Without an explicit no-store, a browser (or intermediate
-        # proxy) is free to cache this dynamic HTML and hand the *same*
-        # state back out on a later visit - e.g. via the back button, a
-        # reopened tab, or plain heuristic caching - producing a GitHub
-        # authorize link whose state no longer matches anything pending.
+        # No per-render state to protect against caching anymore (that now
+        # lives in /auth/login), but this stays unhashed/dynamic like the
+        # app shell itself, so treat it the same way.
         return HTMLResponse(
             content=html,
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )
 
+    @app.get("/auth/login")
+    async def auth_login(request: Request):
+        redirect_uri = str(request.url_for("auth_callback"))
+        return await oauth.authentik.authorize_redirect(request, redirect_uri)
+
     @app.get("/auth/callback")
-    def auth_callback(request: Request, code: str | None = None, state: str | None = None):
-        pending_states = _prune_oauth_states(request.session.get("oauth_states", []))
-        if not code or not state or not any(p["state"] == state for p in pending_states):
+    async def auth_callback(request: Request):
+        try:
+            token = await oauth.authentik.authorize_access_token(request)
+        except OAuthError as exc:
             logger.warning(
-                "oauth callback rejected: code_present=%s state=%s… pending=%s referer=%s ua=%s",
-                bool(code),
-                (state or "")[:8],
-                [p["state"][:8] for p in pending_states],
+                "oidc callback rejected: %s referer=%s ua=%s",
+                exc,
                 request.headers.get("referer"),
                 request.headers.get("user-agent"),
             )
-            raise HTTPException(status_code=403, detail="Invalid OAuth state")
-        pending_states = [p for p in pending_states if p["state"] != state]
-        request.session["oauth_states"] = pending_states
-        logger.info("oauth callback: accepted state=%s…", state[:8])
+            raise HTTPException(status_code=403, detail="Invalid OIDC state") from exc
 
-        token_res = requests.post(
-            _GITHUB_TOKEN_URL,
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": cfg.auth.github_client_id,
-                "client_secret": cfg.auth.github_client_secret,
-                "code": code,
-            },
-            timeout=10,
-        )
-        token_res.raise_for_status()
-        access_token = token_res.json().get("access_token")
-        if not access_token:
-            raise HTTPException(status_code=403, detail="GitHub OAuth exchange failed")
+        userinfo = await oauth.authentik.userinfo(token=token)
+        email = userinfo.get("email")
+        if not email or email != cfg.auth.oidc_allowed_email:
+            raise HTTPException(status_code=403, detail="This account is not authorized")
 
-        user_res = requests.get(
-            _GITHUB_USER_URL,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/vnd.github+json",
-            },
-            timeout=10,
-        )
-        user_res.raise_for_status()
-        login = user_res.json().get("login")
-        if login != cfg.auth.allowed_login:
-            raise HTTPException(status_code=403, detail="This GitHub account is not authorized")
-
-        request.session["user"] = login
+        request.session["user"] = email
         return RedirectResponse(url="/", status_code=302)
 
     @app.get("/logout")
