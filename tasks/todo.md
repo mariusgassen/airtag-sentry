@@ -1936,3 +1936,36 @@ requirement was already met; it just had nothing to persist.
   that's the next diagnostic step if this alone doesn't fully resolve it.
   The new grouped Objekte list and DeviceDetail's map trail/history also
   need a real-account visual check.
+
+## v25: Fix `ModuleNotFoundError: No module named 'cryptography'` in Getting Started
+
+Trigger: real-user report - running the first commands in README's "Getting
+started -> 1. Configure secrets" (`python -c "from cryptography.fernet
+import Fernet..."` and `python scripts/generate_vapid_keys.py`) on a bare
+host Python fails with `ModuleNotFoundError: No module named 'cryptography'`.
+
+Root cause: not a missing dependency in the project itself -
+`cryptography>=42` is already declared in `pyproject.toml` and `py-vapid` is
+what `scripts/generate_vapid_keys.py` imports as `py_vapid`. The bug is in
+the README's ordering: step 1 is the very first thing a new self-hoster
+runs, on their host Python, before `docker compose up` even exists as an
+option - but the only "install the project's Python deps" instruction
+(`pip install -e ".[dev]"`) appears much later, under "## Development",
+which a reader following the guide top-to-bottom hasn't reached yet. Anyone
+without a pre-existing venv from unrelated project work hits this on the
+very first command.
+
+- [x] README: "1. Configure secrets" now installs `cryptography` and
+      `py-vapid` (just the two packages those two commands need, not the
+      full `.[dev]` extra with `pyicloud`/`findmy`/pytest, which are
+      unrelated at this point and heavier) before the two key-generation
+      commands.
+
+## Review (v25)
+- 1 file touched (README.md), no code/dependency/migration changes - the
+  dependency was already correctly declared, only the setup doc was wrong.
+- Verified: reproduced the exact reported traceback in a fresh venv with no
+  packages installed; then followed the corrected README instructions
+  verbatim (`pip install cryptography py-vapid` only) in a fresh venv and
+  confirmed `python scripts/generate_vapid_keys.py` succeeds and prints
+  `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` as expected.
