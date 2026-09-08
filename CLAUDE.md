@@ -103,20 +103,23 @@ but never skip a side because its plumbing is different.
 - `alembic/versions/` — schema migrations. Never edit a migration that has
   already shipped; add a new one. `poll`/`serve` apply pending
   migrations automatically at startup.
-- `tasks/todo.md` — historical changelog (`vN:` entries + a review section
-  per version). Add a new entry here for any shipped feature.
 - `tasks/roadmap.md` — forward-looking, prioritized backlog. Not
-  commitments; move an item into `todo.md` as it's actually built.
+  commitments; drop or check off an item once it's actually built.
 - `tasks/lessons.md` — corrections from the user, logged with the pattern
   and the rule adopted to avoid repeating it.
 
-## Established conventions (from the existing changelog)
+No changelog file (a former `tasks/todo.md`) - every shipped feature
+appended an entry there, and parallel PRs kept conflicting on the same
+end-of-file location. Git history (commit messages, PR descriptions) is
+the changelog now; don't reintroduce a single running file for it.
+
+## Established conventions
 
 - **No backward-compatibility shims.** This is still pre-production
   software with no real deployed data to preserve — breaking config/schema
   changes are fine and have been made repeatedly (config.yaml → env vars →
   DB-backed settings; AirTag keys moving storage location twice). Document
-  the break in the README/changelog instead of adding a compat layer.
+  the break in the README instead of adding a compat layer.
 - **Single-user, single-Apple-ID-account app.** No multi-user support is a
   deliberate non-goal — don't add abstractions for it.
 - Config comes entirely from environment variables (`.env`), validated in

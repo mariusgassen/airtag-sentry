@@ -1,9 +1,8 @@
 # Roadmap
 
-A forward-looking, prioritized backlog — distinct from `tasks/todo.md`,
-which is the historical changelog of what's already shipped (v1–v10).
-Items here are ideas and their rationale, not commitments; each gets moved
-into `todo.md` (with a `vN:` entry) as it's actually built.
+A forward-looking, prioritized backlog. Items here are ideas and their
+rationale, not commitments; each gets dropped or checked off once it's
+actually built (see git history/PR descriptions for what shipped when).
 
 Compared against [Traccar](https://www.traccar.org/) (a mature open-source
 GPS platform) for feature inspiration where noted below.
