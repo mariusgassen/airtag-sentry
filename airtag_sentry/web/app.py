@@ -32,6 +32,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot
+from airtag_sentry.geocode import reverse_geocode
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     AppSettings,
@@ -694,6 +695,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             }
             for r in reports
         ]
+
+    @app.get("/api/geocode")
+    def geocode_route(lat: float, lon: float):
+        return {"address": reverse_geocode(lat, lon)}
 
     @app.get("/api/status")
     def get_status(airtag_id: str | None = None):

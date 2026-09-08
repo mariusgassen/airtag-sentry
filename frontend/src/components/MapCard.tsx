@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type L from 'leaflet'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
+import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
-import { LocationArrowIcon } from './icons'
+import { ChevronLeftIcon, ChevronRightIcon, LocationArrowIcon } from './icons'
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
@@ -52,6 +54,54 @@ function useCurrentPosition() {
   return position
 }
 
+/** Pans (without changing zoom) to an explicitly-selected report's position -
+ * separate from FitBounds, which only reframes the whole trail when the
+ * report list itself changes, not on every selection. */
+function PanToSelection({ position }: { position: [number, number] | null }) {
+  const map = useMap()
+  const lat = position?.[0]
+  const lon = position?.[1]
+  useEffect(() => {
+    if (lat !== undefined && lon !== undefined) map.panTo([lat, lon], { animate: true })
+  }, [map, lat, lon])
+  return null
+}
+
+// Reverse-geocode results, keyed by "lat,lon" - avoids re-fetching the same
+// point's address every time it's re-selected within a session (the backend
+// caches too, but this skips the round-trip entirely).
+const addressCache = new Map<string, string | null>()
+
+/** Best-effort address line for a marker popup - starts blank, fills in (or
+ * silently stays empty) once the lookup resolves, never blocks the popup. */
+function AddressLine({ lat, lon }: { lat: number; lon: number }) {
+  const key = `${lat},${lon}`
+  const [address, setAddress] = useState<string | null | undefined>(() => addressCache.get(key))
+
+  useEffect(() => {
+    if (addressCache.has(key)) {
+      setAddress(addressCache.get(key))
+      return
+    }
+    let cancelled = false
+    setAddress(undefined)
+    getAddress(lat, lon)
+      .then((a) => {
+        addressCache.set(key, a)
+        if (!cancelled) setAddress(a)
+      })
+      .catch(() => {
+        if (!cancelled) setAddress(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [key, lat, lon])
+
+  if (!address) return null
+  return <p className="mb-2 text-[var(--text-secondary)]">{address}</p>
+}
+
 export function NoReportsView() {
   const here = useCurrentPosition()
 
@@ -83,6 +133,8 @@ export function MapCard({
   ownerLocations = [],
   ownerLocationHistories = {},
   onSelectDevice,
+  selectedReportId = null,
+  onSelectReport,
 }: {
   reports: Report[]
   airtag: Airtag
@@ -92,14 +144,32 @@ export function MapCard({
   // own dashed trail, matching the route the AirTag itself gets.
   ownerLocationHistories?: Record<string, OwnerLocation[]>
   onSelectDevice?: (id: string) => void
+  // The report shown as the AirTag's marker/popup - null falls back to the
+  // latest one. Selecting a history-list row and stepping Previous/Next in
+  // the popup both flow through this same prop (see App.tsx).
+  selectedReportId?: number | null
+  onSelectReport?: (id: number) => void
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+  const markerRef = useRef<L.Marker>(null)
+
+  // Pop the marker's popup open when a report is picked from the history
+  // list (clicking the map marker itself already opens it via Leaflet).
+  useEffect(() => {
+    if (selectedReportId != null) markerRef.current?.openPopup()
+  }, [selectedReportId])
 
   if (positions.length === 0) {
     return <NoReportsView />
   }
 
   const last = positions[positions.length - 1]
+  const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
+  const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
+  const displayed = reports[displayedIndex]
+  const displayedPosition: [number, number] = [displayed.lat, displayed.lon]
+  const older = displayedIndex > 0 ? reports[displayedIndex - 1] : null
+  const newer = displayedIndex < reports.length - 1 ? reports[displayedIndex + 1] : null
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -119,12 +189,36 @@ export function MapCard({
           />
         )
       })}
-      <Marker position={last} icon={airtagPinIcon(airtag)}>
+      <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(airtag)}>
         <Popup>
           <div className="text-sm">
-            <p className="mb-2 font-medium">Letzte Position</p>
+            <p className="mb-1 font-medium">{selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}</p>
+            <p className="mb-1 text-[var(--text-secondary)]">{new Date(displayed.timestamp).toLocaleString()}</p>
+            <AddressLine lat={displayed.lat} lon={displayed.lon} />
+            {onSelectReport && (older || newer) && (
+              <div className="mb-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => older && onSelectReport(older.id)}
+                  disabled={!older}
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--accent)] disabled:opacity-30"
+                >
+                  <ChevronLeftIcon className="h-3.5 w-3.5" />
+                  Älter
+                </button>
+                <button
+                  type="button"
+                  onClick={() => newer && onSelectReport(newer.id)}
+                  disabled={!newer}
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--accent)] disabled:opacity-30"
+                >
+                  Neuer
+                  <ChevronRightIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
             <a
-              href={mapsUrl(last[0], last[1], airtag.name)}
+              href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
@@ -169,6 +263,7 @@ export function MapCard({
           </Popup>
         </Marker>
       ))}
+      <PanToSelection position={selectedIndex >= 0 ? displayedPosition : null} />
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
     </MapContainer>

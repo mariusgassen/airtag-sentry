@@ -158,6 +158,12 @@ export async function getStatus(airtagId: string): Promise<Status> {
   return (await apiFetch(`/api/status?airtag_id=${encodeURIComponent(airtagId)}`)).json()
 }
 
+export async function getAddress(lat: number, lon: number): Promise<string | null> {
+  const res = await apiFetch(`/api/geocode?lat=${lat}&lon=${lon}`)
+  const data: { address: string | null } = await res.json()
+  return data.address
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return (await apiFetch('/api/settings')).json()
 }
