@@ -38,7 +38,17 @@ export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
   useEffect(() => {
     if (positions.length > 0) {
-      map.fitBounds(positions, { padding: [24, 24] })
+      // animate: false - PanToSelection (a sibling, run right after on the
+      // same data change) always follows this with its own animated pan.
+      // Leaflet's Map.setView _stop()s any in-progress animation before
+      // starting a new one, and reads the *current* zoom to do it - so an
+      // animated fitBounds here, still mid-flight toward its target zoom
+      // when PanToSelection's panTo interrupts it a moment later, gets its
+      // zoom change silently discarded (the map settles at the zoom it
+      // started from, not the one fitBounds computed) even though its pan
+      // committed instantly and its center looked briefly correct. Applying
+      // this one instantly means there's nothing left to interrupt.
+      map.fitBounds(positions, { padding: [24, 24], animate: false })
     }
   }, [map, positions])
   return null
@@ -80,9 +90,14 @@ function useCurrentPosition() {
   return position
 }
 
-/** Pans (without changing zoom) to an explicitly-selected report's position -
- * separate from FitBounds, which only reframes the whole trail when the
- * report list itself changes, not on every selection. Exported for
+/** Pans (without changing zoom) to whichever position is currently
+ * highlighted on the map - the latest one by default, or an explicitly
+ * selected report/history entry - separate from FitBounds, which only
+ * reframes the whole trail's zoom when the report list itself changes, not
+ * on every selection. Always centering here (not just for an explicit
+ * selection) is what makes every "highlighted" pin - including just
+ * landing on an AirTag/device's detail view - end up centered, not only
+ * ones reached via the history list or title-bar stepper. Exported for
  * DeviceMapCard.tsx, which shares this same selection behavior. */
 export function PanToSelection({ position }: { position: [number, number] | null }) {
   const map = useMap()
@@ -326,8 +341,15 @@ export function MapCard({
           </Popup>
         </Marker>
       ))}
-      <PanToSelection position={selectedIndex >= 0 ? displayedPosition : null} />
+      {/* FitBounds first, PanToSelection second: FitBounds only re-fires on
+          a genuine data change (positions is memoized above) and sets a
+          zoom level that fits the whole trail, but PanToSelection - now
+          unconditional, not just for an explicit history selection - has
+          the final say on centering, so whichever pin is currently
+          highlighted (the latest one by default, same as any explicit
+          selection) is always what the view actually centers on. */}
       <FitBounds positions={positions} />
+      <PanToSelection position={displayedPosition} />
       <InvalidateSizeOnResize />
       <MapClickHandler onMapClick={onMapClick} />
     </MapContainer>
