@@ -1,12 +1,20 @@
 import { useState } from 'react'
 import type { OwnerDevice, OwnerLocation } from '../api'
-import { renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
+import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
 import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { deviceLabel, formatRelative } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
 import { Row, Section } from './AirtagDetail'
-import { ChevronLeftIcon, ChevronRightIcon, PaletteIcon, PencilIcon, PersonIcon, StarIcon } from './icons'
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  PaletteIcon,
+  PencilIcon,
+  PersonIcon,
+  SpeakerIcon,
+  StarIcon,
+} from './icons'
 
 interface Props {
   device: OwnerDevice
@@ -37,6 +45,20 @@ export function DeviceDetail({
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [soundState, setSoundState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [soundError, setSoundError] = useState<string | null>(null)
+
+  async function handlePlaySound() {
+    setSoundState('sending')
+    setSoundError(null)
+    try {
+      await playOwnerDeviceSound(device.id)
+      setSoundState('sent')
+    } catch (err) {
+      setSoundError((err as Error).message)
+      setSoundState('error')
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -66,6 +88,25 @@ export function DeviceDetail({
         </div>
 
         <div className="px-3">
+          <Section>
+            <Row
+              icon={<SpeakerIcon className="h-5 w-5" />}
+              label="Ton abspielen"
+              trailing={
+                <span className="text-sm text-[var(--text-secondary)]">
+                  {soundState === 'sending' ? 'Wird gesendet…' : soundState === 'sent' ? 'Gesendet' : ''}
+                </span>
+              }
+              onClick={soundState === 'sending' ? undefined : handlePlaySound}
+              bordered={false}
+            />
+            {soundState === 'error' && (
+              <p className="border-t border-[var(--divider)] p-3 text-[0.78rem] text-[var(--destructive)]">
+                {soundError}
+              </p>
+            )}
+          </Section>
+
           <Section>
             <Row
               icon={<PencilIcon className="h-5 w-5" />}

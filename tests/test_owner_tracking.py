@@ -194,6 +194,54 @@ def test_fetch_owner_device_locations_records_sync_error_and_reraises(monkeypatc
     assert recorded == ["Invalid email/password combination."]
 
 
+def test_set_include_family_delegates_to_db_layer(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        owner_tracking, "set_owner_include_family_devices", lambda conn, include: calls.append(include) or True
+    )
+    assert owner_tracking.set_include_family(conn=None, include_family=True) is True
+    assert calls == [True]
+
+
+class _FakeDeviceWithSound(_FakeDevice):
+    def __init__(self, id, name, device_type, location):
+        super().__init__(id, name, device_type, location)
+        self.play_sound_calls = 0
+
+    def play_sound(self):
+        self.play_sound_calls += 1
+
+
+def test_play_sound_sends_to_the_matching_device_and_stops_monitor_thread(monkeypatch):
+    target = _FakeDeviceWithSound("d1", "MacBook Air", "Mac", None)
+    other = _FakeDeviceWithSound("d2", "iPhone", "iPhone", None)
+    api = _FakeApi([target, other])
+    monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: api)
+
+    owner_tracking.play_sound(cfg=None, conn=None, device_id="d1")
+
+    assert target.play_sound_calls == 1
+    assert other.play_sound_calls == 0
+    assert api.devices.stop_event.was_set is True
+
+
+def test_play_sound_raises_lookup_error_for_unknown_device(monkeypatch):
+    api = _FakeApi([_FakeDeviceWithSound("d1", "MacBook Air", "Mac", None)])
+    monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: api)
+
+    with pytest.raises(LookupError, match="unknown-id"):
+        owner_tracking.play_sound(cfg=None, conn=None, device_id="unknown-id")
+    # Still stops the monitor thread even though no device matched.
+    assert api.devices.stop_event.was_set is True
+
+
+def test_play_sound_raises_runtime_error_when_not_connected(monkeypatch):
+    monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: None)
+
+    with pytest.raises(RuntimeError, match="not connected"):
+        owner_tracking.play_sound(cfg=None, conn=None, device_id="d1")
+
+
 def test_pyicloud_imports_cleanly():
     """Regression test for a real production failure ("Login failed: No module
     named 'rich'"): pyicloud's own __init__ chain unconditionally imports

@@ -374,6 +374,21 @@ def set_owner_apple_credentials(
     conn.commit()
 
 
+def set_owner_include_family_devices(conn: psycopg.Connection, include_family_devices: bool) -> bool:
+    """Flips the Family Sharing filter on an already-connected account, without
+    touching the stored password - unlike set_owner_apple_credentials (a full
+    login upsert), this only ever runs against an existing row. Returns False
+    (no-op) if owner tracking isn't connected."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE owner_apple_credentials SET include_family_devices = %s, updated_at = now() WHERE id = 1",
+            (include_family_devices,),
+        )
+        updated = cur.rowcount > 0
+    conn.commit()
+    return updated
+
+
 def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
     with conn.cursor() as cur:
         cur.execute(

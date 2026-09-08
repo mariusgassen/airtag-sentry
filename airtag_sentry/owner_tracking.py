@@ -65,6 +65,7 @@ from airtag_sentry.db import (
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_owner_include_family_devices,
     upsert_owner_devices,
 )
 
@@ -158,6 +159,7 @@ def connection_status(conn) -> dict:
             "primary_device_id": None,
             "primary_device_name": None,
             "last_sync_error": None,
+            "include_family_devices": False,
         }
     primary = next((d for d in db_list_owner_devices(conn) if d.is_primary), None)
     return {
@@ -165,7 +167,17 @@ def connection_status(conn) -> dict:
         "primary_device_id": primary.id if primary else None,
         "primary_device_name": primary.name if primary else None,
         "last_sync_error": creds.last_sync_error,
+        "include_family_devices": creds.include_family_devices,
     }
+
+
+def set_include_family(conn, include_family: bool) -> bool:
+    """Flips the "shared with me" Family Sharing filter on an already-connected
+    account. Unlike the connect dialog's checkbox, this needs no re-login: the
+    flag is read fresh from Postgres on every _connect() call (a new
+    PyiCloudService is built per poll/request anyway), so it takes effect on
+    the very next poll. Returns False if owner tracking isn't connected."""
+    return set_owner_include_family_devices(conn, include_family)
 
 
 def disconnect(conn) -> None:
@@ -255,6 +267,31 @@ def rename_device(conn, device_id: str, display_name: str | None) -> OwnerDevice
 
 def set_device_appearance(conn, device_id: str, icon: str | None, color: str | None) -> OwnerDevice | None:
     return set_owner_device_appearance(conn, device_id, icon, color)
+
+
+def play_sound(cfg: Config, conn, device_id: str) -> None:
+    """Live "play sound" request (icloud.com/find's speaker icon), via pyicloud's
+    AppleDevice.play_sound(). This is AirTag/FindMy.py's dashboard counterpart
+    to CLAUDE.md's owner/AirTag feature-parity rule, but has none: FindMy.py
+    only implements the read-only offline-finding reports API an AirTag
+    broadcasts over Bluetooth to nearby strangers' phones - making one chirp on
+    demand needs Apple's own Find My app to relay an encrypted command through
+    a phone within Bluetooth range of the tag right now, a different,
+    unreverse-engineered protocol this app has no way to speak. Raises
+    RuntimeError if not connected, LookupError if device_id isn't one of the
+    account's current devices."""
+    api = _connect(cfg, conn)
+    if api is None:
+        raise RuntimeError("Owner tracking not connected.")
+    try:
+        device = next((d for d in api.devices if d.id == device_id), None)
+        if device is None:
+            raise LookupError(f"Unknown device_id '{device_id}'")
+        device.play_sound()
+    finally:
+        # See _snapshot_devices's docstring: accessing api.devices starts a
+        # background re-poll thread that must be stopped explicitly.
+        api.devices.stop_event.set()
 
 
 def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:

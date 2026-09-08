@@ -37,6 +37,7 @@ from airtag_sentry.db import (
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_owner_include_family_devices,
     set_telegram_bot_commands,
     set_telegram_credentials,
     update_settings,
@@ -505,6 +506,27 @@ def test_reconnecting_owner_apple_account_clears_a_stale_sync_error(conn):
     stored = get_owner_apple_credentials(conn)
     assert stored.last_sync_at is None
     assert stored.last_sync_error is None
+
+
+def test_set_owner_include_family_devices_updates_existing_account_without_password(conn):
+    """The Family Sharing filter must be flippable after connecting, without a
+    re-login: unlike set_owner_apple_credentials (a full login upsert), this
+    should update just the flag on the existing row."""
+    set_owner_apple_credentials(conn, "owner@example.com", "enc1", include_family_devices=False)
+
+    assert set_owner_include_family_devices(conn, True) is True
+    stored = get_owner_apple_credentials(conn)
+    assert stored.include_family_devices is True
+    assert stored.encrypted_password == "enc1"
+
+    assert set_owner_include_family_devices(conn, False) is True
+    assert get_owner_apple_credentials(conn).include_family_devices is False
+
+
+def test_set_owner_include_family_devices_is_a_noop_when_not_connected(conn):
+    assert get_owner_apple_credentials(conn) is None
+    assert set_owner_include_family_devices(conn, True) is False
+    assert get_owner_apple_credentials(conn) is None
 
 
 def test_telegram_credentials_set_get_delete_round_trip(conn):
