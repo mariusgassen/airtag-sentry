@@ -2544,14 +2544,20 @@ Three map-navigation polish items, all applied to both `MapCard.tsx`
       (centers the pin, minimizes the sheet on mobile).
 - [x] Fixed the title-bar Älter/Neuer stepper jumping back out to the
       all-devices overview when tapped at the oldest/newest report on iOS:
-      the buttons were real `disabled` elements floating directly over the
-      Leaflet map, and iOS Safari lets a tap on a disabled control fall
-      through to whatever's rendered underneath rather than swallowing it -
-      the tap was landing on the map itself, and `MapClickHandler` treated
-      it as "tapped away from a pin," closing the whole detail view. Kept
-      the buttons real (non-disabled, `aria-disabled` for a11y instead) so
-      the tap stays on the button and `stepOlder?.()`/`stepNewer?.()` just
-      no-op at the boundary, same dimmed look via conditional `opacity-30`.
+      the buttons are real `disabled` elements floating directly over the
+      Leaflet map, and a disabled control is excluded from hit-testing
+      (browsers treat it as `pointer-events: none`), so the tap fell through
+      to whatever's rendered underneath instead - the Leaflet map itself,
+      whose `MapClickHandler` read it as "tapped away from a pin" and closed
+      the whole detail view. Kept the real `disabled` attribute (native
+      dimmed style) but moved the `onClick` to a wrapping `<span>` around
+      each button: since the span shares the disabled button's box and
+      paints directly behind it, that's where the fallen-through tap now
+      lands instead of the map, and it safely no-ops there
+      (`stepOlder?.()`/`stepNewer?.()` are already null at the boundary).
+      Also enlarged both buttons (`p-1.5`/`h-4 w-4` icon ->
+      `p-2.5`/`h-5 w-5`, ~40px touch target) - a small disabled hit target
+      made stray taps here more likely in the first place.
 
 ## Review (v36)
 

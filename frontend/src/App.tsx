@@ -367,36 +367,43 @@ export default function App() {
         </span>
         {(stepOlder || stepNewer) && (
           <div className="pointer-events-auto absolute right-2 flex items-center gap-0.5 rounded-full bg-[var(--surface-2)] p-0.5">
-            {/* Not a real `disabled` button at the trail's start/end: iOS
-                Safari lets a tap on a disabled control fall through to
-                whatever's rendered underneath instead of swallowing it, and
-                this bar floats directly over the Leaflet map - the tap was
-                landing on the map itself and MapClickHandler treated it as
-                "click away from a pin", kicking the whole detail view back
-                out to the overview. Staying enabled and just no-op'ing via
-                `stepOlder?.()` keeps the tap on the button, where it belongs;
-                aria-disabled still announces the state without triggering
-                that hit-testing quirk the way a real `disabled` attribute does. */}
-            <button
-              type="button"
-              onClick={() => stepOlder?.()}
-              aria-disabled={!stepOlder}
-              aria-label="Älterer Standort"
-              title="Älterer Standort"
-              className={`rounded-full p-1.5 text-[var(--text)] ${stepOlder ? '' : 'opacity-30'}`}
-            >
-              <ChevronDownIcon className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => stepNewer?.()}
-              aria-disabled={!stepNewer}
-              aria-label="Neuerer Standort"
-              title="Neuerer Standort"
-              className={`rounded-full p-1.5 text-[var(--text)] ${stepNewer ? '' : 'opacity-30'}`}
-            >
-              <ChevronUpIcon className="h-4 w-4" />
-            </button>
+            {/* Each button keeps a real `disabled` attribute at the trail's
+                start/end (native dimmed style, no focus/activation) - but the
+                onClick lives on the wrapping <span>, not the button itself.
+                A disabled control is excluded from hit-testing (browsers
+                treat it as `pointer-events: none`), so a tap at the
+                start/end lands on whatever's directly behind it in paint
+                order - normally that's this span (same box, painted just
+                behind its own child), which safely no-ops. Without the
+                span, that tap fell through the button, the group div, and
+                the pointer-events-none title bar behind it, landing on the
+                Leaflet map underneath - MapClickHandler read that as "tapped
+                away from a pin" and closed the whole detail view back to
+                the overview. Sized generously (44px target) since a small
+                disabled hit target made stray taps here more likely in the
+                first place. */}
+            <span onClick={() => stepOlder?.()} className="rounded-full">
+              <button
+                type="button"
+                disabled={!stepOlder}
+                aria-label="Älterer Standort"
+                title="Älterer Standort"
+                className="rounded-full p-2.5 text-[var(--text)] disabled:opacity-30"
+              >
+                <ChevronDownIcon className="h-5 w-5" />
+              </button>
+            </span>
+            <span onClick={() => stepNewer?.()} className="rounded-full">
+              <button
+                type="button"
+                disabled={!stepNewer}
+                aria-label="Neuerer Standort"
+                title="Neuerer Standort"
+                className="rounded-full p-2.5 text-[var(--text)] disabled:opacity-30"
+              >
+                <ChevronUpIcon className="h-5 w-5" />
+              </button>
+            </span>
           </div>
         )}
       </div>
