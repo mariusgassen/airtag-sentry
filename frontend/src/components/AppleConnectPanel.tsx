@@ -19,12 +19,18 @@ export interface AppleConnectAdapter {
     // transient network error, ...), cleared again on the next success.
     last_sync_error?: string | null
   }>
-  login: (email: string, password: string) => Promise<AppleLoginResult>
+  login: (email: string, password: string, includeFamily?: boolean) => Promise<AppleLoginResult>
   // Only present where a live-login fallback exists (AirTag tracking) - lets
   // the user upload a session file generated elsewhere (e.g. on a machine
   // with genuine Apple hardware) instead of the live SRP+2FA handshake, for
   // when that keeps failing with Apple's GSA 503 (see tasks/roadmap.md #12).
   importSession?: (sessionJson: unknown) => Promise<void>
+  // Only meaningful for the owner-tracking adapter - pyicloud's underlying
+  // PyiCloudService otherwise defaults to pulling Family Sharing members'
+  // devices in alongside the account's own (see owner_tracking.py). Presence
+  // of this flag is what shows the "shared with me" checkbox below; the
+  // AirTag adapter (FindMy.py, no such concept) omits it.
+  familySharingToggle?: boolean
   // Absent for adapters whose underlying login never offers a method choice
   // (owner tracking/pyicloud) - the wizard skips straight to the code step.
   selectMethod?: (methodIndex: number) => Promise<void>
@@ -48,6 +54,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   const [step, setStep] = useState<Step>('credentials')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [includeFamily, setIncludeFamily] = useState(false)
   const [methods, setMethods] = useState<AppleTwoFactorMethod[]>([])
   const [code, setCode] = useState('')
   const [saving, setSaving] = useState(false)
@@ -72,6 +79,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
     setStep('credentials')
     setEmail('')
     setPassword('')
+    setIncludeFamily(false)
     setMethods([])
     setCode('')
     setError(null)
@@ -85,7 +93,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
     setSaving(true)
     setError(null)
     try {
-      const result = await adapter.login(email.trim(), password)
+      const result = await adapter.login(email.trim(), password, includeFamily)
       if (!result.requires_2fa) {
         await refreshStatus()
         setOpen(false)
@@ -229,6 +237,16 @@ export function AppleConnectPanel({ title, adapter }: Props) {
                 onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
                 className="mb-2 w-full rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
               />
+              {adapter.familySharingToggle && (
+                <label className="mb-2 flex items-center gap-2 text-[0.8rem] text-[var(--text-secondary)]">
+                  <input
+                    type="checkbox"
+                    checked={includeFamily}
+                    onChange={(e) => setIncludeFamily(e.target.checked)}
+                  />
+                  Auch mit mir geteilte Geräte (Familienfreigabe) einbeziehen
+                </label>
+              )}
               <button
                 type="button"
                 onClick={handleLogin}

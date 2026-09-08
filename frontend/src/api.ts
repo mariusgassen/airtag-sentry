@@ -282,11 +282,15 @@ export async function getOwnerAppleStatus(): Promise<{
   return (await apiFetch('/api/apple/owner/status')).json()
 }
 
-export async function ownerAppleLogin(appleId: string, password: string): Promise<AppleLoginResult> {
+export async function ownerAppleLogin(
+  appleId: string,
+  password: string,
+  includeFamily = false,
+): Promise<AppleLoginResult> {
   return (
     await apiFetch('/api/apple/owner/login', {
       method: 'POST',
-      body: JSON.stringify({ apple_id: appleId, password }),
+      body: JSON.stringify({ apple_id: appleId, password, include_family: includeFamily }),
     })
   ).json()
 }

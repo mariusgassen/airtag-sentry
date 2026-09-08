@@ -62,6 +62,12 @@ class PushSubscription:
 class OwnerAppleCredentials:
     apple_id: str
     encrypted_password: str
+    # Whether pyicloud's PyiCloudService is built with with_family=True, which
+    # pulls Family Sharing members' devices into api.devices alongside the
+    # account's own. Off by default (opt-in via the connect dialog's
+    # checkbox) - this app only ever wants "my own" devices, see CLAUDE.md's
+    # single-user constraint.
+    include_family_devices: bool = False
     # Bookkeeping for the background poller's live Apple calls (see
     # owner_tracking.fetch_owner_device_locations) - last_sync_at advances on
     # every *attempted* listing, success or failure; last_sync_error holds the
@@ -344,23 +350,26 @@ def list_keyed_airtag_ids(conn: psycopg.Connection) -> set[str]:
         return {row[0] for row in cur.fetchall()}
 
 
-def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypted_password: str) -> None:
+def set_owner_apple_credentials(
+    conn: psycopg.Connection, apple_id: str, encrypted_password: str, include_family_devices: bool = False
+) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO owner_apple_credentials
-                (id, apple_id, encrypted_password, updated_at, last_sync_at, last_sync_error)
-            VALUES (1, %s, %s, now(), NULL, NULL)
+                (id, apple_id, encrypted_password, include_family_devices, updated_at, last_sync_at, last_sync_error)
+            VALUES (1, %s, %s, %s, now(), NULL, NULL)
             ON CONFLICT (id) DO UPDATE
                 SET apple_id = EXCLUDED.apple_id,
                     encrypted_password = EXCLUDED.encrypted_password,
+                    include_family_devices = EXCLUDED.include_family_devices,
                     updated_at = now(),
                     -- A fresh login shouldn't carry forward a previous
                     -- connection's stale sync error.
                     last_sync_at = NULL,
                     last_sync_error = NULL
             """,
-            (apple_id, encrypted_password),
+            (apple_id, encrypted_password, include_family_devices),
         )
     conn.commit()
 
@@ -368,7 +377,7 @@ def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypt
 def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT apple_id, encrypted_password, last_sync_at, last_sync_error "
+            "SELECT apple_id, encrypted_password, include_family_devices, last_sync_at, last_sync_error "
             "FROM owner_apple_credentials WHERE id = 1"
         )
         row = cur.fetchone()
