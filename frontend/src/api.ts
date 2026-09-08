@@ -256,6 +256,7 @@ export async function ownerAppleDisconnect(): Promise<void> {
 export interface TelegramStatus {
   connected: boolean
   chat_id: string | null
+  bot_commands_enabled: boolean
 }
 
 export async function getTelegramStatus(): Promise<TelegramStatus> {
@@ -273,6 +274,14 @@ export async function setTelegramCredentials(botToken: string, chatId: string): 
 
 export async function deleteTelegramCredentials(): Promise<void> {
   await apiFetch('/api/notifications/telegram', { method: 'DELETE' })
+}
+
+export async function enableTelegramCommands(): Promise<void> {
+  await apiFetch('/api/notifications/telegram/commands', { method: 'POST' })
+}
+
+export async function disableTelegramCommands(): Promise<void> {
+  await apiFetch('/api/notifications/telegram/commands', { method: 'DELETE' })
 }
 
 export async function getVapidPublicKey(): Promise<string | null> {

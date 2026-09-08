@@ -34,6 +34,7 @@ from airtag_sentry.db import (
     set_owner_apple_credentials,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_telegram_bot_commands,
     set_telegram_credentials,
     update_settings,
     upsert_owner_devices,
@@ -415,6 +416,8 @@ def test_telegram_credentials_set_get_delete_round_trip(conn):
     stored = get_telegram_credentials(conn)
     assert stored.bot_token_encrypted == "enc-token-1"
     assert stored.chat_id == "12345"
+    assert stored.bot_commands_enabled is False
+    assert stored.webhook_secret is None
 
     # Setting again replaces rather than duplicating (single-row table).
     set_telegram_credentials(conn, "enc-token-2", "67890")
@@ -424,6 +427,28 @@ def test_telegram_credentials_set_get_delete_round_trip(conn):
 
     delete_telegram_credentials(conn)
     assert get_telegram_credentials(conn) is None
+
+
+def test_telegram_bot_commands_set_round_trip(conn):
+    set_telegram_credentials(conn, "enc-token", "12345")
+
+    set_telegram_bot_commands(conn, True, "webhook-secret-1")
+    stored = get_telegram_credentials(conn)
+    assert stored.bot_commands_enabled is True
+    assert stored.webhook_secret == "webhook-secret-1"
+
+    set_telegram_bot_commands(conn, False, None)
+    stored = get_telegram_credentials(conn)
+    assert stored.bot_commands_enabled is False
+    assert stored.webhook_secret is None
+
+    # Reconnecting (a new bot token) resets bot-commands state - any webhook
+    # registered against the old token is no longer valid.
+    set_telegram_bot_commands(conn, True, "webhook-secret-2")
+    set_telegram_credentials(conn, "enc-token-new", "12345")
+    stored = get_telegram_credentials(conn)
+    assert stored.bot_commands_enabled is False
+    assert stored.webhook_secret is None
 
 
 def test_settings_table_stays_single_row(conn):

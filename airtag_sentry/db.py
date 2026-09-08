@@ -68,6 +68,12 @@ class OwnerAppleCredentials:
 class TelegramCredentials:
     bot_token_encrypted: str
     chat_id: str
+    bot_commands_enabled: bool
+    # Anti-spoofing token handed to Telegram's setWebhook and compared against
+    # the X-Telegram-Bot-Api-Secret-Token header on every inbound webhook
+    # request - not user secret material, so unlike bot_token_encrypted this
+    # isn't encrypted at rest. None while bot_commands_enabled is false.
+    webhook_secret: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -344,14 +350,20 @@ def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:
 
 
 def set_telegram_credentials(conn: psycopg.Connection, bot_token_encrypted: str, chat_id: str) -> None:
+    # Reconnecting (e.g. a new bot token) invalidates any webhook already
+    # registered against the old token, so drop bot-commands state too - the
+    # dashboard's enable flow re-registers it against the new credentials.
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO telegram_settings (id, bot_token_encrypted, chat_id, updated_at)
-            VALUES (1, %s, %s, now())
+            INSERT INTO telegram_settings
+                (id, bot_token_encrypted, chat_id, bot_commands_enabled, webhook_secret, updated_at)
+            VALUES (1, %s, %s, false, NULL, now())
             ON CONFLICT (id) DO UPDATE
                 SET bot_token_encrypted = EXCLUDED.bot_token_encrypted,
                     chat_id = EXCLUDED.chat_id,
+                    bot_commands_enabled = false,
+                    webhook_secret = NULL,
                     updated_at = now()
             """,
             (bot_token_encrypted, chat_id),
@@ -361,7 +373,10 @@ def set_telegram_credentials(conn: psycopg.Connection, bot_token_encrypted: str,
 
 def get_telegram_credentials(conn: psycopg.Connection) -> TelegramCredentials | None:
     with conn.cursor() as cur:
-        cur.execute("SELECT bot_token_encrypted, chat_id FROM telegram_settings WHERE id = 1")
+        cur.execute(
+            "SELECT bot_token_encrypted, chat_id, bot_commands_enabled, webhook_secret "
+            "FROM telegram_settings WHERE id = 1"
+        )
         row = cur.fetchone()
         return TelegramCredentials(*row) if row else None
 
@@ -369,6 +384,21 @@ def get_telegram_credentials(conn: psycopg.Connection) -> TelegramCredentials | 
 def delete_telegram_credentials(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM telegram_settings WHERE id = 1")
+    conn.commit()
+
+
+def set_telegram_bot_commands(conn: psycopg.Connection, enabled: bool, webhook_secret: str | None) -> None:
+    """Enable/disable the inbound bot-commands webhook. Only meaningful once
+    Telegram credentials already exist (the row must be present)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE telegram_settings
+                SET bot_commands_enabled = %s, webhook_secret = %s, updated_at = now()
+                WHERE id = 1
+            """,
+            (enabled, webhook_secret),
+        )
     conn.commit()
 
 
