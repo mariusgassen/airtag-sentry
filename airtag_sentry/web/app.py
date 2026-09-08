@@ -268,6 +268,11 @@ class AppleSessionImportIn(BaseModel):
 class OwnerLoginIn(BaseModel):
     apple_id: str
     password: str
+    # Mirrors the connect dialog's "shared with me" checkbox - see
+    # owner_tracking.start_owner_login. Off by default: pyicloud's
+    # PyiCloudService otherwise defaults to with_family=True, pulling Family
+    # Sharing members' devices into api.devices alongside the account's own.
+    include_family: bool = False
 
 
 class OwnerDeviceEnabledIn(BaseModel):
@@ -920,7 +925,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def owner_apple_login(body: OwnerLoginIn):
         with get_conn(cfg.database_url) as conn:
             try:
-                result = owner_tracking.start_owner_login(cfg, conn, body.apple_id, body.password)
+                result = owner_tracking.start_owner_login(
+                    cfg, conn, body.apple_id, body.password, body.include_family
+                )
             except Exception as exc:
                 logger.exception("Owner Apple login failed.")
                 raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc

@@ -28,6 +28,7 @@ const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
   login: ownerAppleLogin,
   submitCode: ownerAppleSubmitTwoFactorCode,
   disconnect: ownerAppleDisconnect,
+  familySharingToggle: true,
 }
 
 export function SettingsAppleAccounts() {

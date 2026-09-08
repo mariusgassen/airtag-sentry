@@ -73,14 +73,15 @@ logger = logging.getLogger(__name__)
 _pending_api = None
 _pending_apple_id: str | None = None
 _pending_password: str | None = None
+_pending_include_family: bool = False
 
 
-def _build_api(apple_id: str, password: str, session_dir: str):
+def _build_api(apple_id: str, password: str, session_dir: str, include_family: bool = False):
     from pyicloud import PyiCloudService
     from pyicloud.exceptions import PyiCloudFailedLoginException
 
     try:
-        return PyiCloudService(apple_id, password, cookie_directory=session_dir)
+        return PyiCloudService(apple_id, password, cookie_directory=session_dir, with_family=include_family)
     except PyiCloudFailedLoginException as exc:
         # Apple's own error here ("-20101: Invalid email/password combination") is
         # the same generic message for a genuinely wrong password AND for the most
@@ -94,31 +95,37 @@ def _build_api(apple_id: str, password: str, session_dir: str):
         ) from exc
 
 
-def _persist(cfg: Config, conn, apple_id: str, password: str) -> None:
+def _persist(cfg: Config, conn, apple_id: str, password: str, include_family: bool) -> None:
     encrypted = keystore.encrypt(cfg.key_encryption_key, password)
-    set_owner_apple_credentials(conn, apple_id, encrypted)
+    set_owner_apple_credentials(conn, apple_id, encrypted, include_family)
 
 
-def start_owner_login(cfg: Config, conn, apple_id: str, password: str) -> dict:
+def start_owner_login(cfg: Config, conn, apple_id: str, password: str, include_family: bool = False) -> dict:
     """Submit the owner's Apple ID credentials. Persists them immediately (encrypted)
     if no 2FA is required, otherwise stashes the in-progress session for
-    submit_owner_2fa_code()."""
-    global _pending_api, _pending_apple_id, _pending_password
+    submit_owner_2fa_code().
 
-    api = _build_api(apple_id, password, cfg.apple.owner_session_dir)
+    include_family mirrors the connect dialog's "shared with me" checkbox - it's
+    pyicloud's PyiCloudService with_family flag, which otherwise defaults to True
+    and pulls Family Sharing members' devices into api.devices alongside the
+    account's own."""
+    global _pending_api, _pending_apple_id, _pending_password, _pending_include_family
+
+    api = _build_api(apple_id, password, cfg.apple.owner_session_dir, include_family)
     if api.requires_2fa:
         _pending_api = api
         _pending_apple_id = apple_id
         _pending_password = password
+        _pending_include_family = include_family
         return {"requires_2fa": True}
 
-    _persist(cfg, conn, apple_id, password)
+    _persist(cfg, conn, apple_id, password, include_family)
     return {"requires_2fa": False}
 
 
 def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
     """Complete the login with the received code and persist the encrypted credentials."""
-    global _pending_api, _pending_apple_id, _pending_password
+    global _pending_api, _pending_apple_id, _pending_password, _pending_include_family
     if _pending_api is None:
         raise RuntimeError("No owner Apple login in progress.")
 
@@ -131,10 +138,11 @@ def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
                 "may be required again sooner than usual."
             )
 
-    _persist(cfg, conn, _pending_apple_id, _pending_password)
+    _persist(cfg, conn, _pending_apple_id, _pending_password, _pending_include_family)
     _pending_api = None
     _pending_apple_id = None
     _pending_password = None
+    _pending_include_family = False
 
 
 def connection_status(conn) -> dict:
@@ -172,7 +180,7 @@ def _connect(cfg: Config, conn):
         logger.debug("Owner tracking not connected - no credentials stored.")
         return None
     password = keystore.decrypt(cfg.key_encryption_key, creds.encrypted_password)
-    return _build_api(creds.apple_id, password, cfg.apple.owner_session_dir)
+    return _build_api(creds.apple_id, password, cfg.apple.owner_session_dir, creds.include_family_devices)
 
 
 def _snapshot_devices(api) -> list[dict[str, Any]]:

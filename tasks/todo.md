@@ -2486,3 +2486,38 @@ never surface a device no matter how it was invoked.
   changes - `fetch_owner_device_location_history` already existed.
 - Verified: `pytest tests/test_telegram_bot.py` (10 tests, all passing).
   Did not re-run the full suite (unrelated modules untouched).
+
+## v35: Owner-tracking connect dialog can exclude Family Sharing devices
+
+pyicloud's `PyiCloudService` defaults to `with_family=True`, which pulls
+Family Sharing members' devices into `api.devices` alongside the account's
+own - `owner_tracking._build_api` never overrode this, so a connected
+account with location sharing set up listed/tracked other people's devices
+too, not just "mine."
+
+- [x] New `owner_apple_credentials.include_family_devices` column (migration
+      `7c1e2b6a4f0d`, defaults to `false`), threaded through
+      `start_owner_login`/`submit_owner_2fa_code`/`_connect` into pyicloud's
+      `with_family` flag.
+- [x] `POST /api/apple/owner/login` takes an `include_family` field
+      (default `false`).
+- [x] Dashboard: the owner-tracking connect dialog (`AppleConnectPanel.tsx`)
+      gained a "shared with me" checkbox, shown only for that adapter via a
+      new `familySharingToggle` adapter flag - the AirTag login adapter
+      (`FindMy.py`, no such concept) is unaffected.
+
+## Review (v35)
+
+- Backend: `db.py`, `owner_tracking.py`, `web/app.py`, new alembic
+  migration. Frontend: `api.ts`, `AppleConnectPanel.tsx`,
+  `SettingsAppleAccounts.tsx`. `tests/test_owner_tracking.py`'s
+  `PyiCloudService` stub updated to accept the new `with_family` kwarg.
+- Verified: `pytest` against a real local Postgres (migration applies
+  cleanly to head, full suite green except one pre-existing, unrelated
+  failure - `test_fingerprinted_asset_is_cached_immutably` fails identically
+  on `main`, before this change, whenever `web/static/assets` already holds
+  real built files instead of being empty). `cd frontend && npx tsc -b &&
+  npx vite build && npx oxlint` clean (same 4 pre-existing set-state-in-
+  effect warnings as v33, no new ones). `docker compose config` with a
+  throwaway `.env` parses cleanly. Manual browser click-through of the new
+  checkbox not verified in this sandbox (no real Apple ID available here).
