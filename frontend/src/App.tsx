@@ -222,6 +222,22 @@ export default function App() {
     setActiveTab('objects')
   }
 
+  // Picking a history-list entry already re-centers the map on it (see
+  // MapCard.tsx/DeviceMapCard.tsx's PanToSelection), but on mobile that pan
+  // happened invisibly behind the sheet, which stayed open over the map -
+  // minimize it too so the now-centered pin is actually visible (a no-op on
+  // desktop, where .sheet[data-state="minimized"] only takes effect under
+  // index.css's mobile media query).
+  function handleSelectReport(id: number) {
+    setSelectedReportId(id)
+    setSheetState('minimized')
+  }
+
+  function handleSelectDeviceLocation(recordedAt: string) {
+    setSelectedDeviceLocationKey(recordedAt)
+    setSheetState('minimized')
+  }
+
   async function handleCreate(name: string) {
     const created = await createAirtag(name)
     await refreshAirtags()
@@ -435,7 +451,7 @@ export default function App() {
                 status={statuses[currentAirtag.id] ?? null}
                 reports={reports}
                 selectedReportId={selectedReportId}
-                onSelectReport={setSelectedReportId}
+                onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
                 onChanged={async () => {
                   await refreshAirtags()
@@ -451,7 +467,7 @@ export default function App() {
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 history={ownerLocationHistories[selectedDevice.id] ?? null}
                 selectedLocationKey={selectedDeviceLocationKey}
-                onSelectLocation={setSelectedDeviceLocationKey}
+                onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}
                 onChanged={refreshOwnerDevices}
               />

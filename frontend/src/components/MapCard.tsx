@@ -152,8 +152,28 @@ export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) 
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <Marker position={here} icon={currentLocationIcon}>
-        <Popup>Aktueller Standort</Popup>
+      <Marker position={here} icon={currentLocationIcon} eventHandlers={{ click: centerMarkerOnClick }}>
+        {/* autoPan off: centerMarkerOnClick above already centers this pin
+            explicitly on click. Same info shape as every other pin's popup
+            in the app (address via AddressLine, "In Karten öffnen") rather
+            than the bare title this used to be - this is a real, if
+            approximate, position (the browser's own geolocation), not just
+            filler for an AirTag/device with nothing to show yet. */}
+        <Popup autoPan={false}>
+          <div className={POPUP_WIDTH_CLASS}>
+            <p className="mb-2 text-[0.95rem] font-semibold">Aktueller Standort</p>
+            <AddressLine lat={here[0]} lon={here[1]} />
+            <a
+              href={mapsUrl(here[0], here[1], 'Aktueller Standort')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
+            >
+              <LocationArrowIcon className="h-3.5 w-3.5" />
+              In Karten öffnen
+            </a>
+          </div>
+        </Popup>
       </Marker>
       <MapClickHandler onMapClick={onMapClick} />
       <InvalidateSizeOnResize />
