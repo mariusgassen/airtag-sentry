@@ -2522,7 +2522,56 @@ too, not just "mine."
   throwaway `.env` parses cleanly. Manual browser click-through of the new
   checkbox not verified in this sandbox (no real Apple ID available here).
 
-## v36: Switch dashboard login from GitHub OAuth to OIDC (Authentik)
+## v36: Trail color, clickable history points, fix stepper's WebKit tap-through
+
+Three map-navigation polish items, all applied to both `MapCard.tsx`
+(AirTag) and `DeviceMapCard.tsx` (owner device) per CLAUDE.md's parity rule.
+
+- [x] The selected item's own route (`Polyline`) now draws in its own
+      chosen/hash-derived color (`mapIcons.ts`'s new `deviceColor()`,
+      factored out of `airtagPinIcon`) instead of a hardcoded accent blue -
+      matches its pin badge, so the trail reads as visually "theirs."
+      Background trails for *other* devices shown for context (the dashed
+      ones in `MapCard.tsx`/`OverviewMap.tsx`) are unchanged - those depict
+      other objects, not the one just opened.
+- [x] New `HistoryPoints` component (`MapCard.tsx`, shared with
+      `DeviceMapCard.tsx`): small, low-opacity `CircleMarker` dots at every
+      history point other than the currently-displayed one (which already
+      has its own full pin/popup), clickable to select that point directly
+      on the map instead of only via the sidebar history list. Wired to the
+      same `onSelectReport`/`onSelectLocation` handlers `App.tsx` already
+      used for the list, so map-click selection behaves identically
+      (centers the pin, minimizes the sheet on mobile).
+- [x] Fixed the title-bar Älter/Neuer stepper jumping back out to the
+      all-devices overview when tapped at the oldest/newest report on iOS:
+      the buttons are real `disabled` elements floating directly over the
+      Leaflet map, and a disabled control is excluded from hit-testing
+      (browsers treat it as `pointer-events: none`), so the tap fell through
+      to whatever's rendered underneath instead - the Leaflet map itself,
+      whose `MapClickHandler` read it as "tapped away from a pin" and closed
+      the whole detail view. Kept the real `disabled` attribute (native
+      dimmed style) but moved the `onClick` to a wrapping `<span>` around
+      each button: since the span shares the disabled button's box and
+      paints directly behind it, that's where the fallen-through tap now
+      lands instead of the map, and it safely no-ops there
+      (`stepOlder?.()`/`stepNewer?.()` are already null at the boundary).
+      Also enlarged both buttons (`p-1.5`/`h-4 w-4` icon ->
+      `p-2.5`/`h-5 w-5`, ~40px touch target) - a small disabled hit target
+      made stray taps here more likely in the first place.
+
+## Review (v36)
+
+- Frontend only: `mapIcons.ts`, `MapCard.tsx`, `DeviceMapCard.tsx`,
+  `App.tsx`. No backend/schema changes.
+- Verified: `cd frontend && npx tsc -b && npx vite build && npx oxlint`
+  clean (same 4 pre-existing set-state-in-effect warnings, no new ones).
+  Did not run a live browser click-through in this sandbox (no Apple
+  ID/Postgres/OAuth setup available here to drive real report data) - the
+  stepper fix is a diagnosed root-cause fix (WebKit's disabled-control
+  tap-through) rather than one reproduced live; worth a real-device check
+  on the next iOS test pass.
+
+## v37: Switch dashboard login from GitHub OAuth to OIDC (Authentik)
 
 The dashboard's single-user login was hardcoded to GitHub's OAuth API
 (authorize/token/user endpoints, `login` claim). Replaced with a generic
@@ -2561,7 +2610,7 @@ against Authentik, with an application/provider already set up there.
       env vars and an Authentik-flavored setup flow (issuer, client id/
       secret, allowed username, redirect URI).
 
-## Review (v36)
+## Review (v37)
 
 - Backend only: `config.py`, `web/app.py`, `pyproject.toml`,
   `tests/test_config.py`, `tests/test_web_auth.py`. No schema/DB changes,
