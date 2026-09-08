@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from airtag_sentry import auth, keystore, owner_tracking
+from airtag_sentry import auth, keystore, owner_tracking, telegram_bot
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     AppSettings,
@@ -50,6 +50,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_key,
+    set_telegram_bot_commands,
     set_telegram_credentials,
     update_settings,
 )
@@ -110,6 +111,7 @@ _PUBLIC_PATHS = {
     "/sw.js",
     "/favicon.ico",
     "/health",
+    "/api/telegram/webhook",
 }
 
 
@@ -129,6 +131,10 @@ def _is_public(path: str) -> bool:
 
     `/health` is the same story for a different caller: Coolify's Docker
     healthcheck probes it directly, with no session cookie to send.
+
+    `/api/telegram/webhook` is the same again for Telegram's own servers -
+    it authenticates itself via the X-Telegram-Bot-Api-Secret-Token header
+    (see telegram_webhook()) instead of a session.
     """
     return path in _PUBLIC_PATHS or path.startswith("/icons/")
 
@@ -864,7 +870,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         TELEGRAM_CHAT_ID env vars. The bot token itself is never returned."""
         with get_conn(cfg.database_url) as conn:
             creds = get_telegram_credentials(conn)
-        return {"connected": creds is not None, "chat_id": creds.chat_id if creds else None}
+        return {
+            "connected": creds is not None,
+            "chat_id": creds.chat_id if creds else None,
+            "bot_commands_enabled": creds.bot_commands_enabled if creds else False,
+        }
 
     @app.post("/api/notifications/telegram")
     def telegram_connect(body: TelegramCredentialsIn):
@@ -872,13 +882,88 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Bot-Token und Chat-ID dürfen nicht leer sein.")
         encrypted = keystore.encrypt(cfg.key_encryption_key, body.bot_token.strip())
         with get_conn(cfg.database_url) as conn:
+            # Reconnecting invalidates any webhook already registered against
+            # the previous token - set_telegram_credentials resets
+            # bot_commands_enabled/webhook_secret, so re-enable from the panel
+            # if still wanted.
             set_telegram_credentials(conn, encrypted, body.chat_id.strip())
-        return {"connected": True, "chat_id": body.chat_id.strip()}
+        return {"connected": True, "chat_id": body.chat_id.strip(), "bot_commands_enabled": False}
 
     @app.delete("/api/notifications/telegram")
     def telegram_disconnect():
         with get_conn(cfg.database_url) as conn:
+            creds = get_telegram_credentials(conn)
+            if creds is not None and creds.bot_commands_enabled:
+                bot_token = keystore.decrypt(cfg.key_encryption_key, creds.bot_token_encrypted)
+                try:
+                    telegram_bot.delete_webhook(bot_token)
+                except requests.RequestException:
+                    logger.exception("Failed to delete Telegram webhook while disconnecting; continuing.")
             delete_telegram_credentials(conn)
+        return {"ok": True}
+
+    @app.post("/api/notifications/telegram/commands")
+    def telegram_commands_enable(request: Request):
+        """Registers a webhook with Telegram so the bot can respond to /list,
+        /where, /help (see telegram_bot.py). The webhook URL is derived from
+        this very request's host, not a config value - cli.py's `serve` runs
+        uvicorn with proxy_headers=True, so request.base_url already reflects
+        the public host/scheme behind Coolify's edge TLS termination."""
+        with get_conn(cfg.database_url) as conn:
+            creds = get_telegram_credentials(conn)
+            if creds is None:
+                raise HTTPException(status_code=400, detail="Telegram ist noch nicht verbunden.")
+            bot_token = keystore.decrypt(cfg.key_encryption_key, creds.bot_token_encrypted)
+            webhook_secret = secrets.token_urlsafe(32)
+            webhook_url = f"{str(request.base_url).rstrip('/')}/api/telegram/webhook"
+            try:
+                telegram_bot.set_webhook(bot_token, webhook_url, webhook_secret)
+            except requests.RequestException as exc:
+                logger.exception("Failed to register Telegram webhook.")
+                raise HTTPException(
+                    status_code=502, detail="Telegram-Webhook konnte nicht registriert werden."
+                ) from exc
+            set_telegram_bot_commands(conn, True, webhook_secret)
+        return {"bot_commands_enabled": True}
+
+    @app.delete("/api/notifications/telegram/commands")
+    def telegram_commands_disable():
+        with get_conn(cfg.database_url) as conn:
+            creds = get_telegram_credentials(conn)
+            if creds is not None and creds.bot_commands_enabled:
+                bot_token = keystore.decrypt(cfg.key_encryption_key, creds.bot_token_encrypted)
+                try:
+                    telegram_bot.delete_webhook(bot_token)
+                except requests.RequestException:
+                    logger.exception("Failed to delete Telegram webhook; disabling locally anyway.")
+            set_telegram_bot_commands(conn, False, None)
+        return {"bot_commands_enabled": False}
+
+    @app.post("/api/telegram/webhook")
+    async def telegram_webhook(request: Request):
+        """Public (see _PUBLIC_PATHS) - Telegram can't send our session
+        cookie, so this authenticates the request itself via the secret
+        Telegram echoes back in X-Telegram-Bot-Api-Secret-Token (set once in
+        telegram_commands_enable via setWebhook's secret_token). Always
+        returns 200 once the request is confirmed to be genuinely from
+        Telegram, since a non-2xx makes Telegram retry the same update."""
+        secret_header = request.headers.get("x-telegram-bot-api-secret-token")
+        with get_conn(cfg.database_url) as conn:
+            creds = get_telegram_credentials(conn)
+            if (
+                creds is None
+                or not creds.bot_commands_enabled
+                or not creds.webhook_secret
+                or secret_header is None
+                or not secrets.compare_digest(secret_header, creds.webhook_secret)
+            ):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            bot_token = keystore.decrypt(cfg.key_encryption_key, creds.bot_token_encrypted)
+            try:
+                update = await request.json()
+                telegram_bot.handle_update(conn, bot_token, creds.chat_id, update)
+            except Exception:
+                logger.exception("Telegram webhook handler failed.")
         return {"ok": True}
 
     @app.get("/api/push/vapid-public-key")
