@@ -2143,3 +2143,44 @@ in Coolify), and it meant only `dashboard` had a Docker healthcheck since
   frontend code, so nothing there could have regressed. Re-run after
   merging in v27's Telegram changes: still nothing to verify there, since
   this merge touches no frontend code either.
+
+## v29: Fix owner-device polling silently blocked by a missing AirTag session
+
+- [x] `tracker.py`: `poll_once()` used to call `restore_account(cfg)` (the
+      AirTag-tracking Apple session) as its very first line, before even
+      opening a DB connection. If the AirTag session had never been
+      connected (e.g. a user who only ever connected owner tracking from
+      Settings ⚙️ → Apple-Konten), this raised `FileNotFoundError`
+      immediately and aborted the whole poll - so `_update_owner_devices()`
+      never ran and owner-device locations were never historized, even
+      though `owner_tracking.py`'s own module docstring says it's "entirely
+      optional" and independent of AirTag tracking. Reordered `poll_once()`
+      to open the DB connection and run `_update_owner_devices()`
+      unconditionally first, then check `auth.is_connected(cfg)` (already
+      used by `/api/apple/status`) before restoring the AirTag session and
+      polling AirTags - skipping with an `INFO` log instead of raising when
+      no AirTag session exists yet. Also fixes noisy `ERROR [scheduler] Poll
+      failed` log spam on every poll cycle for a user who hasn't connected
+      AirTag tracking yet, since that's an expected "not configured" state,
+      not a real failure.
+
+## Review (v29)
+
+- 1 file touched in `airtag_sentry/` (`tracker.py`), 1 new test file
+  (`tests/test_tracker.py`), no migration, no frontend changes, no new
+  dependencies - a pure control-flow fix.
+- Root cause confirmed by reading the reported log: `POST
+  /api/apple/owner/login` succeeded, but every subsequent poll still logged
+  `FileNotFoundError: No saved Apple session at data/account.json` -
+  the AirTag-tracking store path, not the owner-tracking one - because
+  `poll_once()` never got past `restore_account()` regardless of what
+  owner tracking was doing.
+- Verified: wrote `tests/test_tracker.py` with a regression test that
+  monkeypatches `restore_account`/`list_airtags` to raise if called, and
+  asserts `_update_owner_devices()` still runs when `is_connected(cfg)` is
+  `False`. Confirmed the test fails against the pre-fix code (`git stash`
+  reproduces the exact bug: `is_connected` doesn't even exist as a name
+  in the unpatched `tracker.py`, since it never checked it) and passes
+  after the fix. Started a local Postgres and ran the full suite for
+  real: `pytest` → 83 passed, 0 skipped. `docker compose config`
+  (throwaway `.env`) parses cleanly.
