@@ -45,6 +45,7 @@ from airtag_sentry.db import (
     fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
+    get_owner_apple_credentials,
     get_settings,
     get_telegram_credentials,
     latest_alert,
@@ -732,21 +733,34 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/owner-devices")
     def get_owner_devices():
-        """Live-refreshed list of the owner's Apple devices (Macs, iPhones, iPads,
+        """Persisted list of the owner's Apple devices (Macs, iPhones, iPads,
         Watches - see owner_tracking.py), each with whether it's enabled for
-        tracking. Empty if owner tracking isn't configured."""
-        try:
-            with get_conn(cfg.database_url) as conn:
-                devices = owner_tracking.list_owner_devices(cfg, conn)
-        except Exception as exc:
-            # list_owner_devices() does a *live* Apple call on every request (no
-            # caching) - a lapsed pyicloud session trust, a transient network
-            # error, or Apple-side rate limiting all surface here uncaught
-            # otherwise, leaving the dashboard's device list spinning forever
-            # with no feedback (see tasks/todo.md v20).
-            logger.exception("Failed to list owner Apple devices.")
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return [dataclasses.asdict(d) for d in devices]
+        tracking. Identity is refreshed by the background poller on every poll
+        cycle (owner_tracking.fetch_owner_device_locations), not by this route -
+        it used to do a *live* Apple call on every request instead, so a lapsed
+        pyicloud session, a transient network error, or Apple-side rate limiting
+        would blank the dashboard's whole device list (see tasks/todo.md).
+        Reading straight from Postgres means this route can't fail because of
+        Apple at all, and we only ever needed the persisted history anyway.
+        Empty if owner tracking isn't configured or the poller hasn't run yet.
+
+        Each device also gets `on_account`: whether it was present in the most
+        recent *successful* live sync (device.last_seen_at == credentials.
+        last_sync_at, the exact same poll's timestamp) - false means Apple
+        stopped listing it (e.g. removed from iCloud/Find My), distinct from
+        it simply being disabled or never having reported a location.
+        Unknown (reported as true) before any sync has ever run."""
+        with get_conn(cfg.database_url) as conn:
+            devices = db_list_owner_devices(conn)
+            creds = get_owner_apple_credentials(conn)
+        last_sync_at = creds.last_sync_at if creds else None
+        return [
+            {
+                **dataclasses.asdict(d),
+                "on_account": last_sync_at is None or d.last_seen_at == last_sync_at,
+            }
+            for d in devices
+        ]
 
     @app.put("/api/owner-devices")
     def set_owner_device_enabled_route(body: OwnerDeviceEnabledIn):

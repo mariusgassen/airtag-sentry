@@ -14,6 +14,10 @@ export interface AppleConnectAdapter {
     // OwnerDevicesPanel.tsx and owner_tracking.set_device_primary().
     primary_device_id?: string | null
     primary_device_name?: string | null
+    // Only meaningful for the owner-tracking adapter - the background
+    // poller's most recent live-Apple-call failure (lapsed session,
+    // transient network error, ...), cleared again on the next success.
+    last_sync_error?: string | null
   }>
   login: (email: string, password: string) => Promise<AppleLoginResult>
   // Only present where a live-login fallback exists (AirTag tracking) - lets
@@ -39,6 +43,7 @@ const METHOD_LABEL = (m: AppleTwoFactorMethod) =>
 export function AppleConnectPanel({ title, adapter }: Props) {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [primaryDeviceName, setPrimaryDeviceName] = useState<string | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>('credentials')
   const [email, setEmail] = useState('')
@@ -52,6 +57,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
     adapter.getStatus().then((s) => {
       setConnected(s.connected)
       setPrimaryDeviceName(s.primary_device_name ?? null)
+      setSyncError(s.last_sync_error ?? null)
     })
   }, [adapter])
 
@@ -59,6 +65,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
     const s = await adapter.getStatus()
     setConnected(s.connected)
     setPrimaryDeviceName(s.primary_device_name ?? null)
+    setSyncError(s.last_sync_error ?? null)
   }
 
   function reset() {
@@ -189,9 +196,16 @@ export function AppleConnectPanel({ title, adapter }: Props) {
       />
 
       {connected && (
-        <div className="flex items-center justify-between gap-3 border-t border-[var(--divider)] p-3">
-          <span className="text-sm">Verbunden</span>
-          <Switch checked onChange={handleDisconnect} />
+        <div className="border-t border-[var(--divider)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm">Verbunden</span>
+            <Switch checked onChange={handleDisconnect} />
+          </div>
+          {syncError && (
+            <p className="mt-2 text-[0.78rem] text-[var(--destructive)]">
+              Letzte Synchronisierung fehlgeschlagen: {syncError}
+            </p>
+          )}
         </div>
       )}
 

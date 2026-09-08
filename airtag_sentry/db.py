@@ -62,6 +62,15 @@ class PushSubscription:
 class OwnerAppleCredentials:
     apple_id: str
     encrypted_password: str
+    # Bookkeeping for the background poller's live Apple calls (see
+    # owner_tracking.fetch_owner_device_locations) - last_sync_at advances on
+    # every *attempted* listing, success or failure; last_sync_error holds the
+    # exception message from the most recent failure and is cleared on the
+    # next success. Surfaced via GET /api/apple/owner/status so a lapsed
+    # session or a transient Apple/network error is visible in the dashboard
+    # instead of only ever being logged.
+    last_sync_at: dt.datetime | None = None
+    last_sync_error: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,6 +104,14 @@ class OwnerDevice:
     display_name: str | None = None
     icon: str | None = None
     color: str | None = None
+    # Set to the poll's timestamp every time this device appears in a
+    # *successful* live Apple device listing (upsert_owner_devices, called for
+    # every device the account has - see owner_tracking.py). Comparing this
+    # against OwnerAppleCredentials.last_sync_at (the same poll's timestamp)
+    # tells whether this device was present in the most recent successful
+    # sync, or has gone missing from the account (e.g. removed from iCloud) -
+    # see GET /api/owner-devices' `on_account` field.
+    last_seen_at: dt.datetime | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -331,12 +348,17 @@ def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypt
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO owner_apple_credentials (id, apple_id, encrypted_password, updated_at)
-            VALUES (1, %s, %s, now())
+            INSERT INTO owner_apple_credentials
+                (id, apple_id, encrypted_password, updated_at, last_sync_at, last_sync_error)
+            VALUES (1, %s, %s, now(), NULL, NULL)
             ON CONFLICT (id) DO UPDATE
                 SET apple_id = EXCLUDED.apple_id,
                     encrypted_password = EXCLUDED.encrypted_password,
-                    updated_at = now()
+                    updated_at = now(),
+                    -- A fresh login shouldn't carry forward a previous
+                    -- connection's stale sync error.
+                    last_sync_at = NULL,
+                    last_sync_error = NULL
             """,
             (apple_id, encrypted_password),
         )
@@ -345,9 +367,25 @@ def set_owner_apple_credentials(conn: psycopg.Connection, apple_id: str, encrypt
 
 def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
     with conn.cursor() as cur:
-        cur.execute("SELECT apple_id, encrypted_password FROM owner_apple_credentials WHERE id = 1")
+        cur.execute(
+            "SELECT apple_id, encrypted_password, last_sync_at, last_sync_error "
+            "FROM owner_apple_credentials WHERE id = 1"
+        )
         row = cur.fetchone()
         return OwnerAppleCredentials(*row) if row else None
+
+
+def set_owner_apple_sync_status(conn: psycopg.Connection, synced_at: dt.datetime, error: str | None) -> None:
+    """Records the outcome of one live Apple device-listing attempt (success or
+    failure) - see OwnerAppleCredentials.last_sync_at/last_sync_error. A no-op if
+    owner tracking was disconnected in the meantime (no credentials row left to
+    update)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE owner_apple_credentials SET last_sync_at = %s, last_sync_error = %s WHERE id = 1",
+            (synced_at, error),
+        )
+    conn.commit()
 
 
 def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:
@@ -456,25 +494,32 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
     return settings
 
 
-def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict]) -> None:
+def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict], seen_at: dt.datetime) -> None:
     """Records/refreshes device identity (name, type) as seen in a live Apple
-    listing. Leaves `enabled` untouched - discovering a device never opts it
-    into tracking on its own."""
+    listing, and stamps `last_seen_at` with `seen_at` (the calling poll's own
+    timestamp, not a fresh `now()` per row) so every device from the same
+    listing gets the exact same value - that's what lets GET /api/owner-devices
+    tell "seen in the most recent successful sync" apart from "missing from it"
+    with a plain equality check against OwnerAppleCredentials.last_sync_at,
+    rather than a fuzzy age comparison. Leaves `enabled` untouched - discovering
+    a device never opts it into tracking on its own."""
     if not devices:
         return
+    rows = [{**device, "seen_at": seen_at} for device in devices]
     with conn.cursor() as cur:
         cur.executemany(
             """
-            INSERT INTO owner_devices (id, name, device_type)
-            VALUES (%(id)s, %(name)s, %(device_type)s)
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, device_type = EXCLUDED.device_type
+            INSERT INTO owner_devices (id, name, device_type, last_seen_at)
+            VALUES (%(id)s, %(name)s, %(device_type)s, %(seen_at)s)
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, device_type = EXCLUDED.device_type,
+                last_seen_at = EXCLUDED.last_seen_at
             """,
-            devices,
+            rows,
         )
     conn.commit()
 
 
-_OWNER_DEVICE_COLUMNS = "id, name, device_type, enabled, is_primary, display_name, icon, color"
+_OWNER_DEVICE_COLUMNS = "id, name, device_type, enabled, is_primary, display_name, icon, color, last_seen_at"
 
 
 def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:

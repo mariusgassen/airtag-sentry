@@ -1,6 +1,7 @@
 import pytest
 
 from airtag_sentry import owner_tracking
+from airtag_sentry.db import OwnerDevice
 
 
 def test_submit_owner_2fa_code_without_pending_login_raises():
@@ -27,9 +28,9 @@ def test_build_api_wraps_failed_login_with_app_specific_password_hint(monkeypatc
         owner_tracking._build_api("owner@example.com", "wrong-password", "/tmp/unused")
 
 
-def test_list_owner_devices_returns_empty_when_not_connected(monkeypatch):
+def test_fetch_owner_device_locations_returns_empty_when_not_connected(monkeypatch):
     monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: None)
-    assert owner_tracking.list_owner_devices(cfg=None, conn=None) == []
+    assert owner_tracking.fetch_owner_device_locations(cfg=None, conn=None) == []
 
 
 class _FakeStopEvent:
@@ -117,6 +118,80 @@ def test_snapshot_devices_forces_a_live_locate_before_reading_locations():
     owner_tracking._snapshot_devices(api)
 
     assert api.devices.refresh_calls == [True]
+
+
+def test_fetch_owner_device_locations_persists_identity_for_every_device_not_just_enabled(monkeypatch):
+    """Regression test: device identity used to only get persisted as a side
+    effect of a live *dashboard* request (the old list_owner_devices(), called
+    from GET /api/owner-devices) - if that request never succeeded, or nobody
+    ever opened the dashboard, owner_devices stayed empty forever even though
+    the background poller (tracker.py -> fetch_owner_device_locations) was
+    running the whole time, which also meant devices silently vanished from
+    the Objekte view and Telegram's /list (both pure DB reads). Now the
+    poller itself upserts identity for every device it sees, enabled or not,
+    on every poll cycle."""
+    enabled_device = _FakeDevice("d1", "MacBook Air", "Mac", {"latitude": 1.0, "longitude": 2.0})
+    disabled_device = _FakeDevice("d2", "iPhone", "iPhone", None)
+    api = _FakeApi([enabled_device, disabled_device])
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: object())
+    monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: api)
+
+    upserted = []
+    monkeypatch.setattr(
+        owner_tracking,
+        "upsert_owner_devices",
+        lambda conn, devices, seen_at: upserted.extend(devices),
+    )
+    sync_status_calls = []
+    monkeypatch.setattr(
+        owner_tracking,
+        "set_owner_apple_sync_status",
+        lambda conn, synced_at, error: sync_status_calls.append(error),
+    )
+    monkeypatch.setattr(
+        owner_tracking,
+        "db_list_owner_devices",
+        lambda conn: [
+            OwnerDevice(id="d1", name="MacBook Air", device_type="Mac", enabled=True, is_primary=False),
+            OwnerDevice(id="d2", name="iPhone", device_type="iPhone", enabled=False, is_primary=False),
+        ],
+    )
+
+    locations = owner_tracking.fetch_owner_device_locations(cfg=None, conn=None)
+
+    assert upserted == [
+        {"id": "d1", "name": "MacBook Air", "device_type": "Mac"},
+        {"id": "d2", "name": "iPhone", "device_type": "iPhone"},
+    ]
+    assert [loc.device_id for loc in locations] == ["d1"]
+    assert sync_status_calls == [None]  # a successful sync clears any prior error
+
+
+def test_fetch_owner_device_locations_records_sync_error_and_reraises(monkeypatch):
+    """Regression test: a live Apple call failure (lapsed pyicloud session,
+    transient network error, ...) used to only ever be logged by tracker.py's
+    broad except-and-log around the whole poll - invisible from the
+    dashboard. Now it's also persisted (OwnerAppleCredentials.last_sync_error,
+    surfaced via GET /api/apple/owner/status), and the exception still
+    propagates unchanged so tracker.py's existing handling is untouched."""
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: object())
+
+    def _raise_connect(cfg, conn):
+        raise RuntimeError("Invalid email/password combination.")
+
+    monkeypatch.setattr(owner_tracking, "_connect", _raise_connect)
+
+    recorded = []
+    monkeypatch.setattr(
+        owner_tracking,
+        "set_owner_apple_sync_status",
+        lambda conn, synced_at, error: recorded.append(error),
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid email/password combination"):
+        owner_tracking.fetch_owner_device_locations(cfg=None, conn=None)
+
+    assert recorded == ["Invalid email/password combination."]
 
 
 def test_pyicloud_imports_cleanly():

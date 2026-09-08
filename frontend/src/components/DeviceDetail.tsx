@@ -46,9 +46,13 @@ export function DeviceDetail({ device, location, history, onBack, onChanged }: P
             {deviceLabel(device)}
             {device.is_primary && <StarIcon className="h-4 w-4 text-[var(--accent)]" filled />}
           </h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            {location ? `Zuletzt gesehen ${formatRelative(location.recorded_at)}` : 'Kein Standort verfügbar'}
-          </p>
+          {device.on_account === false ? (
+            <p className="mt-1 text-sm text-[var(--destructive)]">Nicht mehr im iCloud-Account gefunden</p>
+          ) : (
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              {location ? `Zuletzt gesehen ${formatRelative(location.recorded_at)}` : 'Kein Standort verfügbar'}
+            </p>
+          )}
         </div>
 
         <div className="px-3">

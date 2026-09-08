@@ -125,13 +125,16 @@ def _handle_message(conn, bot_token: str, chat_id: str, message: dict) -> None:
 def _format_list(devices: list[OwnerDevice], airtags: list[AirtagRecord]) -> str:
     """Owner devices (self-location tracking) listed first, in their own section,
     ahead of AirTags - see tasks/todo.md for the bugfix that added devices here at
-    all (this command originally only knew about AirTags)."""
+    all (this command originally only knew about AirTags). Within that section,
+    the primary device (the one answer to "where am I") sorts first, matching the
+    dashboard's ObjectsList.tsx."""
     if not devices and not airtags:
         return "Keine Geräte oder AirTags konfiguriert."
 
     sections = []
     if devices:
-        lines = [f"{i + 1}. {'⭐ ' if d.is_primary else ''}{d.display_name or d.name}" for i, d in enumerate(devices)]
+        ordered = sorted(devices, key=lambda d: not d.is_primary)
+        lines = [f"{i + 1}. {'⭐ ' if d.is_primary else ''}{d.display_name or d.name}" for i, d in enumerate(ordered)]
         sections.append("Deine Geräte:\n" + "\n".join(lines))
     if airtags:
         lines = [f"{i + 1}. {a.name}" for i, a in enumerate(airtags)]
