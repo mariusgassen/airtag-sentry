@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type L from 'leaflet'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
@@ -206,27 +205,34 @@ export function MapCard({
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
 }) {
-  const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
-  const markerRef = useRef<L.Marker>(null)
+  // Memoized: reports itself is a stable reference across pure-selection
+  // re-renders (App.tsx only replaces it on an actual re-fetch), but
+  // `.map()` always returns a fresh array - without this, FitBounds below
+  // (keyed on this same array) re-fits the *whole* trail on every render,
+  // overriding PanToSelection's explicit centering on every older/newer
+  // step or history-list pick.
+  const positions = useMemo<[number, number][]>(() => reports.map((r) => [r.lat, r.lon]), [reports])
+  const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
+  const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
+  // Undefined when there are no reports at all - only read once positions
+  // is confirmed non-empty below, but the hook call itself (Rules of Hooks)
+  // has to run unconditionally either way.
+  const displayed = reports[displayedIndex] as Report | undefined
+  // Memoized: identical lat/lon must keep the same array reference across
+  // renders, since it's also the standalone Popup's `position` prop below -
+  // react-leaflet fully unbinds/rebinds that popup whenever the reference
+  // changes (see the Popup's own comment), so a fresh array every render
+  // would reopen it constantly instead of only on a real position change.
+  const displayedPosition = useMemo<[number, number]>(
+    () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
+    [displayed?.lat, displayed?.lon],
+  )
 
-  // Open the marker's popup as soon as there's a position to show it for -
-  // the default (latest-report) view included, not just an explicit
-  // selection - so the "current" pin shows its info immediately on
-  // drilling in, same as after stepping older/newer (clicking the map
-  // marker itself also opens it via Leaflet, redundantly but harmlessly).
-  useEffect(() => {
-    markerRef.current?.openPopup()
-  }, [selectedReportId])
-
-  if (positions.length === 0) {
+  if (positions.length === 0 || !displayed) {
     return <NoReportsView onMapClick={onMapClick} />
   }
 
   const last = positions[positions.length - 1]
-  const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
-  const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
-  const displayed = reports[displayedIndex]
-  const displayedPosition: [number, number] = [displayed.lat, displayed.lon]
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -246,47 +252,41 @@ export function MapCard({
           />
         )
       })}
-      <Marker
-        ref={markerRef}
-        position={displayedPosition}
-        icon={airtagPinIcon(airtag)}
-        eventHandlers={{ click: centerMarkerOnClick }}
-      >
-        {/* autoPan off: PanToSelection below already centers the selected
-            pin explicitly, and its pan runs before this popup opens (child
-            effects flush before this component's own openPopup effect) -
-            Leaflet's own autoPan would otherwise re-shift the view to fit
-            the popup afterwards, undoing that centering (see CLAUDE.md's
-            map-navigation-experience note on AirTag/device parity - this
-            fix and DeviceMapCard's mirror it exactly). No explicit
-            `position` prop needed for the popup to follow the marker as
-            displayedPosition steps older/newer: Leaflet's bindPopup already
-            listens for the marker's own 'move' event and repositions the
-            bound popup to match (Marker.js's _movePopup) - an explicit
-            position prop here would instead make react-leaflet fully
-            unbind/rebind the popup on every render, since displayedPosition
-            is a fresh array each time. */}
-        <Popup autoPan={false}>
-          <div className={POPUP_WIDTH_CLASS}>
-            <p className="mb-2 text-[0.95rem] font-semibold">
-              {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
-            </p>
-            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-              {new Date(displayed.timestamp).toLocaleString()}
-            </InfoRow>
-            <AddressLine lat={displayed.lat} lon={displayed.lon} />
-            <a
-              href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
-            >
-              <LocationArrowIcon className="h-3.5 w-3.5" />
-              In Karten öffnen
-            </a>
-          </div>
-        </Popup>
-      </Marker>
+      <Marker position={displayedPosition} icon={airtagPinIcon(airtag)} eventHandlers={{ click: centerMarkerOnClick }} />
+      {/* Standalone (not nested in the Marker above) and explicitly
+          position-controlled, rather than a bound popup opened imperatively
+          via a marker ref: that ref-based open() call ran in this
+          component's own effect, which (empirically - a nested Popup's own
+          bind-to-marker effect does NOT reliably finish first) could fire
+          before the popup had actually bound itself to the marker, silently
+          no-opping and leaving the "current" pin's info never shown by
+          default. A standalone Popup opens itself on mount unconditionally
+          (react-leaflet's own behavior for a Popup that isn't a layer's
+          child), sidestepping that ordering entirely - autoPan off since
+          PanToSelection/centerMarkerOnClick already handle centering
+          explicitly (see CLAUDE.md's map-navigation-experience note on
+          AirTag/device parity - this fix and DeviceMapCard's mirror it
+          exactly). */}
+      <Popup position={displayedPosition} autoPan={false}>
+        <div className={POPUP_WIDTH_CLASS}>
+          <p className="mb-2 text-[0.95rem] font-semibold">
+            {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
+          </p>
+          <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+            {new Date(displayed.timestamp).toLocaleString()}
+          </InfoRow>
+          <AddressLine lat={displayed.lat} lon={displayed.lon} />
+          <a
+            href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
+          >
+            <LocationArrowIcon className="h-3.5 w-3.5" />
+            In Karten öffnen
+          </a>
+        </div>
+      </Popup>
       {ownerLocations.map((loc) => (
         <Marker
           key={loc.device_id}
