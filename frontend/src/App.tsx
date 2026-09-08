@@ -11,6 +11,7 @@ import {
   getReports,
   getStatus,
 } from './api'
+import { deviceLabel } from './format'
 import { ObjectsList } from './components/ObjectsList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { DeviceDetail } from './components/DeviceDetail'
@@ -104,20 +105,24 @@ export default function App() {
     refreshAirtags()
   }, [refreshAirtags])
 
-  useEffect(() => {
-    getOwnerDeviceLocations()
+  const refreshOwnerDevices = useCallback(async () => {
+    await getOwnerDeviceLocations()
       .then(setOwnerLocations)
       .catch(() => setOwnerLocations([]))
-    getOwnerAppleStatus()
-      .then((s) => setOwnerConnected(s.connected))
-      .catch(() => setOwnerConnected(false))
     // Full enabled/disabled registry, not just devices with a recorded fix -
     // without this, a freshly-enabled device with no location yet is
     // invisible everywhere outside Settings (see tasks/todo.md).
-    getOwnerDevices()
+    await getOwnerDevices()
       .then((ds) => setOwnerDevices(ds.filter((d) => d.enabled)))
       .catch(() => setOwnerDevices([]))
   }, [])
+
+  useEffect(() => {
+    getOwnerAppleStatus()
+      .then((s) => setOwnerConnected(s.connected))
+      .catch(() => setOwnerConnected(false))
+    refreshOwnerDevices()
+  }, [refreshOwnerDevices])
 
   useEffect(() => {
     if (ownerDevices.length === 0) {
@@ -158,7 +163,8 @@ export default function App() {
   const deviceLocationsById: Record<string, OwnerLocation> = Object.fromEntries(
     ownerLocations.map((l) => [l.device_id, l]),
   )
-  const detailName = detail === 'airtag' ? currentAirtag?.name : detail === 'device' ? selectedDevice?.name : null
+  const detailName =
+    detail === 'airtag' ? currentAirtag?.name : detail === 'device' && selectedDevice ? deviceLabel(selectedDevice) : null
   const title = detailName ? `AirTagSentry — ${detailName}` : 'AirTagSentry'
   useEffect(() => {
     document.title = title
@@ -252,6 +258,7 @@ export default function App() {
             airtag={currentAirtag}
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
+            onSelectDevice={handleSelectDevice}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
           <DeviceMapCard device={selectedDevice} locations={ownerLocationHistories[selectedDevice.id] ?? []} />
@@ -262,6 +269,7 @@ export default function App() {
             onSelect={handleSelect}
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
+            onSelectDevice={handleSelectDevice}
           />
         )}
       </div>
@@ -359,6 +367,7 @@ export default function App() {
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 history={ownerLocationHistories[selectedDevice.id] ?? null}
                 onBack={() => setDetail(null)}
+                onChanged={refreshOwnerDevices}
               />
             ) : (
               <ObjectsList

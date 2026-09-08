@@ -283,6 +283,18 @@ class OwnerDevicePrimaryIn(BaseModel):
     device_id: str
 
 
+class OwnerDeviceRenameIn(BaseModel):
+    # device_id travels in the body, not the URL path - see OwnerDeviceEnabledIn.
+    device_id: str
+    display_name: str | None = None
+
+
+class OwnerDeviceAppearanceIn(BaseModel):
+    device_id: str
+    icon: str | None = None
+    color: str | None = None
+
+
 class TelegramCredentialsIn(BaseModel):
     bot_token: str
     chat_id: str
@@ -762,6 +774,31 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             owner_tracking.set_device_primary(conn, None)
         return {"ok": True}
 
+    @app.patch("/api/owner-devices/rename")
+    def rename_owner_device_route(body: OwnerDeviceRenameIn):
+        """Sets the device's display name shown throughout the dashboard/bot -
+        `None`/empty resets to the Apple-synced technical name (`device.name`).
+        Mirrors PATCH /api/airtags/{id}."""
+        display_name = body.display_name.strip() if body.display_name else None
+        with get_conn(cfg.database_url) as conn:
+            device = owner_tracking.rename_device(conn, body.device_id, display_name)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
+        return dataclasses.asdict(device)
+
+    @app.patch("/api/owner-devices/appearance")
+    def set_owner_device_appearance_route(body: OwnerDeviceAppearanceIn):
+        """Mirrors PATCH /api/airtags/{id}/appearance."""
+        if body.icon is not None and body.icon not in AIRTAG_ICON_CHOICES:
+            raise HTTPException(status_code=400, detail=f"Unknown icon '{body.icon}'.")
+        if body.color is not None and not _COLOR_RE.match(body.color):
+            raise HTTPException(status_code=400, detail="color must be a '#rrggbb' hex string.")
+        with get_conn(cfg.database_url) as conn:
+            device = owner_tracking.set_device_appearance(conn, body.device_id, body.icon, body.color)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
+        return dataclasses.asdict(device)
+
     @app.get("/api/owner-device-locations")
     def get_owner_device_locations():
         """Latest known location of every *enabled* owner device, used to correlate
@@ -769,18 +806,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         device with a recorded fix, empty if none."""
         with get_conn(cfg.database_url) as conn:
             locations = latest_owner_device_locations(conn)
-            names = {d.id: d.name for d in db_list_owner_devices(conn)}
-        return [
-            {
-                "device_id": loc.device_id,
-                "name": names.get(loc.device_id, loc.device_id),
-                "recorded_at": loc.recorded_at.isoformat(),
-                "lat": loc.lat,
-                "lon": loc.lon,
-                "horizontal_accuracy": loc.horizontal_accuracy,
-            }
-            for loc in locations
-        ]
+            devices = {d.id: d for d in db_list_owner_devices(conn)}
+        results = []
+        for loc in locations:
+            device = devices.get(loc.device_id)
+            results.append(
+                {
+                    "device_id": loc.device_id,
+                    "name": (device.display_name or device.name) if device else loc.device_id,
+                    "icon": device.icon if device else None,
+                    "color": device.color if device else None,
+                    "recorded_at": loc.recorded_at.isoformat(),
+                    "lat": loc.lat,
+                    "lon": loc.lon,
+                    "horizontal_accuracy": loc.horizontal_accuracy,
+                }
+            )
+        return results
 
     @app.get("/api/owner-devices/history")
     def get_owner_device_history(device_id: str, limit: int = 200):

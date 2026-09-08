@@ -2252,3 +2252,82 @@ actually existed.
   `tsc`/`build`/`lint`/`pytest` were sufficient for this change. Click
   through the new Settings screens and toggles once in a real browser
   before relying on this.
+
+## v31: Owner devices reach parity with AirTags (Telegram /list, rename/icon, map)
+
+Three bugs reported together, all rooted in owner devices (`owner_tracking.py`
+/ `owner_devices` table - the owner's own Apple devices via `pyicloud`,
+tracked separately from AirTags) never having gotten the same treatment
+AirTags already had:
+
+- [x] `telegram_bot.py`: `/list` only ever queried `list_airtags` - it was
+      written before owner-device tracking existed and never got extended.
+      Now fetches enabled owner devices too and lists them first, in their
+      own "Deine Geräte" section (⭐ for the primary one) ahead of "Deine
+      AirTags" - matching the dashboard's `ObjectsList.tsx`, which already
+      groups them the same way. `/where` and the callback-query picker stay
+      AirTag-only (out of scope - devices have no "where" concept there).
+- [x] New migration `d4f19a6e3b2c` (revises `9d21b6f4a7c3`): adds nullable
+      `display_name`/`icon`/`color` to `owner_devices`, mirroring
+      `8a7b73c5121e`'s AirTag appearance columns. The real fix here is
+      `display_name`: `owner_devices.name` is the Apple-synced *technical*
+      name, silently overwritten by `upsert_owner_devices` on every live
+      device listing - a plain rename onto that column would've been
+      clobbered on the next dashboard load. `display_name` is a separate,
+      app-owned column `upsert_owner_devices` never touches, so a user's
+      chosen name survives every refresh; `None` falls back to showing the
+      technical name (`deviceLabel()` in `format.ts`).
+      `db.py`: `OwnerDevice` gained the three fields; new
+      `rename_owner_device`/`set_owner_device_appearance` (mirroring
+      `rename_airtag`/`set_airtag_appearance` exactly); `owner_tracking.py`
+      got thin `rename_device`/`set_device_appearance` wrappers alongside
+      its existing `set_device_enabled`/`set_device_primary`; `web/app.py`
+      got `PATCH /api/owner-devices/rename` and `.../appearance` (device_id
+      in the body, not the URL path, like the existing enabled/primary
+      routes - Apple device ids can contain `/`). `DeviceDetail.tsx` gained
+      "Umbenennen"/"Symbol & Farbe" sections copied from `AirtagDetail.tsx`
+      (new `DeviceAvatar.tsx` mirrors `AirtagAvatar.tsx`); `ObjectsList.tsx`
+      and every device name/pin (`DeviceMapCard.tsx`, `OverviewMap.tsx`,
+      `MapCard.tsx`) now show the display name and the chosen icon/color
+      (`airtagPinIcon`, already generic over `{id, icon, color}`, reused
+      as-is for device pins instead of the plain "you are here" dot).
+- [x] `DeviceMapCard.tsx` picked `positions[positions.length - 1]` as a
+      device's current position, copied from `MapCard.tsx`'s AirTag logic -
+      but `/api/owner-devices/history` is documented and tested
+      (`fetch_owner_device_location_history`) to return **newest-first**,
+      unlike AirTag reports (`fetch_reports`, oldest-first). This picked the
+      *oldest* kept fix as "current", placing the marker at a stale spot -
+      `DeviceDetail.tsx`'s own history list already `.reverse()`d for this,
+      the map card just never did. Fixed to `positions[0]`. Also:
+      `OverviewMap.tsx`'s empty-state guard checked only AirTag reports,
+      hiding every device pin outright on a device-only setup or before any
+      AirTag had reported yet - now guards on AirTags *and* device
+      locations together, and includes device positions when centering/
+      fitting the map. Device popups on `OverviewMap.tsx`/`MapCard.tsx` were
+      also read-only (name + time); added the same "Details anzeigen"
+      drill-in button AirTag popups have, wired to a new `onSelectDevice`
+      prop from `App.tsx`.
+
+## Review (v31)
+
+- Backend: `telegram_bot.py`, `db.py`, `owner_tracking.py`, `web/app.py`, 1
+  new migration. Frontend: `api.ts`, `format.ts`, `App.tsx`,
+  `DeviceDetail.tsx`, `ObjectsList.tsx`, `DeviceMapCard.tsx`,
+  `OverviewMap.tsx`, `MapCard.tsx`, new `DeviceAvatar.tsx`. No CLI changes
+  (nothing here needed one - all of it was already reachable from the
+  dashboard/bot).
+- Root cause of the map bug confirmed by reading
+  `fetch_owner_device_location_history`'s own docstring/test
+  (`test_fetch_owner_device_location_history_returns_newest_first_and_respects_limit`
+  in `test_db.py`) against `DeviceMapCard.tsx`'s `positions[length - 1]` -
+  a straight ordering-assumption mismatch, not a data problem.
+- Verified: added `test_db.py` cases for `rename_owner_device`,
+  `set_owner_device_appearance`, and a dedicated
+  `test_reupsert_does_not_clobber_display_name_or_appearance` proving a
+  live Apple refresh leaves a user's rename/appearance alone; added
+  `test_telegram_bot.py::test_list_command_shows_devices_before_airtags`.
+  Started a local Postgres, applied the new migration, ran the full suite
+  for real: `pytest` → 89 passed, 0 skipped. `cd frontend && npx tsc -b &&
+  npx vite build && npx oxlint` clean (pre-existing `App.tsx` set-state-in-
+  effect warnings only, unchanged by this diff). `docker compose config`
+  (throwaway `.env`) parses cleanly.

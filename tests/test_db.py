@@ -29,9 +29,11 @@ from airtag_sentry.db import (
     list_owner_devices,
     record_owner_device_location,
     rename_airtag,
+    rename_owner_device,
     set_airtag_appearance,
     set_airtag_key,
     set_owner_apple_credentials,
+    set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
     set_telegram_bot_commands,
@@ -293,6 +295,56 @@ def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):
     assert list_owner_devices(conn) == [
         OwnerDevice(id="mac-1", name="Marius' MacBook", device_type="Mac", enabled=True, is_primary=False)
     ]
+
+
+def test_reupsert_does_not_clobber_display_name_or_appearance(conn):
+    """upsert_owner_devices refreshes `name`/`device_type` from a live Apple
+    listing on every call - it must never touch display_name/icon/color, or a
+    user's rename/appearance choice would get silently reset on the next
+    dashboard load."""
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    rename_owner_device(conn, "mac-1", "Mein Mac")
+    set_owner_device_appearance(conn, "mac-1", "laptop", "#ff0000")
+
+    # A live Apple refresh renames the *technical* name only.
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "Marius' MacBook Air", "device_type": "Mac"}])
+
+    [device] = list_owner_devices(conn)
+    assert device.name == "Marius' MacBook Air"
+    assert device.display_name == "Mein Mac"
+    assert device.icon == "laptop"
+    assert device.color == "#ff0000"
+
+
+def test_rename_owner_device_sets_and_clears_display_name(conn):
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+
+    renamed = rename_owner_device(conn, "mac-1", "Mein Mac")
+    assert renamed.display_name == "Mein Mac"
+    assert renamed.name == "MacBook Air"
+
+    reset = rename_owner_device(conn, "mac-1", None)
+    assert reset.display_name is None
+
+
+def test_rename_owner_device_returns_none_for_unknown_id(conn):
+    assert rename_owner_device(conn, "unknown", "Mein Mac") is None
+
+
+def test_set_owner_device_appearance_sets_and_resets_icon_and_color(conn):
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+
+    styled = set_owner_device_appearance(conn, "mac-1", "laptop", "#ff0000")
+    assert styled.icon == "laptop"
+    assert styled.color == "#ff0000"
+
+    reset = set_owner_device_appearance(conn, "mac-1", None, None)
+    assert reset.icon is None
+    assert reset.color is None
+
+
+def test_set_owner_device_appearance_returns_none_for_unknown_id(conn):
+    assert set_owner_device_appearance(conn, "unknown", "laptop", "#ff0000") is None
 
 
 def test_set_owner_device_enabled_returns_none_for_unknown_id(conn):

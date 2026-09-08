@@ -27,3 +27,9 @@ export const ALERT_REASON_LABELS: Record<string, string> = {
 export function formatAlertReason(reason: string): string {
   return ALERT_REASON_LABELS[reason] ?? reason
 }
+
+/** The name to show for an owner device: its user-chosen display_name, or -
+ * if unset - the Apple-synced technical name (see rename_owner_device). */
+export function deviceLabel(device: { name: string; display_name: string | null }): string {
+  return device.display_name ?? device.name
+}

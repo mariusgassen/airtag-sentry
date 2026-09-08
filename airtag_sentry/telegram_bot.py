@@ -17,7 +17,7 @@ import logging
 
 import requests
 
-from airtag_sentry.db import AirtagRecord, Report, fetch_reports, list_airtags
+from airtag_sentry.db import AirtagRecord, OwnerDevice, Report, fetch_reports, list_airtags, list_owner_devices
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ _API_TIMEOUT = 10
 
 _HELP_TEXT = (
     "Verfügbare Befehle:\n"
-    "/list – alle AirTags anzeigen\n"
+    "/list – alle Geräte und AirTags anzeigen\n"
     "/where [Name] – letzten Standort eines AirTags anzeigen "
     "(ohne Namen: Auswahl zum Antippen)"
 )
@@ -70,7 +70,7 @@ def set_webhook(bot_token: str, url: str, secret: str) -> None:
         _api_url(bot_token, "setMyCommands"),
         json={
             "commands": [
-                {"command": "list", "description": "Alle AirTags anzeigen"},
+                {"command": "list", "description": "Alle Geräte und AirTags anzeigen"},
                 {"command": "where", "description": "Standort eines AirTags anzeigen"},
                 {"command": "help", "description": "Verfügbare Befehle anzeigen"},
             ]
@@ -114,18 +114,29 @@ def _handle_message(conn, bot_token: str, chat_id: str, message: dict) -> None:
     if command in ("/help", "/start"):
         _send_message(bot_token, chat_id, _HELP_TEXT)
     elif command == "/list":
-        _send_message(bot_token, chat_id, _format_list(list_airtags(conn)))
+        devices = [d for d in list_owner_devices(conn) if d.enabled]
+        _send_message(bot_token, chat_id, _format_list(devices, list_airtags(conn)))
     elif command == "/where":
         _handle_where(conn, bot_token, chat_id, arg)
     else:
         _send_message(bot_token, chat_id, f"Unbekannter Befehl: {command}\n\n{_HELP_TEXT}")
 
 
-def _format_list(airtags: list[AirtagRecord]) -> str:
-    if not airtags:
-        return "Keine AirTags konfiguriert."
-    lines = [f"{i + 1}. {a.name}" for i, a in enumerate(airtags)]
-    return "Deine AirTags:\n" + "\n".join(lines)
+def _format_list(devices: list[OwnerDevice], airtags: list[AirtagRecord]) -> str:
+    """Owner devices (self-location tracking) listed first, in their own section,
+    ahead of AirTags - see tasks/todo.md for the bugfix that added devices here at
+    all (this command originally only knew about AirTags)."""
+    if not devices and not airtags:
+        return "Keine Geräte oder AirTags konfiguriert."
+
+    sections = []
+    if devices:
+        lines = [f"{i + 1}. {'⭐ ' if d.is_primary else ''}{d.display_name or d.name}" for i, d in enumerate(devices)]
+        sections.append("Deine Geräte:\n" + "\n".join(lines))
+    if airtags:
+        lines = [f"{i + 1}. {a.name}" for i, a in enumerate(airtags)]
+        sections.append("Deine AirTags:\n" + "\n".join(lines))
+    return "\n\n".join(sections)
 
 
 def _handle_where(conn, bot_token: str, chat_id: str, arg: str) -> None:
