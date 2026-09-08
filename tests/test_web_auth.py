@@ -1,5 +1,6 @@
 import contextlib
 import dataclasses
+import datetime as dt
 import shutil
 from unittest.mock import Mock
 
@@ -7,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from airtag_sentry.config import load_config
-from airtag_sentry.db import OwnerDevice
+from airtag_sentry.db import OwnerAppleCredentials, OwnerDevice
 from airtag_sentry.web import app as app_module
 
 
@@ -274,27 +275,41 @@ def test_owner_devices_route_reads_persisted_devices_without_a_live_apple_call(c
     # owner_tracking.list_owner_devices (the old live-Apple-call path) was
     # removed entirely - nothing to stub out here, this route now only ever
     # touches Postgres.
+    last_sync = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
     monkeypatch.setattr(
         app_module,
         "db_list_owner_devices",
-        lambda _conn: [OwnerDevice(id="d1", name="MacBook", device_type="Mac", enabled=True, is_primary=False)],
+        lambda _conn: [
+            # Seen in the most recent successful sync (same timestamp).
+            OwnerDevice(
+                id="d1", name="MacBook", device_type="Mac", enabled=True, is_primary=False, last_seen_at=last_sync
+            ),
+            # Not seen in the most recent sync (stale last_seen_at) - e.g.
+            # removed from iCloud.
+            OwnerDevice(
+                id="d2",
+                name="iPad",
+                device_type="iPad",
+                enabled=False,
+                is_primary=False,
+                last_seen_at=last_sync - dt.timedelta(hours=1),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "get_owner_apple_credentials",
+        lambda _conn: OwnerAppleCredentials(
+            apple_id="owner@example.com", encrypted_password="enc", last_sync_at=last_sync, last_sync_error=None
+        ),
     )
 
     resp = client.get("/api/owner-devices")
 
     assert resp.status_code == 200
-    assert resp.json() == [
-        {
-            "id": "d1",
-            "name": "MacBook",
-            "device_type": "Mac",
-            "enabled": True,
-            "is_primary": False,
-            "display_name": None,
-            "icon": None,
-            "color": None,
-        }
-    ]
+    body = resp.json()
+    assert [d["id"] for d in body] == ["d1", "d2"]
+    assert [d["on_account"] for d in body] == [True, False]
 
 
 def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):

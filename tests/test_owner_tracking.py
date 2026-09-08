@@ -133,10 +133,21 @@ def test_fetch_owner_device_locations_persists_identity_for_every_device_not_jus
     enabled_device = _FakeDevice("d1", "MacBook Air", "Mac", {"latitude": 1.0, "longitude": 2.0})
     disabled_device = _FakeDevice("d2", "iPhone", "iPhone", None)
     api = _FakeApi([enabled_device, disabled_device])
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: object())
     monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: api)
 
     upserted = []
-    monkeypatch.setattr(owner_tracking, "upsert_owner_devices", lambda conn, devices: upserted.extend(devices))
+    monkeypatch.setattr(
+        owner_tracking,
+        "upsert_owner_devices",
+        lambda conn, devices, seen_at: upserted.extend(devices),
+    )
+    sync_status_calls = []
+    monkeypatch.setattr(
+        owner_tracking,
+        "set_owner_apple_sync_status",
+        lambda conn, synced_at, error: sync_status_calls.append(error),
+    )
     monkeypatch.setattr(
         owner_tracking,
         "db_list_owner_devices",
@@ -153,6 +164,34 @@ def test_fetch_owner_device_locations_persists_identity_for_every_device_not_jus
         {"id": "d2", "name": "iPhone", "device_type": "iPhone"},
     ]
     assert [loc.device_id for loc in locations] == ["d1"]
+    assert sync_status_calls == [None]  # a successful sync clears any prior error
+
+
+def test_fetch_owner_device_locations_records_sync_error_and_reraises(monkeypatch):
+    """Regression test: a live Apple call failure (lapsed pyicloud session,
+    transient network error, ...) used to only ever be logged by tracker.py's
+    broad except-and-log around the whole poll - invisible from the
+    dashboard. Now it's also persisted (OwnerAppleCredentials.last_sync_error,
+    surfaced via GET /api/apple/owner/status), and the exception still
+    propagates unchanged so tracker.py's existing handling is untouched."""
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: object())
+
+    def _raise_connect(cfg, conn):
+        raise RuntimeError("Invalid email/password combination.")
+
+    monkeypatch.setattr(owner_tracking, "_connect", _raise_connect)
+
+    recorded = []
+    monkeypatch.setattr(
+        owner_tracking,
+        "set_owner_apple_sync_status",
+        lambda conn, synced_at, error: recorded.append(error),
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid email/password combination"):
+        owner_tracking.fetch_owner_device_locations(cfg=None, conn=None)
+
+    assert recorded == ["Invalid email/password combination."]
 
 
 def test_pyicloud_imports_cleanly():

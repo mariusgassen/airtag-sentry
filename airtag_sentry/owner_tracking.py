@@ -61,6 +61,7 @@ from airtag_sentry.db import (
     list_owner_devices as db_list_owner_devices,
     rename_owner_device,
     set_owner_apple_credentials,
+    set_owner_apple_sync_status,
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
@@ -137,15 +138,25 @@ def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
 
 
 def connection_status(conn) -> dict:
-    """Connection + primary-device status for the dashboard's Apple-Konten panel."""
+    """Connection + primary-device status for the dashboard's Apple-Konten panel.
+    `last_sync_error` is the most recent background poll's live Apple call
+    failure (a lapsed session, a transient network error, ...), if any -
+    cleared on the next successful sync, so the dashboard can surface it
+    instead of it only ever showing up in the logs."""
     creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
     if creds is None:
-        return {"connected": False, "primary_device_id": None, "primary_device_name": None}
+        return {
+            "connected": False,
+            "primary_device_id": None,
+            "primary_device_name": None,
+            "last_sync_error": None,
+        }
     primary = next((d for d in db_list_owner_devices(conn) if d.is_primary), None)
     return {
         "connected": True,
         "primary_device_id": primary.id if primary else None,
         "primary_device_name": primary.name if primary else None,
+        "last_sync_error": creds.last_sync_error,
     }
 
 
@@ -244,15 +255,30 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
     as this poll runs, without needing a live Apple call from the dashboard itself
     (see module docstring; tasks/todo.md) - then returns a fresh location for
     every *enabled* device, or [] if not connected or none of the enabled devices
-    returned a location this call."""
-    api = _connect(cfg, conn)
-    if api is None:
+    returned a location this call.
+
+    Also records this attempt's outcome on `owner_apple_credentials`
+    (last_sync_at/last_sync_error - see db.set_owner_apple_sync_status), so a
+    lapsed session or a transient Apple/network error surfaces on the
+    dashboard instead of only ever being logged. A failure here still
+    propagates to the caller unchanged (tracker.py's own broad except-and-log
+    around the whole poll) - only the persisting is new."""
+    if get_owner_apple_credentials(conn) is None:
         return []
 
-    snapshot = _snapshot_devices(api)
+    now = dt.datetime.now(dt.timezone.utc)
+    try:
+        api = _connect(cfg, conn)
+        snapshot = _snapshot_devices(api)
+    except Exception as exc:
+        set_owner_apple_sync_status(conn, now, str(exc))
+        raise
+    set_owner_apple_sync_status(conn, now, None)
+
     upsert_owner_devices(
         conn,
         [{"id": d["id"], "name": d["name"], "device_type": d["device_type"]} for d in snapshot],
+        seen_at=now,
     )
 
     enabled_ids = {d.id for d in db_list_owner_devices(conn) if d.enabled}
@@ -260,7 +286,6 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
         logger.info("No owner devices enabled for tracking - skipping location fetch.")
         return []
 
-    now = dt.datetime.now(dt.timezone.utc)
     locations = []
     for device in snapshot:
         if device["id"] not in enabled_ids:

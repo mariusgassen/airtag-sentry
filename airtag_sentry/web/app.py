@@ -45,6 +45,7 @@ from airtag_sentry.db import (
     fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
+    get_owner_apple_credentials,
     get_settings,
     get_telegram_credentials,
     latest_alert,
@@ -741,10 +742,25 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         would blank the dashboard's whole device list (see tasks/todo.md).
         Reading straight from Postgres means this route can't fail because of
         Apple at all, and we only ever needed the persisted history anyway.
-        Empty if owner tracking isn't configured or the poller hasn't run yet."""
+        Empty if owner tracking isn't configured or the poller hasn't run yet.
+
+        Each device also gets `on_account`: whether it was present in the most
+        recent *successful* live sync (device.last_seen_at == credentials.
+        last_sync_at, the exact same poll's timestamp) - false means Apple
+        stopped listing it (e.g. removed from iCloud/Find My), distinct from
+        it simply being disabled or never having reported a location.
+        Unknown (reported as true) before any sync has ever run."""
         with get_conn(cfg.database_url) as conn:
             devices = db_list_owner_devices(conn)
-        return [dataclasses.asdict(d) for d in devices]
+            creds = get_owner_apple_credentials(conn)
+        last_sync_at = creds.last_sync_at if creds else None
+        return [
+            {
+                **dataclasses.asdict(d),
+                "on_account": last_sync_at is None or d.last_seen_at == last_sync_at,
+            }
+            for d in devices
+        ]
 
     @app.put("/api/owner-devices")
     def set_owner_device_enabled_route(body: OwnerDeviceEnabledIn):

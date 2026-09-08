@@ -33,6 +33,7 @@ from airtag_sentry.db import (
     set_airtag_appearance,
     set_airtag_key,
     set_owner_apple_credentials,
+    set_owner_apple_sync_status,
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
@@ -265,6 +266,9 @@ def test_update_settings_round_trips(conn):
     assert get_settings(conn) == updated
 
 
+_SEEN_AT = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
+
+
 def _owner_location(device_id: str, iso: str, lat: float, lon: float, accuracy: float = 10.0) -> OwnerLocation:
     return OwnerLocation(
         id=None,
@@ -279,21 +283,27 @@ def _owner_location(device_id: str, iso: str, lat: float, lon: float, accuracy: 
 def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):
     assert list_owner_devices(conn) == []
 
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
     assert list_owner_devices(conn) == [
-        OwnerDevice(id="mac-1", name="MacBook Air", device_type="Mac", enabled=False, is_primary=False)
+        OwnerDevice(
+            id="mac-1", name="MacBook Air", device_type="Mac", enabled=False, is_primary=False, last_seen_at=_SEEN_AT
+        )
     ]
 
     enabled = set_owner_device_enabled(conn, "mac-1", True)
     assert enabled == OwnerDevice(
-        id="mac-1", name="MacBook Air", device_type="Mac", enabled=True, is_primary=False
+        id="mac-1", name="MacBook Air", device_type="Mac", enabled=True, is_primary=False, last_seen_at=_SEEN_AT
     )
 
     # Re-discovering the same device (e.g. after a rename in Find My) must not
-    # reset `enabled` - only identity fields are refreshed.
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "Marius' MacBook", "device_type": "Mac"}])
+    # reset `enabled` - only identity fields (including last_seen_at) are
+    # refreshed.
+    later = _SEEN_AT + dt.timedelta(minutes=15)
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "Marius' MacBook", "device_type": "Mac"}], seen_at=later)
     assert list_owner_devices(conn) == [
-        OwnerDevice(id="mac-1", name="Marius' MacBook", device_type="Mac", enabled=True, is_primary=False)
+        OwnerDevice(
+            id="mac-1", name="Marius' MacBook", device_type="Mac", enabled=True, is_primary=False, last_seen_at=later
+        )
     ]
 
 
@@ -302,12 +312,14 @@ def test_reupsert_does_not_clobber_display_name_or_appearance(conn):
     listing on every call - it must never touch display_name/icon/color, or a
     user's rename/appearance choice would get silently reset on the next
     dashboard load."""
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
     rename_owner_device(conn, "mac-1", "Mein Mac")
     set_owner_device_appearance(conn, "mac-1", "laptop", "#ff0000")
 
     # A live Apple refresh renames the *technical* name only.
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "Marius' MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(
+        conn, [{"id": "mac-1", "name": "Marius' MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT
+    )
 
     [device] = list_owner_devices(conn)
     assert device.name == "Marius' MacBook Air"
@@ -317,7 +329,7 @@ def test_reupsert_does_not_clobber_display_name_or_appearance(conn):
 
 
 def test_rename_owner_device_sets_and_clears_display_name(conn):
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
 
     renamed = rename_owner_device(conn, "mac-1", "Mein Mac")
     assert renamed.display_name == "Mein Mac"
@@ -332,7 +344,7 @@ def test_rename_owner_device_returns_none_for_unknown_id(conn):
 
 
 def test_set_owner_device_appearance_sets_and_resets_icon_and_color(conn):
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
 
     styled = set_owner_device_appearance(conn, "mac-1", "laptop", "#ff0000")
     assert styled.icon == "laptop"
@@ -358,6 +370,7 @@ def test_set_owner_device_primary_is_exclusive_and_force_enables(conn):
             {"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"},
             {"id": "iphone-1", "name": "iPhone", "device_type": "iPhone"},
         ],
+        seen_at=_SEEN_AT,
     )
 
     mac = set_owner_device_primary(conn, "mac-1")
@@ -379,7 +392,7 @@ def test_set_owner_device_primary_returns_none_for_unknown_id(conn):
 
 
 def test_disabling_the_primary_device_clears_primary(conn):
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
     set_owner_device_primary(conn, "mac-1")
 
     disabled = set_owner_device_enabled(conn, "mac-1", False)
@@ -394,6 +407,7 @@ def test_latest_owner_device_locations_only_includes_enabled_devices(conn):
             {"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"},
             {"id": "iphone-1", "name": "iPhone", "device_type": "iPhone"},
         ],
+        seen_at=_SEEN_AT,
     )
     set_owner_device_enabled(conn, "mac-1", True)
     # iphone-1 stays disabled - it should never show up below, even with a
@@ -416,6 +430,7 @@ def test_latest_primary_owner_device_location_ignores_non_primary_devices(conn):
             {"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"},
             {"id": "iphone-1", "name": "iPhone", "device_type": "iPhone"},
         ],
+        seen_at=_SEEN_AT,
     )
     set_owner_device_enabled(conn, "mac-1", True)
     set_owner_device_enabled(conn, "iphone-1", True)
@@ -434,7 +449,7 @@ def test_latest_primary_owner_device_location_ignores_non_primary_devices(conn):
 
 
 def test_fetch_owner_device_location_history_returns_newest_first_and_respects_limit(conn):
-    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
     assert fetch_owner_device_location_history(conn, "mac-1") == []
 
     first = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
@@ -459,6 +474,37 @@ def test_owner_apple_credentials_set_get_delete_round_trip(conn):
 
     delete_owner_apple_credentials(conn)
     assert get_owner_apple_credentials(conn) is None
+
+
+def test_owner_apple_sync_status_records_and_clears_error(conn):
+    set_owner_apple_credentials(conn, "owner@example.com", "enc1")
+    assert get_owner_apple_credentials(conn).last_sync_at is None
+    assert get_owner_apple_credentials(conn).last_sync_error is None
+
+    set_owner_apple_sync_status(conn, _SEEN_AT, "Invalid email/password combination.")
+    stored = get_owner_apple_credentials(conn)
+    assert stored.last_sync_at == _SEEN_AT
+    assert stored.last_sync_error == "Invalid email/password combination."
+
+    # The next successful sync clears the error but still advances last_sync_at.
+    later = _SEEN_AT + dt.timedelta(minutes=15)
+    set_owner_apple_sync_status(conn, later, None)
+    stored = get_owner_apple_credentials(conn)
+    assert stored.last_sync_at == later
+    assert stored.last_sync_error is None
+
+
+def test_reconnecting_owner_apple_account_clears_a_stale_sync_error(conn):
+    """A fresh login shouldn't carry forward a previous connection's error -
+    otherwise reconnecting after fixing a bad password would still show the
+    old failure until the next poll happens to succeed."""
+    set_owner_apple_credentials(conn, "owner@example.com", "enc1")
+    set_owner_apple_sync_status(conn, _SEEN_AT, "Invalid email/password combination.")
+
+    set_owner_apple_credentials(conn, "owner@example.com", "enc2")
+    stored = get_owner_apple_credentials(conn)
+    assert stored.last_sync_at is None
+    assert stored.last_sync_error is None
 
 
 def test_telegram_credentials_set_get_delete_round_trip(conn):

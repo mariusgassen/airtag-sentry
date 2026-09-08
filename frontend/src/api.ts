@@ -45,6 +45,12 @@ export interface OwnerDevice {
   display_name: string | null
   icon: string | null
   color: string | null
+  // Only present on GET /api/owner-devices (not on the rename/enable/primary/
+  // appearance mutation responses) - whether this device was present in the
+  // background poller's most recent *successful* Apple sync. False means
+  // Apple stopped listing it (e.g. removed from iCloud/Find My) - treat a
+  // missing value the same as true (unknown yet, not flagged).
+  on_account?: boolean
 }
 
 export interface OwnerLocation {
@@ -262,6 +268,10 @@ export async function getOwnerAppleStatus(): Promise<{
   connected: boolean
   primary_device_id: string | null
   primary_device_name: string | null
+  // The most recent background poll's live Apple call failure (a lapsed
+  // session, a transient network error, ...), if any - cleared again on the
+  // next successful sync.
+  last_sync_error: string | null
 }> {
   return (await apiFetch('/api/apple/owner/status')).json()
 }

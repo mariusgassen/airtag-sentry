@@ -132,9 +132,15 @@ export function ObjectsList({
                           <span className="block truncate text-[0.95rem] font-medium">{deviceLabel(d)}</span>
                           {d.is_primary && <StarIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" filled />}
                         </span>
-                        <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
-                          {location ? capitalize(formatRelative(location.recorded_at)) : 'Kein Standort verfügbar'}
-                        </span>
+                        {d.on_account === false ? (
+                          <span className="block truncate text-[0.8rem] text-[var(--destructive)]">
+                            Nicht mehr im iCloud-Account gefunden
+                          </span>
+                        ) : (
+                          <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
+                            {location ? capitalize(formatRelative(location.recorded_at)) : 'Kein Standort verfügbar'}
+                          </span>
+                        )}
                       </span>
                       <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
                     </button>
