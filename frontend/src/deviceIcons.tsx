@@ -167,20 +167,10 @@ export function IphoneIcon({ className }: IconProps) {
 export function AirpodsIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <path
-        d="M9 4.5c1.4 0 2.5 1.1 2.5 2.5v7.2c0 1.7-1.3 3.3-3 3.3S5.5 15.9 5.5 14.2V9"
-        stroke="currentColor"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-      />
-      <rect x="7.7" y="6.3" width="2.3" height="3.6" rx="1.15" fill="currentColor" />
-      <path
-        d="M15 4.5c-1.4 0-2.5 1.1-2.5 2.5v7.2c0 1.7 1.3 3.3 3 3.3s3-1.6 3-3.3V9"
-        stroke="currentColor"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-      />
-      <rect x="14" y="6.3" width="2.3" height="3.6" rx="1.15" fill="currentColor" />
+      <rect x="6.3" y="4.5" width="4.2" height="6.4" rx="2.1" stroke="currentColor" strokeWidth={1.7} />
+      <path d="M8.4 10.7 6 18.5" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" />
+      <rect x="13.5" y="4.5" width="4.2" height="6.4" rx="2.1" stroke="currentColor" strokeWidth={1.7} />
+      <path d="M15.6 10.7 18 18.5" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" />
     </svg>
   )
 }
