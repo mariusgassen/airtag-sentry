@@ -6,7 +6,7 @@ import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
-import { mapsUrl } from '../maps'
+import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
 // Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
@@ -226,7 +226,12 @@ export function MapCard({
           />
         )
       })}
-      <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(airtag)}>
+      <Marker
+        ref={markerRef}
+        position={displayedPosition}
+        icon={airtagPinIcon(airtag)}
+        eventHandlers={{ click: centerMarkerOnClick }}
+      >
         {/* autoPan off: PanToSelection below already centers the selected
             pin explicitly, and its pan runs before this popup opens (child
             effects flush before this component's own openPopup effect) -
@@ -267,8 +272,11 @@ export function MapCard({
           key={loc.device_id}
           position={[loc.lat, loc.lon]}
           icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
+          eventHandlers={{ click: centerMarkerOnClick }}
         >
-          <Popup>
+          {/* autoPan off: centerMarkerOnClick above already centers this
+              pin explicitly on click. */}
+          <Popup autoPan={false}>
             <div className={POPUP_WIDTH_CLASS}>
               <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>

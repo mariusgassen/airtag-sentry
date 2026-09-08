@@ -2,7 +2,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Popup } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
-import { mapsUrl } from '../maps'
+import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { FitBounds, InfoRow, InvalidateSizeOnResize, NoReportsView, POPUP_WIDTH_CLASS } from './MapCard'
 import { ClockIcon, LocationArrowIcon } from './icons'
 
@@ -54,8 +54,15 @@ export function OverviewMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {located.map(({ airtag, lastReport }) => (
-        <Marker key={airtag.id} position={[lastReport.lat, lastReport.lon]} icon={airtagPinIcon(airtag)}>
-          <Popup>
+        <Marker
+          key={airtag.id}
+          position={[lastReport.lat, lastReport.lon]}
+          icon={airtagPinIcon(airtag)}
+          eventHandlers={{ click: centerMarkerOnClick }}
+        >
+          {/* autoPan off: centerMarkerOnClick above already centers this
+              pin explicitly on click. */}
+          <Popup autoPan={false}>
             <div className={POPUP_WIDTH_CLASS}>
               <p className="mb-2 text-[0.95rem] font-semibold">{airtag.name}</p>
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
@@ -99,8 +106,11 @@ export function OverviewMap({
           key={loc.device_id}
           position={[loc.lat, loc.lon]}
           icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
+          eventHandlers={{ click: centerMarkerOnClick }}
         >
-          <Popup>
+          {/* autoPan off: centerMarkerOnClick above already centers this
+              pin explicitly on click. */}
+          <Popup autoPan={false}>
             <div className={POPUP_WIDTH_CLASS}>
               <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>

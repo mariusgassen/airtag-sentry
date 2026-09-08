@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
-import { mapsUrl } from '../maps'
+import { centerMarkerOnClick, mapsUrl } from '../maps'
 import {
   AddressLine,
   FitBounds,
@@ -74,7 +74,12 @@ export function DeviceMapCard({
       {positions.length > 1 && (
         <Polyline positions={positions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 4 }} />
       )}
-      <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(device)}>
+      <Marker
+        ref={markerRef}
+        position={displayedPosition}
+        icon={airtagPinIcon(device)}
+        eventHandlers={{ click: centerMarkerOnClick }}
+      >
         {/* autoPan off: mirrors MapCard.tsx's selected-pin popup exactly -
             see the comment there for why. */}
         <Popup autoPan={false}>
