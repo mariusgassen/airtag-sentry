@@ -205,7 +205,13 @@ export function MapCard({
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
 }) {
-  const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
+  // Memoized: reports itself is a stable reference across pure-selection
+  // re-renders (App.tsx only replaces it on an actual re-fetch), but
+  // `.map()` always returns a fresh array - without this, FitBounds below
+  // (keyed on this same array) re-fits the *whole* trail on every render,
+  // overriding PanToSelection's explicit centering on every older/newer
+  // step or history-list pick.
+  const positions = useMemo<[number, number][]>(() => reports.map((r) => [r.lat, r.lon]), [reports])
   const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
   const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
   // Undefined when there are no reports at all - only read once positions

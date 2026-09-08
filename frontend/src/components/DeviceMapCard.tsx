@@ -42,7 +42,11 @@ export function DeviceMapCard({
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
 }) {
-  const positions: [number, number][] = locations.map((l) => [l.lat, l.lon])
+  // Memoized: see MapCard.tsx's identical comment on its own positions -
+  // without this, FitBounds below re-fits the *whole* trail on every
+  // render, overriding PanToSelection's explicit centering on every
+  // older/newer step or history-list pick.
+  const positions = useMemo<[number, number][]>(() => locations.map((l) => [l.lat, l.lon]), [locations])
 
   // /api/owner-devices/history is newest-first (see
   // fetch_owner_device_location_history), unlike AirTag reports - index 0 is
