@@ -84,6 +84,8 @@ AIRTAG_ICON_CHOICES = {
     "headphones",
     "book",
     "box",
+    "iphone",
+    "airpods",
 }
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
