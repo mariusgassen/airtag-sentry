@@ -50,9 +50,13 @@ the dashboard's AirTags list. Their key material is entered the same way
 cp .env.example .env
 ```
 
-Generate the two keys the app needs and paste them into `.env`:
+Generate the two keys the app needs and paste them into `.env`. These run on
+your host Python, not inside Docker, so install the two packages they need
+first:
 
 ```bash
+pip install cryptography py-vapid
+
 # AIRTAG_KEY_ENCRYPTION_KEY — encrypts AirTag keys at rest. Back it up: losing
 # it makes every stored AirTag key permanently undecryptable.
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -180,7 +184,6 @@ Each backend is optional and independent:
 
 | Backend  | Enable by setting                                                                                             |
 |----------|-----------------------------------------------------------------------------------------------------------------|
-| ntfy.sh  | `NTFY_TOPIC_URL` (e.g. `https://ntfy.sh/your-secret-topic`) in `.env`                                          |
 | Telegram | Bot token + chat ID, connected from the dashboard's Settings ⚙️ → **Benachrichtigungen** panel                |
 | Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` in `.env`, then click "Enable notifications" on the dashboard |
 

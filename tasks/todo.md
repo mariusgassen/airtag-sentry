@@ -1937,7 +1937,72 @@ requirement was already met; it just had nothing to persist.
   The new grouped Objekte list and DeviceDetail's map trail/history also
   need a real-account visual check.
 
-## v25: Inbound Telegram bot commands (/list, /where)
+## v25: Remove ntfy.sh notifier
+
+Trigger: user request - drop the ntfy.sh backend entirely; Telegram and Web
+Push already cover the same "push a movement alert somewhere" need without
+a third-party relay topic to keep secret.
+
+- [x] Deleted `airtag_sentry/notifiers/ntfy.py` and its `NtfyNotifier`
+      class/test (`test_notifiers.py`).
+- [x] `notifiers/__init__.py`'s `build_notifiers()` no longer imports or
+      instantiates it.
+- [x] `config.py`: dropped `NtfyConfig`, the `notifications.ntfy` field, and
+      `NTFY_TOPIC_URL` env var parsing; the "no notifier configured" startup
+      warning now only mentions Web Push/Telegram.
+- [x] Dropped `NTFY_TOPIC_URL` from `docker-compose.yml` (both `app` and
+      `dashboard` services), `.env.example`, and the README's notifiers
+      table.
+- [x] `tasks/roadmap.md`'s per-AirTag routing item updated to drop the
+      now-gone backend from its notifier list.
+
+## Review (v25)
+
+- 7 files touched (2 backend, 1 deleted, 1 test, 3 docs/config), no new
+  dependencies, no migration - a pure removal, no compat shim per this
+  repo's established "no backward-compatibility shims" convention. Anyone
+  with `NTFY_TOPIC_URL` still set in their `.env` just has it silently
+  ignored, same treatment prior config-shape breaks in this changelog got.
+- Verified: `pytest tests/` and `ruff`/type-checks pass with no leftover
+  `ntfy` references; grepped the full repo (case-insensitive) for `ntfy`
+  and confirmed only this changelog entry and the historical v21/pre-v21
+  entries above (left as the historical record, not rewritten) still
+  mention it.
+
+## v26: Fix `ModuleNotFoundError: No module named 'cryptography'` in Getting Started
+
+Trigger: real-user report - running the first commands in README's "Getting
+started -> 1. Configure secrets" (`python -c "from cryptography.fernet
+import Fernet..."` and `python scripts/generate_vapid_keys.py`) on a bare
+host Python fails with `ModuleNotFoundError: No module named 'cryptography'`.
+
+Root cause: not a missing dependency in the project itself -
+`cryptography>=42` is already declared in `pyproject.toml` and `py-vapid` is
+what `scripts/generate_vapid_keys.py` imports as `py_vapid`. The bug is in
+the README's ordering: step 1 is the very first thing a new self-hoster
+runs, on their host Python, before `docker compose up` even exists as an
+option - but the only "install the project's Python deps" instruction
+(`pip install -e ".[dev]"`) appears much later, under "## Development",
+which a reader following the guide top-to-bottom hasn't reached yet. Anyone
+without a pre-existing venv from unrelated project work hits this on the
+very first command.
+
+- [x] README: "1. Configure secrets" now installs `cryptography` and
+      `py-vapid` (just the two packages those two commands need, not the
+      full `.[dev]` extra with `pyicloud`/`findmy`/pytest, which are
+      unrelated at this point and heavier) before the two key-generation
+      commands.
+
+## Review (v26)
+- 1 file touched (README.md), no code/dependency/migration changes - the
+  dependency was already correctly declared, only the setup doc was wrong.
+- Verified: reproduced the exact reported traceback in a fresh venv with no
+  packages installed; then followed the corrected README instructions
+  verbatim (`pip install cryptography py-vapid` only) in a fresh venv and
+  confirmed `python scripts/generate_vapid_keys.py` succeeds and prints
+  `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` as expected.
+
+## v27: Inbound Telegram bot commands (/list, /where)
 
 Trigger: the Telegram integration was outbound-only (movement alerts via
 `notifiers/telegram.py`'s `sendMessage`) - user wanted to be able to *ask*
@@ -1991,9 +2056,9 @@ picker when the name is omitted rather than erroring.
 Deliberately deferred: `/status` and `/alerts` (more read-only commands),
 and `/mute`/`unmute` (snoozing alerts needs to be checked inside the shared
 `notify_all()` pipeline in `tracker.py`, not just the Telegram bot, so it
-would also silence ntfy/web push - a separate change).
+would also silence web push - a separate change).
 
-## Review (v25)
+## Review (v27)
 - 8 files touched (4 backend + 1 migration, 2 frontend, 2 tests), no new
   dependencies.
 - Verified: started a local Postgres 16 in this sandbox (no Docker daemon
