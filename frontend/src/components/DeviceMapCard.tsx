@@ -5,8 +5,16 @@ import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
-import { AddressLine, FitBounds, InfoRow, InvalidateSizeOnResize, NoReportsView, PanToSelection, POPUP_WIDTH_CLASS } from './MapCard'
-import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, LocationArrowIcon } from './icons'
+import {
+  FitBounds,
+  InvalidateSizeOnResize,
+  MapClickHandler,
+  NoReportsView,
+  PanToSelection,
+  PopupStepper,
+  POPUP_WIDTH_CLASS,
+} from './MapCard'
+import { LocationArrowIcon } from './icons'
 
 /** Single-device counterpart to MapCard - one owner device's own location
  * trail, drilled into from ObjectsList (device selected -> DeviceDetail).
@@ -20,6 +28,7 @@ export function DeviceMapCard({
   locations,
   selectedLocationKey = null,
   onSelectLocation,
+  onMapClick,
 }: {
   device: OwnerDevice
   locations: OwnerLocation[]
@@ -30,6 +39,9 @@ export function DeviceMapCard({
   // Previous/Next in the popup both flow through this same prop.
   selectedLocationKey?: string | null
   onSelectLocation?: (recordedAt: string) => void
+  // Fired when the map background (not a marker/popup) is tapped - lets the
+  // caller back out to the overview (see App.tsx).
+  onMapClick?: () => void
 }) {
   const positions: [number, number][] = locations.map((l) => [l.lat, l.lon])
   const markerRef = useRef<L.Marker>(null)
@@ -39,7 +51,7 @@ export function DeviceMapCard({
   }, [selectedLocationKey])
 
   if (positions.length === 0) {
-    return <NoReportsView />
+    return <NoReportsView onMapClick={onMapClick} />
   }
 
   // /api/owner-devices/history is newest-first (see
@@ -63,40 +75,23 @@ export function DeviceMapCard({
         <Polyline positions={positions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 4 }} />
       )}
       <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(device)}>
-        <Popup>
+        {/* autoPan off: mirrors MapCard.tsx's selected-pin popup exactly -
+            see the comment there for why. */}
+        <Popup autoPan={false}>
           <div className={POPUP_WIDTH_CLASS}>
             <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
-            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-              {new Date(displayed.recorded_at).toLocaleString()}
-            </InfoRow>
-            <AddressLine lat={displayed.lat} lon={displayed.lon} />
-            {onSelectLocation && (older || newer) && (
-              <div className="mt-3 flex gap-1 rounded-lg bg-[var(--surface-2)] p-1">
-                <button
-                  type="button"
-                  onClick={() => older && onSelectLocation(older.recorded_at)}
-                  disabled={!older}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
-                >
-                  <ChevronLeftIcon className="h-3.5 w-3.5" />
-                  Älter
-                </button>
-                <button
-                  type="button"
-                  onClick={() => newer && onSelectLocation(newer.recorded_at)}
-                  disabled={!newer}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
-                >
-                  Neuer
-                  <ChevronRightIcon className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
+            <PopupStepper
+              timestamp={displayed.recorded_at}
+              lat={displayed.lat}
+              lon={displayed.lon}
+              onOlder={onSelectLocation ? (older ? () => onSelectLocation(older.recorded_at) : null) : undefined}
+              onNewer={onSelectLocation ? (newer ? () => onSelectLocation(newer.recorded_at) : null) : undefined}
+            />
             <a
               href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
             >
               <LocationArrowIcon className="h-3.5 w-3.5" />
               In Karten öffnen
@@ -107,6 +102,7 @@ export function DeviceMapCard({
       <PanToSelection position={selectedIndex >= 0 ? displayedPosition : null} />
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
+      <MapClickHandler onMapClick={onMapClick} />
     </MapContainer>
   )
 }

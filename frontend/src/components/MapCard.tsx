@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type L from 'leaflet'
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
-import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+import { ChevronDownIcon, ChevronUpIcon, ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
 // Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
 // shares this shape - a fixed width so the card doesn't reflow oddly between
@@ -21,6 +21,70 @@ export function InfoRow({ icon, children }: { icon: ReactNode; children: ReactNo
     <div className="mb-1 flex items-start gap-1.5 text-xs text-[var(--text-secondary)] last:mb-0">
       <span className="mt-0.5 shrink-0">{icon}</span>
       <span>{children}</span>
+    </div>
+  )
+}
+
+/** Fires onMapClick when the map background itself is tapped - Leaflet
+ * markers stop click propagation, so this never fires for a marker/popup
+ * tap. Used to let "click away from a pin" back out of a detail view (see
+ * App.tsx's onMapClick). Exported for DeviceMapCard.tsx, which shares this
+ * same behavior. */
+export function MapClickHandler({ onMapClick }: { onMapClick?: () => void }) {
+  useMapEvent('click', () => onMapClick?.())
+  return null
+}
+
+/** Timestamp/address info paired with the older/newer stepper (^ / v
+ * arrows), grouped at the top of a "selected pin" popup - previously the
+ * stepper sat at the bottom as separate left/right "Älter"/"Neuer" buttons,
+ * disconnected from the info it steps through. Pass null (not omitted) for
+ * a direction with nothing to step to, so its button renders disabled
+ * rather than disappearing and shifting the other one. Exported for
+ * DeviceMapCard.tsx, which shares this same popup content. */
+export function PopupStepper({
+  timestamp,
+  lat,
+  lon,
+  onOlder,
+  onNewer,
+}: {
+  timestamp: string
+  lat: number
+  lon: number
+  onOlder?: (() => void) | null
+  onNewer?: (() => void) | null
+}) {
+  return (
+    <div className="mb-2 flex items-start justify-between gap-3">
+      <div className="min-w-0 flex-1">
+        <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>{new Date(timestamp).toLocaleString()}</InfoRow>
+        <AddressLine lat={lat} lon={lon} />
+      </div>
+      {(onOlder || onNewer) && (
+        <div className="flex shrink-0 flex-col gap-0.5 rounded-lg bg-[var(--surface-2)] p-1">
+          <button
+            type="button"
+            onClick={() => onNewer?.()}
+            disabled={!onNewer}
+            aria-label="Neuerer Standort"
+            title="Neuerer Standort"
+            className="rounded-md p-1 text-[var(--text)] disabled:opacity-30"
+          >
+            <ChevronUpIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onOlder?.()}
+            disabled={!onOlder}
+            aria-label="Älterer Standort"
+            title="Älterer Standort"
+            className="rounded-md p-1 text-[var(--text)] disabled:opacity-30"
+          >
+            <ChevronDownIcon className="h-4 w-4" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -125,7 +189,7 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   )
 }
 
-export function NoReportsView() {
+export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) {
   const here = useCurrentPosition()
 
   if (!here) {
@@ -145,6 +209,7 @@ export function NoReportsView() {
       <Marker position={here} icon={currentLocationIcon}>
         <Popup>Aktueller Standort</Popup>
       </Marker>
+      <MapClickHandler onMapClick={onMapClick} />
       <InvalidateSizeOnResize />
     </MapContainer>
   )
@@ -158,6 +223,7 @@ export function MapCard({
   onSelectDevice,
   selectedReportId = null,
   onSelectReport,
+  onMapClick,
 }: {
   reports: Report[]
   airtag: Airtag
@@ -172,6 +238,9 @@ export function MapCard({
   // the popup both flow through this same prop (see App.tsx).
   selectedReportId?: number | null
   onSelectReport?: (id: number) => void
+  // Fired when the map background (not a marker/popup) is tapped - lets the
+  // caller back out to the overview (see App.tsx).
+  onMapClick?: () => void
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
   const markerRef = useRef<L.Marker>(null)
@@ -183,7 +252,7 @@ export function MapCard({
   }, [selectedReportId])
 
   if (positions.length === 0) {
-    return <NoReportsView />
+    return <NoReportsView onMapClick={onMapClick} />
   }
 
   const last = positions[positions.length - 1]
@@ -213,42 +282,30 @@ export function MapCard({
         )
       })}
       <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(airtag)}>
-        <Popup>
+        {/* autoPan off: PanToSelection below already centers the selected
+            pin explicitly, and its pan runs before this popup opens (child
+            effects flush before this component's own openPopup effect) -
+            Leaflet's own autoPan would otherwise re-shift the view to fit
+            the popup afterwards, undoing that centering (see CLAUDE.md's
+            map-navigation-experience note on AirTag/device parity - this
+            fix and DeviceMapCard's mirror it exactly). */}
+        <Popup autoPan={false}>
           <div className={POPUP_WIDTH_CLASS}>
             <p className="mb-2 text-[0.95rem] font-semibold">
               {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
             </p>
-            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-              {new Date(displayed.timestamp).toLocaleString()}
-            </InfoRow>
-            <AddressLine lat={displayed.lat} lon={displayed.lon} />
-            {onSelectReport && (older || newer) && (
-              <div className="mt-3 flex gap-1 rounded-lg bg-[var(--surface-2)] p-1">
-                <button
-                  type="button"
-                  onClick={() => older && onSelectReport(older.id)}
-                  disabled={!older}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
-                >
-                  <ChevronLeftIcon className="h-3.5 w-3.5" />
-                  Älter
-                </button>
-                <button
-                  type="button"
-                  onClick={() => newer && onSelectReport(newer.id)}
-                  disabled={!newer}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
-                >
-                  Neuer
-                  <ChevronRightIcon className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
+            <PopupStepper
+              timestamp={displayed.timestamp}
+              lat={displayed.lat}
+              lon={displayed.lon}
+              onOlder={onSelectReport ? (older ? () => onSelectReport(older.id) : null) : undefined}
+              onNewer={onSelectReport ? (newer ? () => onSelectReport(newer.id) : null) : undefined}
+            />
             <a
               href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
             >
               <LocationArrowIcon className="h-3.5 w-3.5" />
               In Karten öffnen
@@ -295,6 +352,7 @@ export function MapCard({
       <PanToSelection position={selectedIndex >= 0 ? displayedPosition : null} />
       <FitBounds positions={positions} />
       <InvalidateSizeOnResize />
+      <MapClickHandler onMapClick={onMapClick} />
     </MapContainer>
   )
 }

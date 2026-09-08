@@ -274,6 +274,7 @@ export default function App() {
             onSelectDevice={handleSelectDevice}
             selectedReportId={selectedReportId}
             onSelectReport={setSelectedReportId}
+            onMapClick={() => setDetail(null)}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
           <DeviceMapCard
@@ -281,6 +282,7 @@ export default function App() {
             locations={ownerLocationHistories[selectedDevice.id] ?? []}
             selectedLocationKey={selectedDeviceLocationKey}
             onSelectLocation={setSelectedDeviceLocationKey}
+            onMapClick={() => setDetail(null)}
           />
         ) : (
           <OverviewMap
@@ -359,7 +361,14 @@ export default function App() {
           >
             <span className="h-1 w-9 rounded-full bg-[var(--divider)]" />
           </button>
-          <div className="min-h-0 flex-1">
+          {/* invisible (not just relying on the flex-1/min-h-0 shrink) when
+              minimized: the grab handle's own rendered height doesn't line
+              up pixel-for-pixel with --sheet-handle-h (inline text metrics
+              vs. the padding+pill math the CSS comment describes), so
+              without this a sliver of whatever's underneath - most visibly
+              the detail views' "< AirTags"/"< Objekte" back button - peeked
+              out below the handle instead of the map being fully clear. */}
+          <div className={`min-h-0 flex-1 ${sheetState === 'minimized' ? 'invisible' : ''}`}>
             {activeTab === 'settings' ? (
               <SettingsPanel
                 pushStatus={push.status}
