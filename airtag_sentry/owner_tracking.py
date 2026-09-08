@@ -55,7 +55,9 @@ from airtag_sentry.db import (
     delete_owner_apple_credentials,
     get_owner_apple_credentials,
     list_owner_devices as db_list_owner_devices,
+    rename_owner_device,
     set_owner_apple_credentials,
+    set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
     upsert_owner_devices,
@@ -239,6 +241,14 @@ def set_device_enabled(conn, device_id: str, enabled: bool) -> OwnerDevice | Non
 
 def set_device_primary(conn, device_id: str | None) -> OwnerDevice | None:
     return set_owner_device_primary(conn, device_id)
+
+
+def rename_device(conn, device_id: str, display_name: str | None) -> OwnerDevice | None:
+    return rename_owner_device(conn, device_id, display_name)
+
+
+def set_device_appearance(conn, device_id: str, icon: str | None, color: str | None) -> OwnerDevice | None:
+    return set_owner_device_appearance(conn, device_id, icon, color)
 
 
 def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:

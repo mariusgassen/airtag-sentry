@@ -1,6 +1,7 @@
 import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
-import { OWNER_TRAIL_COLOR, currentLocationIcon } from '../mapIcons'
+import { deviceLabel } from '../format'
+import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import { FitBounds, InvalidateSizeOnResize, NoReportsView } from './MapCard'
 import { LocationArrowIcon } from './icons'
@@ -17,7 +18,10 @@ export function DeviceMapCard({ device, locations }: { device: OwnerDevice; loca
     return <NoReportsView />
   }
 
-  const last = positions[positions.length - 1]
+  // /api/owner-devices/history is newest-first (see
+  // fetch_owner_device_location_history) - DeviceHistoryList already accounts
+  // for this, this map needs to too.
+  const last = positions[0]
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -28,12 +32,12 @@ export function DeviceMapCard({ device, locations }: { device: OwnerDevice; loca
       {positions.length > 1 && (
         <Polyline positions={positions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 4 }} />
       )}
-      <Marker position={last} icon={currentLocationIcon}>
+      <Marker position={last} icon={airtagPinIcon(device)}>
         <Popup>
           <div className="text-sm">
-            <p className="mb-2 font-medium">{device.name}</p>
+            <p className="mb-2 font-medium">{deviceLabel(device)}</p>
             <a
-              href={mapsUrl(last[0], last[1], device.name)}
+              href={mapsUrl(last[0], last[1], deviceLabel(device))}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"

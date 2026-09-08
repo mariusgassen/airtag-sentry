@@ -2,13 +2,20 @@ import datetime as dt
 from unittest.mock import MagicMock, patch
 
 from airtag_sentry import telegram_bot
-from airtag_sentry.db import AirtagRecord, Report
+from airtag_sentry.db import AirtagRecord, OwnerDevice, Report
 
 
 def _make_airtags():
     return [
         AirtagRecord(id="a1", name="Rucksack"),
         AirtagRecord(id="a2", name="Fahrrad"),
+    ]
+
+
+def _make_owner_devices():
+    return [
+        OwnerDevice(id="d1", name="iPad", device_type="iPad", enabled=True, is_primary=False),
+        OwnerDevice(id="d2", name="iPhone von Marius", device_type="iPhone", enabled=True, is_primary=True),
     ]
 
 
@@ -24,11 +31,13 @@ def _make_report(airtag_id: str) -> Report:
     )
 
 
+@patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
-def test_list_command_sends_numbered_airtags(mock_post, mock_list_airtags):
+def test_list_command_sends_numbered_airtags(mock_post, mock_list_airtags, mock_list_owner_devices):
     mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
+    mock_list_owner_devices.return_value = []
 
     telegram_bot.handle_update(
         conn=MagicMock(),
@@ -43,10 +52,33 @@ def test_list_command_sends_numbered_airtags(mock_post, mock_list_airtags):
     assert "2. Fahrrad" in kwargs["json"]["text"]
 
 
+@patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
-def test_message_from_unauthorized_chat_is_ignored(mock_post, mock_list_airtags):
+def test_list_command_shows_devices_before_airtags(mock_post, mock_list_airtags, mock_list_owner_devices):
+    mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
+    mock_list_owner_devices.return_value = _make_owner_devices()
+
+    telegram_bot.handle_update(
+        conn=MagicMock(),
+        bot_token="tok",
+        chat_id="111",
+        update={"message": {"chat": {"id": 111}, "text": "/list"}},
+    )
+
+    text = mock_post.call_args.kwargs["json"]["text"]
+    assert text.index("Deine Geräte:") < text.index("Deine AirTags:")
+    assert "1. iPad" in text
+    assert "2. ⭐ iPhone von Marius" in text
+
+
+@patch("airtag_sentry.telegram_bot.list_owner_devices")
+@patch("airtag_sentry.telegram_bot.list_airtags")
+@patch("airtag_sentry.telegram_bot.requests.post")
+def test_message_from_unauthorized_chat_is_ignored(mock_post, mock_list_airtags, mock_list_owner_devices):
+    mock_list_airtags.return_value = _make_airtags()
+    mock_list_owner_devices.return_value = []
 
     telegram_bot.handle_update(
         conn=MagicMock(),

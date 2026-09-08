@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
-import { capitalize, formatRelative } from '../format'
+import { capitalize, deviceLabel, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { ChevronRightIcon, PersonIcon, PlusIcon, StarIcon } from './icons'
+import { DeviceAvatar } from './DeviceAvatar'
+import { ChevronRightIcon, PlusIcon, StarIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -120,12 +121,10 @@ export function ObjectsList({
                         selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
                       } ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
                     >
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white">
-                        <PersonIcon className="h-5 w-5" />
-                      </span>
+                      <DeviceAvatar device={d} size={40} />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5">
-                          <span className="block truncate text-[0.95rem] font-medium">{d.name}</span>
+                          <span className="block truncate text-[0.95rem] font-medium">{deviceLabel(d)}</span>
                           {d.is_primary && <StarIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" filled />}
                         </span>
                         <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">

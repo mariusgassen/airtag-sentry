@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import type { OwnerDevice, OwnerLocation } from '../api'
-import { formatRelative } from '../format'
+import { renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
+import { airtagColor, PALETTE } from '../airtagColor'
+import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
+import { deviceLabel, formatRelative } from '../format'
+import { DeviceAvatar } from './DeviceAvatar'
 import { Row, Section } from './AirtagDetail'
-import { ChevronLeftIcon, ChevronRightIcon, PersonIcon, StarIcon } from './icons'
+import { ChevronLeftIcon, ChevronRightIcon, PaletteIcon, PencilIcon, PersonIcon, StarIcon } from './icons'
 
 interface Props {
   device: OwnerDevice
@@ -11,14 +15,17 @@ interface Props {
   // reused here rather than fetched again. null while still loading.
   history: OwnerLocation[] | null
   onBack: () => void
+  onChanged: () => void | Promise<void>
 }
 
-/** Device counterpart to AirtagDetail - deliberately smaller, since a device's
- * name/tracking/primary status are managed in Settings -> Eigene Geräte, not
- * here. This is the *only* place a device's history renders (moved out of
- * Settings - see tasks/todo.md): a header with its last-seen state and an
- * expandable "Verlauf" list, matching AirtagDetail's own history section. */
-export function DeviceDetail({ device, location, history, onBack }: Props) {
+/** Device counterpart to AirtagDetail. Tracking/primary status are still
+ * managed in Settings -> Eigene Geräte (which device to track at all), but
+ * the device's own display name/icon/color live here, mirroring AirtagDetail's
+ * Umbenennen/Symbol & Farbe sections exactly - this is the *only* place a
+ * device's history renders too (moved out of Settings - see tasks/todo.md). */
+export function DeviceDetail({ device, location, history, onBack, onChanged }: Props) {
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
 
   return (
@@ -34,11 +41,9 @@ export function DeviceDetail({ device, location, history, onBack }: Props) {
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         <div className="mb-6 flex flex-col items-center px-4 text-center">
-          <span className="mb-3 flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white">
-            <PersonIcon className="h-9 w-9" />
-          </span>
+          <DeviceAvatar device={device} size={80} className="mb-3" />
           <h2 className="flex items-center gap-1.5 text-xl font-semibold">
-            {device.name}
+            {deviceLabel(device)}
             {device.is_primary && <StarIcon className="h-4 w-4 text-[var(--accent)]" filled />}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -47,6 +52,40 @@ export function DeviceDetail({ device, location, history, onBack }: Props) {
         </div>
 
         <div className="px-3">
+          <Section>
+            <Row
+              icon={<PencilIcon className="h-5 w-5" />}
+              label="Umbenennen"
+              trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
+              onClick={() => setRenameOpen((v) => !v)}
+              bordered={false}
+            />
+            {renameOpen && (
+              <DeviceRenameForm
+                device={device}
+                onDone={async () => {
+                  setRenameOpen(false)
+                  await onChanged()
+                }}
+              />
+            )}
+          </Section>
+
+          <Section>
+            <Row
+              icon={<PaletteIcon className="h-5 w-5" />}
+              label="Symbol & Farbe"
+              trailing={
+                <ChevronRightIcon
+                  className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${appearanceOpen ? 'rotate-90' : ''}`}
+                />
+              }
+              onClick={() => setAppearanceOpen((v) => !v)}
+              bordered={false}
+            />
+            {appearanceOpen && <DeviceAppearanceForm device={device} onDone={onChanged} />}
+          </Section>
+
           <Section>
             <Row
               icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
@@ -63,6 +102,125 @@ export function DeviceDetail({ device, location, history, onBack }: Props) {
             {historyOpen && <DeviceHistoryList history={history} />}
           </Section>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function DeviceRenameForm({ device, onDone }: { device: OwnerDevice; onDone: () => void | Promise<void> }) {
+  const [name, setName] = useState(device.display_name ?? device.name)
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    try {
+      const trimmed = name.trim()
+      // Saving back the unchanged technical name is the same as resetting to
+      // "automatic" - keeps a no-op edit from creating a redundant display_name.
+      await renameOwnerDevice(device.id, trimmed && trimmed !== device.name ? trimmed : null)
+      await onDone()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-[var(--divider)] p-3">
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="flex-1 rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          Sichern
+        </button>
+      </div>
+      <p className="mt-2 text-[0.72rem] text-[var(--text-secondary)]">Technischer Name (von Apple): {device.name}</p>
+    </div>
+  )
+}
+
+function DeviceAppearanceForm({ device, onDone }: { device: OwnerDevice; onDone: () => void | Promise<void> }) {
+  const [saving, setSaving] = useState(false)
+  const effectiveColor = device.color ?? airtagColor(device.id)
+
+  async function pick(next: { icon?: string | null; color?: string | null }) {
+    const icon = next.icon !== undefined ? next.icon : device.icon
+    const color = next.color !== undefined ? next.color : device.color
+    setSaving(true)
+    try {
+      await setOwnerDeviceAppearance(device.id, icon, color)
+      await onDone()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const ringClass = 'ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--surface)]'
+
+  return (
+    <div className="border-t border-[var(--divider)] p-3">
+      <p className="mb-2 text-[0.72rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">Symbol</p>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => pick({ icon: null })}
+          disabled={saving}
+          aria-label="Automatisch"
+          title="Automatisch"
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-60 ${device.icon === null ? ringClass : ''}`}
+          style={{ backgroundColor: effectiveColor }}
+        >
+          <PersonIcon className="h-6 w-6" />
+        </button>
+        {DEVICE_ICON_NAMES.map((name) => {
+          const Glyph = DEVICE_ICON_COMPONENTS[name]
+          return (
+            <button
+              key={name}
+              type="button"
+              onClick={() => pick({ icon: name })}
+              disabled={saving}
+              aria-label={DEVICE_ICON_LABELS[name]}
+              title={DEVICE_ICON_LABELS[name]}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-60 ${device.icon === name ? ringClass : ''}`}
+              style={{ backgroundColor: effectiveColor }}
+            >
+              <Glyph className="h-6 w-6" />
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="mb-2 text-[0.72rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">Farbe</p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => pick({ color: null })}
+          disabled={saving}
+          aria-label="Automatisch"
+          title="Automatisch"
+          className={`h-8 w-8 shrink-0 rounded-full border-2 border-dashed border-[var(--text-secondary)] disabled:opacity-60 ${device.color === null ? ringClass : ''}`}
+        />
+        {PALETTE.map((hex) => (
+          <button
+            key={hex}
+            type="button"
+            onClick={() => pick({ color: hex })}
+            disabled={saving}
+            aria-label={hex}
+            title={hex}
+            className={`h-8 w-8 shrink-0 rounded-full disabled:opacity-60 ${device.color === hex ? ringClass : ''}`}
+            style={{ backgroundColor: hex }}
+          />
+        ))}
       </div>
     </div>
   )

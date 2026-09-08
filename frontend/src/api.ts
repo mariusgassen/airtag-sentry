@@ -39,6 +39,12 @@ export interface OwnerDevice {
   device_type: string
   enabled: boolean
   is_primary: boolean
+  // User-chosen name/icon/color, mirroring Airtag's - null means "unset":
+  // display_name falls back to `name` (the Apple-synced technical name),
+  // icon/color fall back to the derived glyph/hash-color. See deviceLabel().
+  display_name: string | null
+  icon: string | null
+  color: string | null
 }
 
 export interface OwnerLocation {
@@ -46,6 +52,8 @@ export interface OwnerLocation {
   // Only present on /api/owner-device-locations (a per-device history entry
   // already has its device context from the panel showing it).
   name?: string
+  icon?: string | null
+  color?: string | null
   recorded_at: string
   lat: number
   lon: number
@@ -182,6 +190,28 @@ export async function setOwnerDevicePrimary(id: string): Promise<OwnerDevice> {
 
 export async function clearOwnerDevicePrimary(): Promise<void> {
   await apiFetch('/api/owner-devices/primary', { method: 'DELETE' })
+}
+
+export async function renameOwnerDevice(id: string, displayName: string | null): Promise<OwnerDevice> {
+  return (
+    await apiFetch('/api/owner-devices/rename', {
+      method: 'PATCH',
+      body: JSON.stringify({ device_id: id, display_name: displayName }),
+    })
+  ).json()
+}
+
+export async function setOwnerDeviceAppearance(
+  id: string,
+  icon: string | null,
+  color: string | null,
+): Promise<OwnerDevice> {
+  return (
+    await apiFetch('/api/owner-devices/appearance', {
+      method: 'PATCH',
+      body: JSON.stringify({ device_id: id, icon, color }),
+    })
+  ).json()
 }
 
 export async function getOwnerDeviceLocations(): Promise<OwnerLocation[]> {

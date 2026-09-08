@@ -88,6 +88,13 @@ class OwnerDevice:
     # map trail; other enabled devices are tracked/listed but don't affect
     # either.
     is_primary: bool
+    # User-chosen name/icon/color, mirroring AirtagRecord's - None means
+    # "unset", i.e. fall back to `name` (the Apple-synced technical name) /
+    # the derived glyph+color. `upsert_owner_devices` never touches these,
+    # unlike `name` - see rename_owner_device/set_owner_device_appearance.
+    display_name: str | None = None
+    icon: str | None = None
+    color: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -467,9 +474,12 @@ def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict]) -> None:
     conn.commit()
 
 
+_OWNER_DEVICE_COLUMNS = "id, name, device_type, enabled, is_primary, display_name, icon, color"
+
+
 def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, name, device_type, enabled, is_primary FROM owner_devices ORDER BY name")
+        cur.execute(f"SELECT {_OWNER_DEVICE_COLUMNS} FROM owner_devices ORDER BY name")
         return [OwnerDevice(*row) for row in cur.fetchall()]
 
 
@@ -479,8 +489,8 @@ def set_owner_device_enabled(conn: psycopg.Connection, device_id: str, enabled: 
             # Disabling a device that's currently primary clears is_primary too -
             # a disabled device never gets a fresh location, so leaving it primary
             # would silently stop away-correlation without any visible signal why.
-            "UPDATE owner_devices SET enabled = %s, is_primary = is_primary AND %s WHERE id = %s "
-            "RETURNING id, name, device_type, enabled, is_primary",
+            f"UPDATE owner_devices SET enabled = %s, is_primary = is_primary AND %s WHERE id = %s "
+            f"RETURNING {_OWNER_DEVICE_COLUMNS}",
             (enabled, enabled, device_id),
         )
         row = cur.fetchone()
@@ -499,9 +509,38 @@ def set_owner_device_primary(conn: psycopg.Connection, device_id: str | None) ->
             conn.commit()
             return None
         cur.execute(
-            "UPDATE owner_devices SET is_primary = true, enabled = true WHERE id = %s "
-            "RETURNING id, name, device_type, enabled, is_primary",
+            f"UPDATE owner_devices SET is_primary = true, enabled = true WHERE id = %s "
+            f"RETURNING {_OWNER_DEVICE_COLUMNS}",
             (device_id,),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def rename_owner_device(conn: psycopg.Connection, device_id: str, display_name: str | None) -> OwnerDevice | None:
+    """Sets (or, with display_name=None, clears back to the Apple-synced technical
+    `name`) a device's user-chosen display name. Never touches `name` itself -
+    that's upsert_owner_devices' column, refreshed from Apple on every live listing."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE owner_devices SET display_name = %s WHERE id = %s RETURNING {_OWNER_DEVICE_COLUMNS}",
+            (display_name, device_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def set_owner_device_appearance(
+    conn: psycopg.Connection, device_id: str, icon: str | None, color: str | None
+) -> OwnerDevice | None:
+    """Set (or, with both args None, reset to automatic) a device's chosen
+    icon/color - mirrors set_airtag_appearance."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE owner_devices SET icon = %s, color = %s WHERE id = %s RETURNING {_OWNER_DEVICE_COLUMNS}",
+            (icon, color, device_id),
         )
         row = cur.fetchone()
     conn.commit()

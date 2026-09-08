@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
-import { formatRelative } from '../format'
+import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import { LocationArrowIcon } from './icons'
@@ -82,6 +82,7 @@ export function MapCard({
   airtag,
   ownerLocations = [],
   ownerLocationHistories = {},
+  onSelectDevice,
 }: {
   reports: Report[]
   airtag: Airtag
@@ -90,6 +91,7 @@ export function MapCard({
   // History of every *enabled* device, keyed by device_id - each drawn as its
   // own dashed trail, matching the route the AirTag itself gets.
   ownerLocationHistories?: Record<string, OwnerLocation[]>
+  onSelectDevice?: (id: string) => void
 }) {
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
 
@@ -134,9 +136,36 @@ export function MapCard({
         </Popup>
       </Marker>
       {ownerLocations.map((loc) => (
-        <Marker key={loc.device_id} position={[loc.lat, loc.lon]} icon={currentLocationIcon}>
+        <Marker
+          key={loc.device_id}
+          position={[loc.lat, loc.lon]}
+          icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
+        >
           <Popup>
-            {loc.name ?? 'Gerät'} · {formatRelative(loc.recorded_at)}
+            <div className="text-sm">
+              <p className="mb-1 font-medium">{loc.name ?? 'Gerät'}</p>
+              <p className="mb-2 text-[var(--text-secondary)]">{capitalize(formatRelative(loc.recorded_at))}</p>
+              {onSelectDevice && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onSelectDevice(loc.device_id)}
+                    className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white"
+                  >
+                    Details anzeigen
+                  </button>
+                  <a
+                    href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+                  >
+                    <LocationArrowIcon className="h-3.5 w-3.5" />
+                    In Karten öffnen
+                  </a>
+                </div>
+              )}
+            </div>
           </Popup>
         </Marker>
       ))}
