@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from airtag_sentry.config import load_config
+from airtag_sentry.db import OwnerDevice
 from airtag_sentry.web import app as app_module
 
 
@@ -277,6 +278,58 @@ def test_owner_devices_route_reports_apple_errors_instead_of_hanging(client, mon
 
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Invalid email/password combination."
+
+
+def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):
+    # Regression test: Apple's own device ids (pyicloud AppleDevice.id) are
+    # opaque base64-ish blobs that can contain a literal "/" - previously
+    # these three routes took device_id as a URL *path* segment, and even
+    # though the frontend correctly percent-encoded it (encodeURIComponent),
+    # ASGI/uvicorn decodes "%2F" back into a literal "/" while building the
+    # request path *before* routing runs, splitting one {device_id} segment
+    # into two and breaking route matching (a 405, since the split path
+    # happened to collide with another route's static segments/methods).
+    # device_id now travels in the body (PUT routes) or as a query param (GET
+    # history), neither of which treats "/" as a delimiter.
+    _mock_github(monkeypatch)
+    state = _extract_state(client.get("/login").text)
+    client.get(f"/auth/callback?code=abc&state={state}")
+
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+
+    slashy_id = "AYPwQofdb4u+u4RpzfkAFj9WaXtGuR3ffJRt3OMwic/XrQDUiWs5dCtra9prAfRuX3bA=="
+
+    seen_enabled = {}
+    monkeypatch.setattr(
+        app_module.owner_tracking,
+        "set_device_enabled",
+        lambda _conn, device_id, enabled: seen_enabled.update(device_id=device_id, enabled=enabled)
+        or OwnerDevice(id=device_id, name="MacBook", device_type="Mac", enabled=enabled, is_primary=False),
+    )
+    resp = client.put("/api/owner-devices", json={"device_id": slashy_id, "enabled": True})
+    assert resp.status_code == 200
+    assert seen_enabled == {"device_id": slashy_id, "enabled": True}
+
+    seen_primary = {}
+    monkeypatch.setattr(
+        app_module.owner_tracking,
+        "set_device_primary",
+        lambda _conn, device_id: seen_primary.update(device_id=device_id)
+        or OwnerDevice(id=device_id, name="MacBook", device_type="Mac", enabled=True, is_primary=True),
+    )
+    resp = client.put("/api/owner-devices/primary", json={"device_id": slashy_id})
+    assert resp.status_code == 200
+    assert seen_primary == {"device_id": slashy_id}
+
+    seen_history = {}
+    monkeypatch.setattr(
+        app_module,
+        "fetch_owner_device_location_history",
+        lambda _conn, device_id, limit: seen_history.update(device_id=device_id, limit=limit) or [],
+    )
+    resp = client.get("/api/owner-devices/history", params={"device_id": slashy_id, "limit": 50})
+    assert resp.status_code == 200
+    assert seen_history == {"device_id": slashy_id, "limit": 50}
 
 
 def test_favicon_is_servable_without_a_session(client):

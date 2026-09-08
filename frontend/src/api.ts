@@ -159,16 +159,25 @@ export async function getOwnerDevices(): Promise<OwnerDevice[]> {
 }
 
 export async function setOwnerDeviceEnabled(id: string, enabled: boolean): Promise<OwnerDevice> {
+  // device_id travels in the body, not the URL path - Apple's device ids can
+  // contain a literal "/" (they're opaque base64-ish blobs), which breaks
+  // path-based routing even when percent-encoded, since ASGI/proxy layers
+  // decode "%2F" back into a delimiter before routing ever sees it.
   return (
-    await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}`, {
+    await apiFetch('/api/owner-devices', {
       method: 'PUT',
-      body: JSON.stringify({ enabled }),
+      body: JSON.stringify({ device_id: id, enabled }),
     })
   ).json()
 }
 
 export async function setOwnerDevicePrimary(id: string): Promise<OwnerDevice> {
-  return (await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}/primary`, { method: 'PUT' })).json()
+  return (
+    await apiFetch('/api/owner-devices/primary', {
+      method: 'PUT',
+      body: JSON.stringify({ device_id: id }),
+    })
+  ).json()
 }
 
 export async function clearOwnerDevicePrimary(): Promise<void> {
@@ -181,7 +190,9 @@ export async function getOwnerDeviceLocations(): Promise<OwnerLocation[]> {
 
 export async function getOwnerDeviceHistory(id: string, limit = 200): Promise<OwnerLocation[]> {
   return (
-    await apiFetch(`/api/owner-devices/${encodeURIComponent(id)}/history?limit=${limit}`)
+    await apiFetch(
+      `/api/owner-devices/history?device_id=${encodeURIComponent(id)}&limit=${limit}`,
+    )
   ).json()
 }
 
