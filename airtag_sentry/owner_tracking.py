@@ -11,10 +11,14 @@ correlation needs. This is a second, independent Apple session from the one `aut
 manages for AirTags - its own login, its own 2FA, its own persisted session.
 
 Multiple devices can be tracked, each with its own history - see `owner_devices`/
-`owner_device_locations` in db.py. Discovering a device (via list_owner_devices) only
-records its identity; a device only gets its location polled and historized once
-explicitly enabled via set_device_enabled, so connecting the account never silently
-starts recording history for every device on it.
+`owner_device_locations` in db.py. Device *identity* (name/type) is persisted on
+every background poll (fetch_owner_device_locations, called from tracker.py) for
+every device the Apple account has, whether tracked or not - there's no separate
+live "discovery" call, so a device shows up (toggleable) as soon as the poller has
+seen it once, without needing a dashboard visit to trigger a live Apple round trip.
+A device only gets its *location* polled and historized once explicitly enabled via
+set_device_enabled, so connecting the account never silently starts recording
+history for every device on it.
 
 Exactly one enabled device can additionally be marked primary (set_device_primary) -
 that's the one used for "moved without you" away-correlation and the map's location
@@ -218,23 +222,6 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
     return snapshot
 
 
-def list_owner_devices(cfg: Config, conn) -> list[OwnerDevice]:
-    """Live-refreshes device identity (name/type) from the Apple account and
-    returns the full known list, DB `enabled`/`is_primary` flags intact. Empty
-    if not connected."""
-    api = _connect(cfg, conn)
-    if api is None:
-        return []
-    snapshot = _snapshot_devices(api)
-    upsert_owner_devices(
-        conn,
-        [{"id": d["id"], "name": d["name"], "device_type": d["device_type"]} for d in snapshot],
-    )
-    devices = db_list_owner_devices(conn)
-    logger.info("Refreshed identity for %d owner device(s) (%d enabled).", len(devices), sum(d.enabled for d in devices))
-    return devices
-
-
 def set_device_enabled(conn, device_id: str, enabled: bool) -> OwnerDevice | None:
     return set_owner_device_enabled(conn, device_id, enabled)
 
@@ -252,11 +239,21 @@ def set_device_appearance(conn, device_id: str, icon: str | None, color: str | N
 
 
 def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
-    """Current location of every *enabled* device, or [] if not connected or none
-    of the enabled devices returned a location this call."""
+    """Refreshes every device's identity (name/type) in `owner_devices` - not just
+    enabled ones, so a newly-seen device is toggleable from the dashboard as soon
+    as this poll runs, without needing a live Apple call from the dashboard itself
+    (see module docstring; tasks/todo.md) - then returns a fresh location for
+    every *enabled* device, or [] if not connected or none of the enabled devices
+    returned a location this call."""
     api = _connect(cfg, conn)
     if api is None:
         return []
+
+    snapshot = _snapshot_devices(api)
+    upsert_owner_devices(
+        conn,
+        [{"id": d["id"], "name": d["name"], "device_type": d["device_type"]} for d in snapshot],
+    )
 
     enabled_ids = {d.id for d in db_list_owner_devices(conn) if d.enabled}
     if not enabled_ids:
@@ -265,7 +262,7 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
 
     now = dt.datetime.now(dt.timezone.utc)
     locations = []
-    for device in _snapshot_devices(api):
+    for device in snapshot:
         if device["id"] not in enabled_ids:
             continue
         if device["location"] is None:

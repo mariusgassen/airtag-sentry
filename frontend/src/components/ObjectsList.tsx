@@ -48,6 +48,11 @@ export function ObjectsList({
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // The primary device (the one driving "moved without you" away-correlation
+  // and the map's own-location trail) is the one answer to "where am I", so
+  // it belongs first, ahead of every other tracked device.
+  const sortedDevices = [...devices].sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
+
   async function handleAdd(e: FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
@@ -109,7 +114,7 @@ export function ObjectsList({
               </div>
             ) : (
               <div className="overflow-hidden rounded-2xl bg-[var(--surface)]">
-                {devices.map((d, i) => {
+                {sortedDevices.map((d, i) => {
                   const location = deviceLocations[d.id]
                   const selected = d.id === selectedDeviceId
                   return (

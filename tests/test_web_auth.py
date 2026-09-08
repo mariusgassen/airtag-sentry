@@ -254,13 +254,15 @@ def test_service_worker_script_is_never_cached(client):
         sw.unlink()
 
 
-def test_owner_devices_route_reports_apple_errors_instead_of_hanging(client, monkeypatch):
-    # Regression test: GET /api/owner-devices does a *live* Apple call on every
-    # request (owner_tracking.list_owner_devices) with no caching - a lapsed
-    # pyicloud session, a transient network error, or Apple rate limiting all
-    # used to propagate as an unhandled 500 with no detail, which the dashboard
-    # had no error handling for either - OwnerDevicesPanel.tsx just showed
-    # "Lädt…" forever. Now the route wraps it and returns a clear 400 instead.
+def test_owner_devices_route_reads_persisted_devices_without_a_live_apple_call(client, monkeypatch):
+    # Regression test: GET /api/owner-devices used to do a *live* Apple call on
+    # every request (owner_tracking.list_owner_devices) with no caching - a
+    # lapsed pyicloud session, a transient network error, or Apple rate
+    # limiting all blanked the dashboard's whole device list, since the
+    # frontend treats a failed fetch as "no devices" (see tasks/todo.md).
+    # Identity is now persisted by the background poller instead
+    # (owner_tracking.fetch_owner_device_locations), so this route just reads
+    # Postgres and can't fail because of Apple at all.
     _mock_github(monkeypatch)
     state = _extract_state(client.get("/login").text)
     client.get(f"/auth/callback?code=abc&state={state}")
@@ -269,15 +271,30 @@ def test_owner_devices_route_reports_apple_errors_instead_of_hanging(client, mon
         app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock())
     )
 
-    def _raise(*_args, **_kwargs):
-        raise RuntimeError("Invalid email/password combination.")
-
-    monkeypatch.setattr(app_module.owner_tracking, "list_owner_devices", _raise)
+    # owner_tracking.list_owner_devices (the old live-Apple-call path) was
+    # removed entirely - nothing to stub out here, this route now only ever
+    # touches Postgres.
+    monkeypatch.setattr(
+        app_module,
+        "db_list_owner_devices",
+        lambda _conn: [OwnerDevice(id="d1", name="MacBook", device_type="Mac", enabled=True, is_primary=False)],
+    )
 
     resp = client.get("/api/owner-devices")
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "Invalid email/password combination."
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "id": "d1",
+            "name": "MacBook",
+            "device_type": "Mac",
+            "enabled": True,
+            "is_primary": False,
+            "display_name": None,
+            "icon": None,
+            "color": None,
+        }
+    ]
 
 
 def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):

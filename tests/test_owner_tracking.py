@@ -1,6 +1,7 @@
 import pytest
 
 from airtag_sentry import owner_tracking
+from airtag_sentry.db import OwnerDevice
 
 
 def test_submit_owner_2fa_code_without_pending_login_raises():
@@ -27,9 +28,9 @@ def test_build_api_wraps_failed_login_with_app_specific_password_hint(monkeypatc
         owner_tracking._build_api("owner@example.com", "wrong-password", "/tmp/unused")
 
 
-def test_list_owner_devices_returns_empty_when_not_connected(monkeypatch):
+def test_fetch_owner_device_locations_returns_empty_when_not_connected(monkeypatch):
     monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: None)
-    assert owner_tracking.list_owner_devices(cfg=None, conn=None) == []
+    assert owner_tracking.fetch_owner_device_locations(cfg=None, conn=None) == []
 
 
 class _FakeStopEvent:
@@ -117,6 +118,41 @@ def test_snapshot_devices_forces_a_live_locate_before_reading_locations():
     owner_tracking._snapshot_devices(api)
 
     assert api.devices.refresh_calls == [True]
+
+
+def test_fetch_owner_device_locations_persists_identity_for_every_device_not_just_enabled(monkeypatch):
+    """Regression test: device identity used to only get persisted as a side
+    effect of a live *dashboard* request (the old list_owner_devices(), called
+    from GET /api/owner-devices) - if that request never succeeded, or nobody
+    ever opened the dashboard, owner_devices stayed empty forever even though
+    the background poller (tracker.py -> fetch_owner_device_locations) was
+    running the whole time, which also meant devices silently vanished from
+    the Objekte view and Telegram's /list (both pure DB reads). Now the
+    poller itself upserts identity for every device it sees, enabled or not,
+    on every poll cycle."""
+    enabled_device = _FakeDevice("d1", "MacBook Air", "Mac", {"latitude": 1.0, "longitude": 2.0})
+    disabled_device = _FakeDevice("d2", "iPhone", "iPhone", None)
+    api = _FakeApi([enabled_device, disabled_device])
+    monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: api)
+
+    upserted = []
+    monkeypatch.setattr(owner_tracking, "upsert_owner_devices", lambda conn, devices: upserted.extend(devices))
+    monkeypatch.setattr(
+        owner_tracking,
+        "db_list_owner_devices",
+        lambda conn: [
+            OwnerDevice(id="d1", name="MacBook Air", device_type="Mac", enabled=True, is_primary=False),
+            OwnerDevice(id="d2", name="iPhone", device_type="iPhone", enabled=False, is_primary=False),
+        ],
+    )
+
+    locations = owner_tracking.fetch_owner_device_locations(cfg=None, conn=None)
+
+    assert upserted == [
+        {"id": "d1", "name": "MacBook Air", "device_type": "Mac"},
+        {"id": "d2", "name": "iPhone", "device_type": "iPhone"},
+    ]
+    assert [loc.device_id for loc in locations] == ["d1"]
 
 
 def test_pyicloud_imports_cleanly():

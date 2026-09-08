@@ -69,8 +69,10 @@ def test_list_command_shows_devices_before_airtags(mock_post, mock_list_airtags,
 
     text = mock_post.call_args.kwargs["json"]["text"]
     assert text.index("Deine Geräte:") < text.index("Deine AirTags:")
-    assert "1. iPad" in text
-    assert "2. ⭐ iPhone von Marius" in text
+    # The primary device (own-location tracking) sorts first, matching
+    # ObjectsList.tsx - not DB order (list_owner_devices orders by name).
+    assert "1. ⭐ iPhone von Marius" in text
+    assert "2. iPad" in text
 
 
 @patch("airtag_sentry.telegram_bot.list_owner_devices")
