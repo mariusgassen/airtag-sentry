@@ -19,6 +19,8 @@ interface Props {
   airtag: Airtag
   status: Status | null
   reports: Report[]
+  selectedReportId: number | null
+  onSelectReport: (id: number) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
   onDeleted: () => void | Promise<void>
@@ -90,7 +92,16 @@ export function Row({
   )
 }
 
-export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDeleted }: Props) {
+export function AirtagDetail({
+  airtag,
+  status,
+  reports,
+  selectedReportId,
+  onSelectReport,
+  onBack,
+  onChanged,
+  onDeleted,
+}: Props) {
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
@@ -194,7 +205,9 @@ export function AirtagDetail({ airtag, status, reports, onBack, onChanged, onDel
               onClick={() => setHistoryOpen((v) => !v)}
               bordered={false}
             />
-            {historyOpen && <HistoryList reports={reports} />}
+            {historyOpen && (
+              <HistoryList reports={reports} selectedReportId={selectedReportId} onSelectReport={onSelectReport} />
+            )}
           </Section>
 
           <Section>
@@ -439,7 +452,17 @@ function KeyForm({ airtag, onDone }: { airtag: Airtag; onDone: () => void | Prom
   )
 }
 
-function HistoryList({ reports }: { reports: Report[] }) {
+function HistoryList({
+  reports,
+  selectedReportId,
+  onSelectReport,
+}: {
+  reports: Report[]
+  selectedReportId: number | null
+  onSelectReport: (id: number) => void
+}) {
+  // Newest first - reports arrive oldest-first from the backend (chronological,
+  // for trail drawing), so reverse purely for display here.
   const rows = [...reports].reverse()
   if (rows.length === 0) {
     return (
@@ -451,15 +474,19 @@ function HistoryList({ reports }: { reports: Report[] }) {
   return (
     <div className="max-h-64 overflow-y-auto border-t border-[var(--divider)]">
       {rows.map((r, i) => (
-        <div
+        <button
+          type="button"
           key={r.id}
-          className={`flex items-center justify-between px-4 py-2 text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
+          onClick={() => onSelectReport(r.id)}
+          className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
+            r.id === selectedReportId ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
+          }`}
         >
           <span>{new Date(r.timestamp).toLocaleString()}</span>
           <span className="text-[var(--text-secondary)]">
             {r.lat.toFixed(4)}, {r.lon.toFixed(4)}
           </span>
-        </div>
+        </button>
       ))}
     </div>
   )

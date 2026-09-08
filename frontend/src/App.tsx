@@ -67,6 +67,11 @@ export default function App() {
   // the first place a tracked device becomes visible outside Settings.
   const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
+  // Which of the current AirTag's `reports` is shown selected on the map/in
+  // the history list - null means "no explicit selection" (map falls back
+  // to the latest report). Reset whenever `reports` is reloaded (new AirTag,
+  // or fresh poll data) so a stale id never lingers past the data it pointed at.
+  const [selectedReportId, setSelectedReportId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   // Which detail screen (if any) the sheet/map are drilled into - an AirTag's
   // or a tracked device's. Only one of the two `current*Id` values below is
@@ -153,6 +158,7 @@ export default function App() {
     getReports(currentId).then((r) => {
       if (!cancelled) setReports(r)
     })
+    setSelectedReportId(null)
     return () => {
       cancelled = true
     }
@@ -259,6 +265,8 @@ export default function App() {
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
+            selectedReportId={selectedReportId}
+            onSelectReport={setSelectedReportId}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
           <DeviceMapCard device={selectedDevice} locations={ownerLocationHistories[selectedDevice.id] ?? []} />
@@ -352,6 +360,8 @@ export default function App() {
                 airtag={currentAirtag}
                 status={statuses[currentAirtag.id] ?? null}
                 reports={reports}
+                selectedReportId={selectedReportId}
+                onSelectReport={setSelectedReportId}
                 onBack={() => setDetail(null)}
                 onChanged={async () => {
                   await refreshAirtags()

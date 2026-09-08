@@ -2331,3 +2331,56 @@ AirTags already had:
   npx vite build && npx oxlint` clean (pre-existing `App.tsx` set-state-in-
   effect warnings only, unchanged by this diff). `docker compose config`
   (throwaway `.env`) parses cleanly.
+
+## v32: Map/history navigation - jump-to-entry, prev/next trail stepping, address lookup
+
+- [x] `App.tsx` gained a lifted `selectedReportId` (reset whenever the
+      current AirTag's `reports` reload), passed into both `MapCard.tsx` and
+      `AirtagDetail.tsx` - the two were previously independent siblings with
+      no shared selection concept (`onSelectDevice` was the closest existing
+      precedent, but that jumps *between devices*, not within one trail).
+- [x] `AirtagDetail.tsx`'s `HistoryList` rows are now buttons: clicking one
+      sets `selectedReportId`, highlighting the row (`bg-[var(--accent)]/15`,
+      matching `ObjectsList.tsx`'s existing selected-row style) and moving
+      the map marker to it. Rows were already newest-first (`reports`
+      arrives oldest-first from `fetch_reports`, reversed for display) - no
+      change needed there.
+- [x] `MapCard.tsx`: the AirTag's single marker now sits on the selected
+      report (falling back to the latest, unchanged default), panning to it
+      via a new `PanToSelection` helper (separate from `FitBounds`, which
+      only reframes the whole trail when the report list itself changes)
+      and auto-opening its popup via a `markerRef`. The popup gained an
+      absolute timestamp (`toLocaleString()`, matching `HistoryList`'s own
+      formatting) and Previous/Next ("Älter"/"Neuer") buttons that step
+      through `reports` by index, disabled at the trail's ends - the same
+      `onSelectReport` callback drives both list-click and popup-button
+      selection.
+- [x] New `airtag_sentry/geocode.py`: best-effort reverse geocoding via OSM
+      Nominatim (no separate API key needed - same OSM data already backing
+      the map tiles), rate-limited to Nominatim's 1 req/s policy and cached
+      in-process by rounded lat/lon (not persisted - a display nicety, not
+      data worth a migration/table for). Never raises; a failed lookup just
+      means no address line. New `GET /api/geocode?lat=&lon=` route;
+      frontend `getAddress()` + `MapCard.tsx`'s `AddressLine` (own
+      loading/cache state, renders nothing until/unless a result lands).
+
+## Review (v32)
+
+- Backend: new `airtag_sentry/geocode.py`, one new route in `web/app.py`.
+  Frontend: `api.ts`, `App.tsx`, `AirtagDetail.tsx`, `MapCard.tsx`. No CLI
+  or schema changes - this is a session-scoped UI/API addition, nothing
+  persisted.
+- Verified: new `tests/test_geocode.py` (4 cases: address returned, cache
+  hit by rounded coordinates, network failure → `None`, missing
+  `display_name` → `None`) via `pytest tests/test_geocode.py` - all pass.
+  Full `pytest` against a real Postgres and `docker compose config` with a
+  throwaway `.env` weren't runnable in this sandbox (no Docker daemon
+  available here); ran the DB-independent suites
+  (`test_movement.py`/`test_config.py`/`test_keystore.py`) and a plain
+  `from airtag_sentry.web.app import create_app` import check instead, both
+  clean. `docker compose config` (throwaway `.env`, syntax-only - doesn't
+  need the daemon) parses cleanly. `cd frontend && npx tsc -b && npx vite
+  build && npx oxlint` clean (same pre-existing `App.tsx` set-state-in-
+  effect warnings as v31, plus one new one of the same class in
+  `MapCard.tsx`'s `AddressLine` - consistent with the rest of the codebase,
+  not a new warning category).
