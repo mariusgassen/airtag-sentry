@@ -27,8 +27,7 @@ timeline.
 
 | Service     | Role                                                                                                  |
 |-------------|-------------------------------------------------------------------------------------------------------|
-| `app`       | APScheduler polling loop (default every 15 min): fetch → dedupe → movement check → notify             |
-| `dashboard` | FastAPI API + installable Vite/React PWA — map, timeline, AirTag management, notification opt-in      |
+| `dashboard` | FastAPI API + installable Vite/React PWA, and an in-process APScheduler polling loop (default every 15 min: fetch → dedupe → movement check → notify) |
 | `anisette`  | [`anisette-v3-server`](https://github.com/Dadoum/anisette-v3-server), Apple's authentication handshake |
 | `postgres`  | Stores location reports, alerts, and push subscriptions                                               |
 
@@ -107,7 +106,7 @@ Open `http://localhost:8000`, log in with GitHub, then in Settings ⚙️ →
 **Apple-Konten** connect your Apple ID (email, password, then a 2FA code if
 prompted) — this replaces the old CLI login step, and needs a live 2FA code
 from your phone the same way. The resulting session (`data/account.json`)
-is reused by the scheduler and dashboard after that, no redeploy or
+is reused by the dashboard (poller included) after that, no redeploy or
 container access needed to reconnect. Then add each AirTag's key from its
 detail view. A tag without a key yet is simply skipped each poll (logged,
 not fatal) until you add one.
@@ -137,8 +136,7 @@ instead of using the email/password form.
 
 ```
 python -m airtag_sentry poll    # run a single poll immediately and exit
-python -m airtag_sentry run     # run the scheduler forever (used by the `app` service)
-python -m airtag_sentry serve   # run the dashboard (used by the `dashboard` service)
+python -m airtag_sentry serve   # run the dashboard + background poller (used by the `dashboard` service)
 ```
 
 ## Owner device tracking (optional): "moved without you" alerts
@@ -236,8 +234,8 @@ third, additional alert — it never replaces the other two:
 
 **Dashboard settings** (⚙️ panel, stored in Postgres) — polling interval,
 the movement thresholds above, and (if owner device tracking is configured)
-the away-distance/max-age thresholds. Changes apply on the `app` service's
-next poll, no restart needed.
+the away-distance/max-age thresholds. Changes apply on the next poll, no
+restart needed.
 
 ## Installing the dashboard as an app (PWA)
 
@@ -271,8 +269,8 @@ deploys reflect whether it's actually serving.
 ## Database migrations
 
 Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/).
-`poll`/`run`/`serve` all apply pending migrations automatically at startup,
-so there's no separate migration step in normal operation.
+`poll`/`serve` both apply pending migrations automatically at startup, so
+there's no separate migration step in normal operation.
 
 To add a schema change: `alembic revision -m "description"`, fill in
 `upgrade()`/`downgrade()` in the generated file, and add a new migration

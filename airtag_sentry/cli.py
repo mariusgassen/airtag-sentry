@@ -1,4 +1,9 @@
-"""CLI entrypoints: `python -m airtag_sentry {poll,run,serve}`.
+"""CLI entrypoints: `python -m airtag_sentry {poll,serve}`.
+
+`serve` runs the FastAPI dashboard *and* the background poller (started
+from its lifespan hook, see web/app.py and scheduler.py) in one process -
+there's no separate long-running poller command. `poll` remains for a
+one-off manual poll independent of the dashboard process.
 
 Apple ID login (AirTag tracking and optional owner device tracking) is a
 dashboard UI flow (Settings panel), not a CLI command - see
@@ -19,8 +24,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="airtag_sentry")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("poll", help="Run a single poll immediately and exit.")
-    sub.add_parser("run", help="Run the scheduler forever (polling interval set in the dashboard's Settings panel).")
-    sub.add_parser("serve", help="Run the FastAPI dashboard.")
+    sub.add_parser(
+        "serve",
+        help="Run the FastAPI dashboard and the background poller "
+        "(polling interval set in the dashboard's Settings panel).",
+    )
 
     args = parser.parse_args(argv)
     cfg = load_config()
@@ -31,12 +39,6 @@ def main(argv: list[str] | None = None) -> int:
 
         upgrade_to_head()
         poll_once(cfg)
-    elif args.command == "run":
-        from airtag_sentry.migrate import upgrade_to_head
-        from airtag_sentry.scheduler import run_forever
-
-        upgrade_to_head()
-        run_forever(cfg)
     elif args.command == "serve":
         import uvicorn
 

@@ -7,7 +7,7 @@ repository. Read this before making changes.
 
 **Everything the user needs to do to operate this app should be doable from
 the dashboard UI.** The CLI (`python -m airtag_sentry ...`) only has
-`poll`/`run`/`serve` - container entrypoints, not user setup steps. Apple ID
+`poll`/`serve` - container entrypoints, not user setup steps. Apple ID
 login (AirTag tracking, and optional owner device tracking) used to be
 CLI-only interactive scripts; it's now a dashboard Settings ⚙️ → **Apple-Konten**
 flow (`auth.py`/`owner_tracking.py`'s stateful `start_login`/`request_2fa_code`/
@@ -56,16 +56,18 @@ an obvious place to go without a layout change.
 
 ## Project shape
 
-- `airtag_sentry/` — Python backend: `tracker.py`/`scheduler.py` (the `app`
-  service, a polling loop), `web/app.py` (FastAPI dashboard API + static
-  PWA, the `dashboard` service), `db.py` (plain psycopg, no ORM),
-  `movement.py` (pure, DB-free alert logic — keep it that way), `auth.py` /
-  `owner_tracking.py` (two independent Apple sessions — AirTag lookups via
-  `FindMy.py`, owner-device location via `pyicloud` — don't conflate them).
+- `airtag_sentry/` — Python backend, all one `dashboard` service/container:
+  `web/app.py` (FastAPI dashboard API + static PWA) starts the background
+  poller (`tracker.py`/`scheduler.py`, an APScheduler `BackgroundScheduler`)
+  from its lifespan hook - the two only talk to each other through Postgres,
+  never directly. Also `db.py` (plain psycopg, no ORM), `movement.py` (pure,
+  DB-free alert logic — keep it that way), `auth.py` / `owner_tracking.py`
+  (two independent Apple sessions — AirTag lookups via `FindMy.py`,
+  owner-device location via `pyicloud` — don't conflate them).
 - `frontend/` — Vite + React + TypeScript PWA, builds straight into
   `airtag_sentry/web/static`.
 - `alembic/versions/` — schema migrations. Never edit a migration that has
-  already shipped; add a new one. `poll`/`run`/`serve` apply pending
+  already shipped; add a new one. `poll`/`serve` apply pending
   migrations automatically at startup.
 - `tasks/todo.md` — historical changelog (`vN:` entries + a review section
   per version). Add a new entry here for any shipped feature.

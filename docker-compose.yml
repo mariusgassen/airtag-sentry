@@ -40,19 +40,26 @@ services:
     volumes:
       - anisette_data:/home/Alcoholic/.config/anisette-v3/
 
-  app:
+  dashboard:
     build: .
     restart: unless-stopped
-    command: ["run"]
+    command: ["serve"]
     depends_on:
       postgres:
         condition: service_healthy
       anisette:
         condition: service_started
-    # No healthcheck here: this process has no HTTP surface to probe (it's the
-    # scheduler loop, see scheduler.py), so Docker/Coolify's own "is the
-    # container still running" state is what tracks its health - the same
-    # signal `restart: unless-stopped` already acts on.
+    # The image is python:3.14-slim (no curl/wget), so probe with the
+    # interpreter that's already there. Hardcodes WEB_PORT's fixed default
+    # (see the README's Coolify section for why WEB_PORT isn't overridable)
+    # and hits it from inside the container, so it's unaffected by
+    # SERVICE_FQDN_DASHBOARD_8000/TLS termination at Coolify's edge.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     # env_file for plain `docker compose up`; the explicit environment: block
     # below is what makes each variable show up individually in Coolify's UI.
     env_file: .env
@@ -74,47 +81,10 @@ services:
       ANISETTE_MODE: remote
       ANISETTE_REMOTE_URL: http://anisette:6969
     volumes:
-      - app_data:/app/data
-
-  dashboard:
-    build: .
-    restart: unless-stopped
-    command: ["serve"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    # The image is python:3.14-slim (no curl/wget), so probe with the
-    # interpreter that's already there. Hardcodes WEB_PORT's fixed default
-    # (see the README's Coolify section for why WEB_PORT isn't overridable)
-    # and hits it from inside the container, so it's unaffected by
-    # SERVICE_FQDN_DASHBOARD_8000/TLS termination at Coolify's edge.
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=5)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    env_file: .env
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: postgres
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
-      GITHUB_ALLOWED_LOGIN: ${GITHUB_ALLOWED_LOGIN}
-      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
-      AIRTAG_KEY_ENCRYPTION_KEY: ${AIRTAG_KEY_ENCRYPTION_KEY}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
-      VAPID_SUBJECT: ${VAPID_SUBJECT}
-    volumes:
-      # Read-write (not :ro): the Settings panel's Apple-ID login flow runs in
-      # this service and writes/deletes the AirTag session file here
-      # (APPLE_STORE_PATH) and the owner-tracking session cache
-      # (APPLE_OWNER_SESSION_PATH) - previously only the `app` service's CLI
-      # login command wrote to this volume, so it was safe to mount read-only
-      # here; that's no longer true now that login is a dashboard UI action.
+      # Read-write (not :ro): the Settings panel's Apple-ID login flow, the
+      # poller, and migrations all run in this one service, and each writes
+      # here - the AirTag session file (APPLE_STORE_PATH), the owner-tracking
+      # session cache (APPLE_OWNER_SESSION_PATH).
       - app_data:/app/data
 
 volumes:

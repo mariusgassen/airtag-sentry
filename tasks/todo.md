@@ -2076,3 +2076,70 @@ would also silence web push - a separate change).
   a real `/list`/`/where` round trip including tapping an inline-keyboard
   button, needs a live bot token + chat and a publicly reachable deployment
   to test against. Do that smoke test before relying on this in production.
+
+## v28: Merge `app` service into `dashboard` (one container for poller + web)
+
+Trigger: user request - two containers doing nothing but talking through
+Postgres was unnecessary operational overhead (two things to deploy/watch
+in Coolify), and it meant only `dashboard` had a Docker healthcheck since
+`app`'s scheduler loop had no HTTP surface to probe.
+
+- [x] `scheduler.py`: `run_forever()` (blocking, its own process) replaced
+      with `start_scheduler(cfg)`, which uses APScheduler's
+      `BackgroundScheduler` (own worker thread, non-blocking) and returns
+      the scheduler instance instead of running forever.
+- [x] `web/app.py`: `create_app()` now takes a `lifespan` hook that calls
+      `start_scheduler(cfg)` on startup and `scheduler.shutdown(wait=False)`
+      on shutdown - the poller and the dashboard are now one process, still
+      only talking to each other through Postgres (`get_conn()` opens a
+      fresh connection per call already, so no new concurrency handling
+      needed between the scheduler thread and request-handling threads).
+      The first poll is scheduled for "now" via `add_job` rather than run
+      inline, so `/health` isn't blocked behind an Apple round-trip at
+      startup.
+- [x] `cli.py`: dropped the `run` subcommand entirely (no compat shim, per
+      this repo's established convention) - `poll`/`serve` remain, `serve`
+      now implicitly starts the poller too.
+- [x] `Dockerfile`: default `CMD` changed from `["run"]` to `["serve"]`.
+- [x] `docker-compose.yml`: deleted the `app` service; merged its
+      `anisette` dependency and `ANISETTE_MODE`/`ANISETTE_REMOTE_URL` env
+      vars into `dashboard`. Kept the service name `dashboard` (not `app`)
+      and the `app_data` volume name unchanged, since Coolify's
+      `SERVICE_FQDN_DASHBOARD_8000` and the persisted volume both key off
+      those names - renaming either would cost the user their live
+      deployment's public domain/TLS binding or (for the volume) their
+      persisted Apple session data for no functional reason.
+- [x] `README.md`, `CLAUDE.md`, `.env.example`: updated every place
+      describing the two-service split (services table, CLI reference,
+      Coolify section, migrations section, project-shape doc) to describe
+      one `dashboard` service that runs both roles.
+
+## Review (v28)
+
+- 8 files touched (3 backend, 1 Dockerfile, 1 compose, 3 docs/config), no
+  new dependencies (`apscheduler`'s `BackgroundScheduler` ships in the same
+  `apscheduler>=3.10` already installed), no migration - a pure
+  process/deployment topology change. No compat shim for the removed `run`
+  command, per this repo's established "no backward-compatibility shims"
+  convention - anyone with a script or Coolify config still invoking
+  `python -m airtag_sentry run` needs to switch to `serve`.
+- Verified: started a local Postgres and ran the full suite for real -
+  `pytest -q` → 74 passed, 0 skipped (this sandbox normally has no
+  Postgres, so DB-dependent tests usually skip; started one for this
+  change specifically since it touches `create_app()`'s startup path).
+  Confirmed none of the existing tests trigger the new lifespan hook at
+  all (`TestClient(app_module.create_app(cfg), ...)` is never used as a
+  context manager in this codebase, so ASGI lifespan/startup never runs
+  during those HTTP-route tests - ruled out by reading `tests/test_web_auth.py`
+  before assuming it was safe).
+  Additionally wrote a standalone script exercising `create_app()` inside
+  `with TestClient(app) as client:` (the one thing no existing test does)
+  against the same local Postgres: confirmed `/health` returns 200
+  immediately without waiting on a poll, and the scheduler shuts down
+  cleanly on exit with no dangling thread errors.
+  `docker compose config` (throwaway `.env`) parses cleanly and lists only
+  `postgres`, `anisette`, `dashboard` - no `app`.
+- Not re-run: frontend `tsc`/`vite build`/`oxlint` - this change touches no
+  frontend code, so nothing there could have regressed. Re-run after
+  merging in v27's Telegram changes: still nothing to verify there, since
+  this merge touches no frontend code either.

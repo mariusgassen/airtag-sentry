@@ -22,4 +22,4 @@ COPY alembic ./alembic
 RUN pip install --no-cache-dir .
 
 ENTRYPOINT ["python", "-m", "airtag_sentry"]
-CMD ["run"]
+CMD ["serve"]
