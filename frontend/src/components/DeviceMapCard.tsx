@@ -5,8 +5,8 @@ import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
-import { AddressLine, FitBounds, InvalidateSizeOnResize, NoReportsView, PanToSelection } from './MapCard'
-import { ChevronLeftIcon, ChevronRightIcon, LocationArrowIcon } from './icons'
+import { AddressLine, FitBounds, InfoRow, InvalidateSizeOnResize, NoReportsView, PanToSelection, POPUP_WIDTH_CLASS } from './MapCard'
+import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, LocationArrowIcon } from './icons'
 
 /** Single-device counterpart to MapCard - one owner device's own location
  * trail, drilled into from ObjectsList (device selected -> DeviceDetail).
@@ -64,17 +64,19 @@ export function DeviceMapCard({
       )}
       <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(device)}>
         <Popup>
-          <div className="text-sm">
-            <p className="mb-1 font-medium">{deviceLabel(device)}</p>
-            <p className="mb-1 text-[var(--text-secondary)]">{new Date(displayed.recorded_at).toLocaleString()}</p>
+          <div className={POPUP_WIDTH_CLASS}>
+            <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
+            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+              {new Date(displayed.recorded_at).toLocaleString()}
+            </InfoRow>
             <AddressLine lat={displayed.lat} lon={displayed.lon} />
             {onSelectLocation && (older || newer) && (
-              <div className="mb-2 flex gap-2">
+              <div className="mt-3 flex gap-1 rounded-lg bg-[var(--surface-2)] p-1">
                 <button
                   type="button"
                   onClick={() => older && onSelectLocation(older.recorded_at)}
                   disabled={!older}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--accent)] disabled:opacity-30"
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
                 >
                   <ChevronLeftIcon className="h-3.5 w-3.5" />
                   Älter
@@ -83,7 +85,7 @@ export function DeviceMapCard({
                   type="button"
                   onClick={() => newer && onSelectLocation(newer.recorded_at)}
                   disabled={!newer}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--accent)] disabled:opacity-30"
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
                 >
                   Neuer
                   <ChevronRightIcon className="h-3.5 w-3.5" />
@@ -94,7 +96,7 @@ export function DeviceMapCard({
               href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
             >
               <LocationArrowIcon className="h-3.5 w-3.5" />
               In Karten öffnen

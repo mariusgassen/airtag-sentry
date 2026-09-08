@@ -118,6 +118,36 @@ body {
   color: var(--text-secondary) !important;
 }
 
+/* Leaflet's default popup is a plain white card with a heavy drop shadow
+   and a system-blue close glyph - it never adapted to the dark map/app
+   theme above, sitting on every marker as a jarring light box. Re-skin the
+   chrome itself here so every popup (MapCard/DeviceMapCard/OverviewMap)
+   automatically matches the app instead of fighting it with per-popup
+   inline styles. */
+.leaflet-popup-content-wrapper {
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 14px;
+  border: 1px solid var(--divider);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+.leaflet-popup-content {
+  margin: 0.8rem 1rem;
+  line-height: 1.4;
+}
+.leaflet-popup-tip {
+  background: var(--surface);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.25);
+}
+.leaflet-popup-close-button {
+  color: var(--text-secondary) !important;
+  font-size: 20px !important;
+  padding: 6px 8px 0 0 !important;
+}
+.leaflet-popup-close-button:hover {
+  color: var(--text) !important;
+}
+
 /* A pulsing "you are here" marker for the map's no-reports-yet fallback -
    distinct from the default red AirTag pin so it's never mistaken for a
    device location. */
