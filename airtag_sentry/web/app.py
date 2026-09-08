@@ -1,6 +1,11 @@
 """FastAPI dashboard: read-only reports/status API, push subscription endpoints,
 and the static PWA (Leaflet map + timeline + manifest/service worker).
 
+Also owns the background poller (see scheduler.py): it's started from this
+app's lifespan hook and runs on its own thread for the life of the process,
+so the dashboard and the poller are one deployable unit that only talk to
+each other through Postgres, never directly.
+
 Routes are plain `def` (not `async def`) so Starlette runs the sync psycopg calls
 in its threadpool automatically - no async DB driver needed at this scale.
 """
@@ -13,6 +18,7 @@ import logging
 import re
 import secrets
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +59,7 @@ from airtag_sentry.db import (
     set_telegram_credentials,
     update_settings,
 )
+from airtag_sentry.scheduler import start_scheduler
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -282,7 +289,16 @@ def _slugify(name: str) -> str:
 
 def create_app(cfg: Config | None = None) -> FastAPI:
     cfg = cfg or load_config()
-    app = FastAPI(title="AirTagSentry")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        scheduler = start_scheduler(cfg)
+        try:
+            yield
+        finally:
+            scheduler.shutdown(wait=False)
+
+    app = FastAPI(title="AirTagSentry", lifespan=lifespan)
 
     def _resolve_airtag_id(conn, airtag_id: str | None) -> str:
         airtags = list_airtags(conn)
