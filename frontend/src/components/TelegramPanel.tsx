@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
-import { deleteTelegramCredentials, getTelegramStatus, setTelegramCredentials } from '../api'
+import {
+  deleteTelegramCredentials,
+  disableTelegramCommands,
+  enableTelegramCommands,
+  getTelegramStatus,
+  setTelegramCredentials,
+} from '../api'
 import { ChevronRightIcon, PaperPlaneIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 
 export function TelegramPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [chatId, setChatId] = useState<string | null>(null)
+  const [botCommandsEnabled, setBotCommandsEnabled] = useState(false)
+  const [commandsBusy, setCommandsBusy] = useState(false)
+  const [commandsError, setCommandsError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [botToken, setBotToken] = useState('')
   const [chatIdInput, setChatIdInput] = useState('')
@@ -16,6 +25,7 @@ export function TelegramPanel() {
     getTelegramStatus().then((s) => {
       setConnected(s.connected)
       setChatId(s.chat_id)
+      setBotCommandsEnabled(s.bot_commands_enabled)
     })
   }, [])
 
@@ -23,6 +33,24 @@ export function TelegramPanel() {
     const s = await getTelegramStatus()
     setConnected(s.connected)
     setChatId(s.chat_id)
+    setBotCommandsEnabled(s.bot_commands_enabled)
+  }
+
+  async function handleToggleCommands() {
+    setCommandsBusy(true)
+    setCommandsError(null)
+    try {
+      if (botCommandsEnabled) {
+        await disableTelegramCommands()
+      } else {
+        await enableTelegramCommands()
+      }
+      await refreshStatus()
+    } catch (err) {
+      setCommandsError((err as Error).message)
+    } finally {
+      setCommandsBusy(false)
+    }
   }
 
   function reset() {
@@ -84,10 +112,32 @@ export function TelegramPanel() {
 
       {connected && (
         <div className="border-t border-[var(--divider)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Bot-Befehle</p>
+              <p className="text-[0.78rem] text-[var(--text-secondary)]">
+                /list und /where direkt im Chat abfragen.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleCommands}
+              disabled={commandsBusy}
+              className={`rounded-lg border px-3 py-1.5 text-sm disabled:opacity-60 ${
+                botCommandsEnabled
+                  ? 'border-[var(--destructive)] text-[var(--destructive)]'
+                  : 'border-[var(--accent)] text-[var(--accent)]'
+              }`}
+            >
+              {botCommandsEnabled ? 'Deaktivieren' : 'Aktivieren'}
+            </button>
+          </div>
+          {commandsError && <p className="mt-2 text-[0.78rem] text-[var(--destructive)]">{commandsError}</p>}
+
           <button
             type="button"
             onClick={handleDisconnect}
-            className="rounded-lg border border-[var(--destructive)] px-3 py-1.5 text-sm text-[var(--destructive)]"
+            className="mt-3 rounded-lg border border-[var(--destructive)] px-3 py-1.5 text-sm text-[var(--destructive)]"
           >
             Trennen
           </button>

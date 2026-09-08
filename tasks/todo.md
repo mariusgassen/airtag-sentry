@@ -2001,3 +2001,78 @@ very first command.
   verbatim (`pip install cryptography py-vapid` only) in a fresh venv and
   confirmed `python scripts/generate_vapid_keys.py` succeeds and prints
   `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` as expected.
+
+## v27: Inbound Telegram bot commands (/list, /where)
+
+Trigger: the Telegram integration was outbound-only (movement alerts via
+`notifiers/telegram.py`'s `sendMessage`) - user wanted to be able to *ask*
+the bot for its tracked AirTags and their locations instead. Two explicit
+requirements: `/list` so the user never has to remember AirTag names/ids,
+and any device-taking command falls back to a two-step inline-keyboard
+picker when the name is omitted rather than erroring.
+
+- [x] New Alembic migration (`9d21b6f4a7c3`, `down_revision = f3a4c8e1d9b2`):
+      `telegram_settings` gains `bot_commands_enabled BOOLEAN` and
+      `webhook_secret TEXT` - the anti-spoofing token handed to Telegram's
+      `setWebhook`, stored in plaintext (not user secret material, unlike
+      `bot_token_encrypted`).
+- [x] `db.py`: `TelegramCredentials` gained those two fields;
+      `set_telegram_credentials` now also resets them on reconnect (a new
+      bot token invalidates any webhook registered against the old one);
+      new `set_telegram_bot_commands(conn, enabled, webhook_secret)`.
+- [x] New `airtag_sentry/telegram_bot.py`: the inbound counterpart to
+      `notifiers/telegram.py`. `handle_update()` routes `/help`, `/list`,
+      `/where [name]` and `callback_query` picker selections. Every reply
+      path is gated on the update's `chat.id` matching the one configured
+      `chat_id` *before* touching any data - a stranger who finds/adds the
+      bot elsewhere gets silence, not even a response that would confirm
+      the bot exists. `/where` with no arg (or an ambiguous name) sends an
+      inline keyboard built from `list_airtags()`'s order; the tap comes
+      back as a `callback_query` with `callback_data="where:<index>"` -
+      Telegram's own round-trip *is* the two-step state, no server-side
+      "pending command" table needed.
+- [x] `web/app.py`: `/api/telegram/webhook` (public - Telegram can't send
+      the session cookie, so it authenticates itself via
+      `X-Telegram-Bot-Api-Secret-Token` compared with `secrets.compare_digest`
+      against the stored secret) plus `POST`/`DELETE
+      /api/notifications/telegram/commands` to enable/disable it. The
+      webhook URL is derived from the enabling request's own
+      `request.base_url`, not a new config value - `cli.py`'s `serve`
+      already runs uvicorn with `proxy_headers=True`, so it already
+      reflects the public host behind Coolify's edge TLS. Disabling
+      Telegram entirely (`telegram_disconnect`) now also tears down the
+      webhook if one was registered.
+- [x] Frontend: `TelegramPanel.tsx` gained an "Aktivieren/Deaktivieren"
+      toggle for bot commands once connected; `api.ts` gained
+      `enableTelegramCommands`/`disableTelegramCommands` and
+      `TelegramStatus.bot_commands_enabled`.
+- [x] Tests: `test_db.py` extended the Telegram round-trip test and added
+      `test_telegram_bot_commands_set_round_trip` (including the
+      reconnect-resets-state case). New `test_telegram_bot.py` unit-tests
+      `handle_update`'s routing, name matching, the picker, callback-query
+      resolution, and the unauthorized-chat-id silence, all via mocked
+      `requests.post` (no real Telegram API calls).
+
+Deliberately deferred: `/status` and `/alerts` (more read-only commands),
+and `/mute`/`unmute` (snoozing alerts needs to be checked inside the shared
+`notify_all()` pipeline in `tracker.py`, not just the Telegram bot, so it
+would also silence web push - a separate change).
+
+## Review (v27)
+- 8 files touched (4 backend + 1 migration, 2 frontend, 2 tests), no new
+  dependencies.
+- Verified: started a local Postgres 16 in this sandbox (no Docker daemon
+  available here), created `airtag_sentry`/`airtag_sentry_test`, ran the
+  full suite in a scratch venv - `pytest`: 83 passed (81 prior + 2 new
+  `test_db.py` cases), including the new `test_telegram_bot.py` (7 tests)
+  and `test_web_auth.py` (exercises the full `web/app.py` import, so the
+  new routes/imports are at least import-clean). `cd frontend && npx tsc -b
+  && npx vite build` clean; `npx oxlint` shows the same three pre-existing
+  `set-state-in-effect` warnings, none new. `docker compose config` parses
+  cleanly with a throwaway `.env` containing no new env vars (by design -
+  the webhook URL comes from the request, not config).
+- Not verified: an actual Telegram bot end-to-end (no bot token available
+  in this sandbox) - registering a real webhook via `setWebhook`, and then
+  a real `/list`/`/where` round trip including tapping an inline-keyboard
+  button, needs a live bot token + chat and a publicly reachable deployment
+  to test against. Do that smoke test before relying on this in production.
