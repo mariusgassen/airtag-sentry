@@ -2451,3 +2451,38 @@ doesn't happen a third time.
   from a device's history row, Previous/Next stepping at both ends of a
   device's trail, address text appearing) not verified in this sandbox -
   same limitation noted in v32.
+
+## v34: Fix `/where` only ever offering AirTags, never owner devices
+
+v27 shipped `/where` AirTag-only (before owner devices existed as an
+Objekt), and unlike `/list` it never got the parity pass v31 gave every
+other user-facing surface - `_handle_where`/`_send_picker`/
+`_format_location`/the callback handler all called `list_airtags` and
+nothing else, so the picker, name search, and tap-to-select flow could
+never surface a device no matter how it was invoked.
+
+- [x] `telegram_bot.py`: replaced the AirTag-only list with `_where_items`,
+      returning a combined `(kind, obj)` sequence - enabled devices
+      (primary first), then AirTags - matching `_format_list`'s existing
+      ordering. Picker buttons, name search, and `_format_location` now
+      dispatch on `kind`; `_format_location`'s device branch reads
+      `fetch_owner_device_location_history(..., limit=1)[0]` (newest-first,
+      unlike `fetch_reports`, which is oldest-first hence `reports[-1]`).
+- [x] Picker `callback_data` stays an index (`where:<n>`) into that same
+      combined list, rebuilt identically by the callback handler - avoids
+      embedding AirTag/device ids (arbitrary length/charset) in Telegram's
+      64-byte callback_data, same reasoning as the pre-existing AirTag-only
+      version.
+- [x] Help text and the `/`-menu command description now say "Geräts oder
+      AirTags" instead of just "AirTags".
+- [x] `test_telegram_bot.py`: updated the `/where` tests to patch
+      `list_owner_devices`, and added device-picker-ordering and
+      device-name-search-to-location tests mirroring the existing AirTag
+      ones.
+
+## Review (v34)
+
+- Backend only: `telegram_bot.py`, `test_telegram_bot.py`. No schema/DB
+  changes - `fetch_owner_device_location_history` already existed.
+- Verified: `pytest tests/test_telegram_bot.py` (10 tests, all passing).
+  Did not re-run the full suite (unrelated modules untouched).
