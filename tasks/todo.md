@@ -2570,3 +2570,70 @@ Three map-navigation polish items, all applied to both `MapCard.tsx`
   stepper fix is a diagnosed root-cause fix (WebKit's disabled-control
   tap-through) rather than one reproduced live; worth a real-device check
   on the next iOS test pass.
+
+## v37: Switch dashboard login from GitHub OAuth to OIDC (Authentik)
+
+The dashboard's single-user login was hardcoded to GitHub's OAuth API
+(authorize/token/user endpoints, `login` claim). Replaced with a generic
+OIDC client so it works against any OIDC provider - built and tested
+against Authentik, with an application/provider already set up there.
+
+- [x] `config.py`'s `AuthConfig`: `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`/
+      `GITHUB_ALLOWED_LOGIN` replaced with `OIDC_ISSUER`/`OIDC_CLIENT_ID`/
+      `OIDC_CLIENT_SECRET`/`OIDC_ALLOWED_USERNAME` (`SESSION_SECRET_KEY`
+      unchanged). No compat shim for the old names - breaking config change,
+      per this repo's established convention.
+- [x] `web/app.py`: registers an `authlib` `OAuth` client
+      (`authlib.integrations.starlette_client`) against
+      `<OIDC_ISSUER>/.well-known/openid-configuration` - discovers
+      authorize/token/userinfo/jwks endpoints instead of hardcoding a
+      provider's URLs, with PKCE (S256) and the `openid profile` scope
+      (`profile` is what carries `preferred_username`). Exposed on
+      `app.state.oauth` so tests can seed fake discovery metadata and stub
+      the token/userinfo HTTP calls without a real IdP.
+- [x] `/login`'s branded page now links to a new `/auth/login` (starts the
+      authlib redirect) instead of embedding a provider-specific authorize
+      link with a hand-minted state; `/auth/callback` exchanges the code via
+      authlib, fetches userinfo, and gates on `OIDC_ALLOWED_USERNAME`
+      against the `preferred_username` claim. Dropped the hand-rolled
+      pending-OAuth-state list (`_prune_oauth_states` et al.) - authlib owns
+      state/nonce/PKCE-verifier storage in the session now. `/logout`
+      unchanged (local session clear only - no RP-initiated Authentik
+      logout, since that needs a post-logout redirect URI we can't assume
+      is registered).
+- [x] Dropped `authlib<1.8` pin reasoning documented inline in
+      `pyproject.toml`: 1.8 moves its httpx integration to a separate
+      `httpx2` package, falling back to `httpx` with a deprecation warning
+      on every request otherwise - stayed on the last release using `httpx`
+      directly.
+- [x] `.env.example`, `docker-compose.yml`, `README.md` updated for the new
+      env vars and an Authentik-flavored setup flow (issuer, client id/
+      secret, allowed username, redirect URI).
+
+## Review (v37)
+
+- Backend only: `config.py`, `web/app.py`, `pyproject.toml`,
+  `tests/test_config.py`, `tests/test_web_auth.py`. No schema/DB changes,
+  no frontend changes (the login page is server-rendered).
+- `test_web_auth.py`'s login-flow tests were rewritten around authlib: a
+  `client` fixture seeds `app.state.oauth.authentik.server_metadata` with
+  fake discovery data (`_loaded_at` already set) so tests never hit a real
+  network, and only the actual token-exchange/userinfo calls are stubbed
+  per test - state/PKCE/nonce handling in `authorize_access_token()` runs
+  for real. One behavior changed under the hood: authlib's Starlette
+  integration keeps only the *most recently minted* pending state per
+  session (to bound the signed cookie's size), unlike the old hand-rolled
+  list that tolerated many concurrent ones - replaced
+  `test_concurrent_login_hit_does_not_invalidate_in_flight_state` with
+  `test_second_login_link_supersedes_the_first`, since that concurrency no
+  longer matters: `/login` itself no longer mints state, so a background
+  PWA wake-up redirected there (the actual scenario the old list defended
+  against) never touches `/auth/login` at all.
+- Verified: `pytest` against a real local Postgres (migration-free change;
+  full suite green, no pre-existing-failure caveat this time since
+  `web/static/assets` was empty in this sandbox). `docker compose config`
+  with a throwaway `.env` using the new `OIDC_*` vars parses cleanly. Did
+  not re-run the frontend build/lint (no frontend files touched). Manual
+  browser click-through against a real Authentik instance not verified in
+  this sandbox (no real IdP available here) - the mocked-network test
+  coverage above is what stands in for it.

@@ -44,9 +44,10 @@ def test_database_url_requires_postgres_vars(monkeypatch):
 
 @pytest.fixture()
 def required_env(postgres_env, monkeypatch):
-    monkeypatch.setenv("GITHUB_CLIENT_ID", "client-id")
-    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "client-secret")
-    monkeypatch.setenv("GITHUB_ALLOWED_LOGIN", "octocat")
+    monkeypatch.setenv("OIDC_ISSUER", "https://authentik.example.com/application/o/airtag-sentry/")
+    monkeypatch.setenv("OIDC_CLIENT_ID", "client-id")
+    monkeypatch.setenv("OIDC_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("OIDC_ALLOWED_USERNAME", "me")
     monkeypatch.setenv("SESSION_SECRET_KEY", "session-secret")
     monkeypatch.setenv(
         "AIRTAG_KEY_ENCRYPTION_KEY",

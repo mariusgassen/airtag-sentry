@@ -38,9 +38,10 @@ class WebConfig:
 
 @dataclasses.dataclass
 class AuthConfig:
-    github_client_id: str
-    github_client_secret: str
-    allowed_login: str
+    oidc_issuer: str
+    oidc_client_id: str
+    oidc_client_secret: str
+    oidc_allowed_username: str
     session_secret_key: str
 
 
@@ -126,16 +127,18 @@ def load_config() -> Config:
 
     web = WebConfig(host=_env_str("WEB_HOST", "0.0.0.0"), port=_env_int("WEB_PORT", 8000))
 
-    github_client_id = _env("GITHUB_CLIENT_ID")
-    github_client_secret = _env("GITHUB_CLIENT_SECRET")
-    allowed_login = _env("GITHUB_ALLOWED_LOGIN")
+    oidc_issuer = _env("OIDC_ISSUER")
+    oidc_client_id = _env("OIDC_CLIENT_ID")
+    oidc_client_secret = _env("OIDC_CLIENT_SECRET")
+    oidc_allowed_username = _env("OIDC_ALLOWED_USERNAME")
     session_secret_key = _env("SESSION_SECRET_KEY")
     missing_auth = [
         name
         for name, value in [
-            ("GITHUB_CLIENT_ID", github_client_id),
-            ("GITHUB_CLIENT_SECRET", github_client_secret),
-            ("GITHUB_ALLOWED_LOGIN", allowed_login),
+            ("OIDC_ISSUER", oidc_issuer),
+            ("OIDC_CLIENT_ID", oidc_client_id),
+            ("OIDC_CLIENT_SECRET", oidc_client_secret),
+            ("OIDC_ALLOWED_USERNAME", oidc_allowed_username),
             ("SESSION_SECRET_KEY", session_secret_key),
         ]
         if not value
@@ -145,9 +148,10 @@ def load_config() -> Config:
             "Missing required dashboard-login env var(s): " + ", ".join(missing_auth)
         )
     auth = AuthConfig(
-        github_client_id=github_client_id,
-        github_client_secret=github_client_secret,
-        allowed_login=allowed_login,
+        oidc_issuer=oidc_issuer,
+        oidc_client_id=oidc_client_id,
+        oidc_client_secret=oidc_client_secret,
+        oidc_allowed_username=oidc_allowed_username,
         session_secret_key=session_secret_key,
     )
 

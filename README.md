@@ -41,7 +41,9 @@ the dashboard's AirTags list. Their key material is entered the same way
 **Prerequisites**
 - Your own Apple ID, with 2FA you can complete interactively once.
 - A Mac with the AirTag paired in Find My, to extract its key (see below).
-- A GitHub OAuth App, so the dashboard can require your GitHub login (see below).
+- An OIDC identity provider (e.g. [Authentik](https://goauthentik.io/)) with an
+  application/provider set up for the dashboard, so it can require your login
+  (see below).
 
 ### 1. Configure secrets
 
@@ -64,15 +66,20 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 python scripts/generate_vapid_keys.py
 ```
 
-Then create a [GitHub OAuth App](https://github.com/settings/applications/new)
-(callback URL `https://<your-domain>/auth/callback`) and add its credentials:
+Then, in your OIDC provider, register an OAuth2/OIDC application for the
+dashboard (redirect URI `https://<your-domain>/auth/callback`, grant type
+"Authorization code", scopes `openid`, `profile`) and add its credentials:
 
 ```
-GITHUB_CLIENT_ID=...
-GITHUB_CLIENT_SECRET=...
-GITHUB_ALLOWED_LOGIN=your-github-username
+OIDC_ISSUER=https://<authentik-host>/application/o/<application-slug>/
+OIDC_CLIENT_ID=...
+OIDC_CLIENT_SECRET=...
+OIDC_ALLOWED_USERNAME=your-username   # only this account may log in
 SESSION_SECRET_KEY=...   # e.g. `openssl rand -hex 32`
 ```
+
+The app discovers the authorize/token/userinfo endpoints itself from
+`<OIDC_ISSUER>/.well-known/openid-configuration`.
 
 For local development, publish the dashboard on `localhost`:
 
@@ -305,7 +312,7 @@ npm run build   # production build, writes into airtag_sentry/web/static
 
 ## Scope
 
-Single user (one allowed GitHub login), no native mobile app beyond the
+Single user (one allowed OIDC account), no native mobile app beyond the
 installable PWA — by design. Multiple AirTags per Apple ID are supported,
 managed entirely via the dashboard. Use this only on AirTags you own.
 
