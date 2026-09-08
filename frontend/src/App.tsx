@@ -16,6 +16,7 @@ import { ObjectsList } from './components/ObjectsList'
 import { AirtagDetail } from './components/AirtagDetail'
 import { DeviceDetail } from './components/DeviceDetail'
 import { DeviceMapCard } from './components/DeviceMapCard'
+import { ChevronDownIcon, ChevronUpIcon } from './components/icons'
 import { MapCard } from './components/MapCard'
 import { OverviewMap } from './components/OverviewMap'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -182,6 +183,32 @@ export default function App() {
     document.title = title
   }, [title])
 
+  // Older/newer navigation for the mobile title bar's stepper (moved there
+  // from the map popup - see tasks/todo.md). AirTag reports arrive
+  // oldest-first, owner-device locations newest-first (see CLAUDE.md), so
+  // "older"/"newer" step in opposite index directions for each; mirrored
+  // from the same logic MapCard.tsx/DeviceMapCard.tsx use to pick their
+  // displayed position.
+  let stepOlder: (() => void) | null = null
+  let stepNewer: (() => void) | null = null
+  if (detail === 'airtag' && currentAirtag) {
+    const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
+    const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
+    const older = displayedIndex > 0 ? reports[displayedIndex - 1] : null
+    const newer = displayedIndex < reports.length - 1 ? reports[displayedIndex + 1] : null
+    if (older) stepOlder = () => setSelectedReportId(older.id)
+    if (newer) stepNewer = () => setSelectedReportId(newer.id)
+  } else if (detail === 'device' && selectedDevice) {
+    const locations = ownerLocationHistories[selectedDevice.id] ?? []
+    const selectedIndex =
+      selectedDeviceLocationKey != null ? locations.findIndex((l) => l.recorded_at === selectedDeviceLocationKey) : -1
+    const displayedIndex = selectedIndex >= 0 ? selectedIndex : 0
+    const older = displayedIndex < locations.length - 1 ? locations[displayedIndex + 1] : null
+    const newer = displayedIndex > 0 ? locations[displayedIndex - 1] : null
+    if (older) stepOlder = () => setSelectedDeviceLocationKey(older.recorded_at)
+    if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.recorded_at)
+  }
+
   function handleSelect(id: string) {
     setCurrentId(id)
     setDetail('airtag')
@@ -193,6 +220,22 @@ export default function App() {
     setSelectedDeviceLocationKey(null)
     setDetail('device')
     setActiveTab('objects')
+  }
+
+  // Picking a history-list entry already re-centers the map on it (see
+  // MapCard.tsx/DeviceMapCard.tsx's PanToSelection), but on mobile that pan
+  // happened invisibly behind the sheet, which stayed open over the map -
+  // minimize it too so the now-centered pin is actually visible (a no-op on
+  // desktop, where .sheet[data-state="minimized"] only takes effect under
+  // index.css's mobile media query).
+  function handleSelectReport(id: number) {
+    setSelectedReportId(id)
+    setSheetState('minimized')
+  }
+
+  function handleSelectDeviceLocation(recordedAt: string) {
+    setSelectedDeviceLocationKey(recordedAt)
+    setSheetState('minimized')
   }
 
   async function handleCreate(name: string) {
@@ -273,7 +316,6 @@ export default function App() {
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
             selectedReportId={selectedReportId}
-            onSelectReport={setSelectedReportId}
             onMapClick={() => setDetail(null)}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
@@ -281,7 +323,6 @@ export default function App() {
             device={selectedDevice}
             locations={ownerLocationHistories[selectedDevice.id] ?? []}
             selectedLocationKey={selectedDeviceLocationKey}
-            onSelectLocation={setSelectedDeviceLocationKey}
             onMapClick={() => setDetail(null)}
           />
         ) : (
@@ -311,13 +352,41 @@ export default function App() {
           instead of sitting underneath it. Currently just the selected
           AirTag's or tracked device's name (or "AirTags" with none
           selected/on the overview map) - reusing the same fallback as
-          `title` above - but the slot is deliberately generic so future
-          per-item meta (e.g. battery, last-seen) can go here without a
-          layout change. */}
+          `title` above - plus, while drilled into a detail view with a
+          position history, the older/newer stepper (moved here from the
+          map popup - see tasks/todo.md) as an absolutely-positioned group
+          on the right so the title itself stays centered whether or not
+          the stepper is showing. The slot is otherwise still generic so
+          future per-item meta (e.g. battery, last-seen) can go here too
+          without a layout change. */}
       <div className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-10 flex h-[var(--header-h)] items-center justify-center border-b border-[var(--divider)] chrome-blur md:hidden">
         <span className="truncate px-12 text-[15px] font-semibold text-[var(--text)]">
           {detailName ?? 'AirTags'}
         </span>
+        {(stepOlder || stepNewer) && (
+          <div className="pointer-events-auto absolute right-2 flex items-center gap-0.5 rounded-full bg-[var(--surface-2)] p-0.5">
+            <button
+              type="button"
+              onClick={() => stepOlder?.()}
+              disabled={!stepOlder}
+              aria-label="Älterer Standort"
+              title="Älterer Standort"
+              className="rounded-full p-1.5 text-[var(--text)] disabled:opacity-30"
+            >
+              <ChevronDownIcon className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => stepNewer?.()}
+              disabled={!stepNewer}
+              aria-label="Neuerer Standort"
+              title="Neuerer Standort"
+              className="rounded-full p-1.5 text-[var(--text)] disabled:opacity-30"
+            >
+              <ChevronUpIcon className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Sheet + tab bar, grouped so the tab bar always sits directly below
@@ -382,7 +451,7 @@ export default function App() {
                 status={statuses[currentAirtag.id] ?? null}
                 reports={reports}
                 selectedReportId={selectedReportId}
-                onSelectReport={setSelectedReportId}
+                onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
                 onChanged={async () => {
                   await refreshAirtags()
@@ -398,7 +467,7 @@ export default function App() {
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 history={ownerLocationHistories[selectedDevice.id] ?? null}
                 selectedLocationKey={selectedDeviceLocationKey}
-                onSelectLocation={setSelectedDeviceLocationKey}
+                onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}
                 onChanged={refreshOwnerDevices}
               />

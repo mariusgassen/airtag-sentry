@@ -6,8 +6,8 @@ import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
-import { mapsUrl } from '../maps'
-import { ChevronDownIcon, ChevronUpIcon, ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
 // Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
 // shares this shape - a fixed width so the card doesn't reflow oddly between
@@ -33,60 +33,6 @@ export function InfoRow({ icon, children }: { icon: ReactNode; children: ReactNo
 export function MapClickHandler({ onMapClick }: { onMapClick?: () => void }) {
   useMapEvent('click', () => onMapClick?.())
   return null
-}
-
-/** Timestamp/address info paired with the older/newer stepper (^ / v
- * arrows), grouped at the top of a "selected pin" popup - previously the
- * stepper sat at the bottom as separate left/right "Älter"/"Neuer" buttons,
- * disconnected from the info it steps through. Pass null (not omitted) for
- * a direction with nothing to step to, so its button renders disabled
- * rather than disappearing and shifting the other one. Exported for
- * DeviceMapCard.tsx, which shares this same popup content. */
-export function PopupStepper({
-  timestamp,
-  lat,
-  lon,
-  onOlder,
-  onNewer,
-}: {
-  timestamp: string
-  lat: number
-  lon: number
-  onOlder?: (() => void) | null
-  onNewer?: (() => void) | null
-}) {
-  return (
-    <div className="mb-2 flex items-start justify-between gap-3">
-      <div className="min-w-0 flex-1">
-        <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>{new Date(timestamp).toLocaleString()}</InfoRow>
-        <AddressLine lat={lat} lon={lon} />
-      </div>
-      {(onOlder || onNewer) && (
-        <div className="flex shrink-0 flex-col gap-0.5 rounded-lg bg-[var(--surface-2)] p-1">
-          <button
-            type="button"
-            onClick={() => onNewer?.()}
-            disabled={!onNewer}
-            aria-label="Neuerer Standort"
-            title="Neuerer Standort"
-            className="rounded-md p-1 text-[var(--text)] disabled:opacity-30"
-          >
-            <ChevronUpIcon className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onOlder?.()}
-            disabled={!onOlder}
-            aria-label="Älterer Standort"
-            title="Älterer Standort"
-            className="rounded-md p-1 text-[var(--text)] disabled:opacity-30"
-          >
-            <ChevronDownIcon className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-    </div>
-  )
 }
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
@@ -206,8 +152,28 @@ export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) 
         attribution="&copy; OpenStreetMap contributors"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      <Marker position={here} icon={currentLocationIcon}>
-        <Popup>Aktueller Standort</Popup>
+      <Marker position={here} icon={currentLocationIcon} eventHandlers={{ click: centerMarkerOnClick }}>
+        {/* autoPan off: centerMarkerOnClick above already centers this pin
+            explicitly on click. Same info shape as every other pin's popup
+            in the app (address via AddressLine, "In Karten öffnen") rather
+            than the bare title this used to be - this is a real, if
+            approximate, position (the browser's own geolocation), not just
+            filler for an AirTag/device with nothing to show yet. */}
+        <Popup autoPan={false}>
+          <div className={POPUP_WIDTH_CLASS}>
+            <p className="mb-2 text-[0.95rem] font-semibold">Aktueller Standort</p>
+            <AddressLine lat={here[0]} lon={here[1]} />
+            <a
+              href={mapsUrl(here[0], here[1], 'Aktueller Standort')}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
+            >
+              <LocationArrowIcon className="h-3.5 w-3.5" />
+              In Karten öffnen
+            </a>
+          </div>
+        </Popup>
       </Marker>
       <MapClickHandler onMapClick={onMapClick} />
       <InvalidateSizeOnResize />
@@ -222,7 +188,6 @@ export function MapCard({
   ownerLocationHistories = {},
   onSelectDevice,
   selectedReportId = null,
-  onSelectReport,
   onMapClick,
 }: {
   reports: Report[]
@@ -234,10 +199,9 @@ export function MapCard({
   ownerLocationHistories?: Record<string, OwnerLocation[]>
   onSelectDevice?: (id: string) => void
   // The report shown as the AirTag's marker/popup - null falls back to the
-  // latest one. Selecting a history-list row and stepping Previous/Next in
-  // the popup both flow through this same prop (see App.tsx).
+  // latest one. Selecting a history-list row or stepping older/newer in the
+  // mobile title bar (see App.tsx) both flow through this same prop.
   selectedReportId?: number | null
-  onSelectReport?: (id: number) => void
   // Fired when the map background (not a marker/popup) is tapped - lets the
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
@@ -245,10 +209,13 @@ export function MapCard({
   const positions: [number, number][] = reports.map((r) => [r.lat, r.lon])
   const markerRef = useRef<L.Marker>(null)
 
-  // Pop the marker's popup open when a report is picked from the history
-  // list (clicking the map marker itself already opens it via Leaflet).
+  // Open the marker's popup as soon as there's a position to show it for -
+  // the default (latest-report) view included, not just an explicit
+  // selection - so the "current" pin shows its info immediately on
+  // drilling in, same as after stepping older/newer (clicking the map
+  // marker itself also opens it via Leaflet, redundantly but harmlessly).
   useEffect(() => {
-    if (selectedReportId != null) markerRef.current?.openPopup()
+    markerRef.current?.openPopup()
   }, [selectedReportId])
 
   if (positions.length === 0) {
@@ -260,8 +227,6 @@ export function MapCard({
   const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
   const displayed = reports[displayedIndex]
   const displayedPosition: [number, number] = [displayed.lat, displayed.lon]
-  const older = displayedIndex > 0 ? reports[displayedIndex - 1] : null
-  const newer = displayedIndex < reports.length - 1 ? reports[displayedIndex + 1] : null
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -281,26 +246,35 @@ export function MapCard({
           />
         )
       })}
-      <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(airtag)}>
+      <Marker
+        ref={markerRef}
+        position={displayedPosition}
+        icon={airtagPinIcon(airtag)}
+        eventHandlers={{ click: centerMarkerOnClick }}
+      >
         {/* autoPan off: PanToSelection below already centers the selected
             pin explicitly, and its pan runs before this popup opens (child
             effects flush before this component's own openPopup effect) -
             Leaflet's own autoPan would otherwise re-shift the view to fit
             the popup afterwards, undoing that centering (see CLAUDE.md's
             map-navigation-experience note on AirTag/device parity - this
-            fix and DeviceMapCard's mirror it exactly). */}
+            fix and DeviceMapCard's mirror it exactly). No explicit
+            `position` prop needed for the popup to follow the marker as
+            displayedPosition steps older/newer: Leaflet's bindPopup already
+            listens for the marker's own 'move' event and repositions the
+            bound popup to match (Marker.js's _movePopup) - an explicit
+            position prop here would instead make react-leaflet fully
+            unbind/rebind the popup on every render, since displayedPosition
+            is a fresh array each time. */}
         <Popup autoPan={false}>
           <div className={POPUP_WIDTH_CLASS}>
             <p className="mb-2 text-[0.95rem] font-semibold">
               {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
             </p>
-            <PopupStepper
-              timestamp={displayed.timestamp}
-              lat={displayed.lat}
-              lon={displayed.lon}
-              onOlder={onSelectReport ? (older ? () => onSelectReport(older.id) : null) : undefined}
-              onNewer={onSelectReport ? (newer ? () => onSelectReport(newer.id) : null) : undefined}
-            />
+            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+              {new Date(displayed.timestamp).toLocaleString()}
+            </InfoRow>
+            <AddressLine lat={displayed.lat} lon={displayed.lon} />
             <a
               href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
               target="_blank"
@@ -318,8 +292,11 @@ export function MapCard({
           key={loc.device_id}
           position={[loc.lat, loc.lon]}
           icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
+          eventHandlers={{ click: centerMarkerOnClick }}
         >
-          <Popup>
+          {/* autoPan off: centerMarkerOnClick above already centers this
+              pin explicitly on click. */}
+          <Popup autoPan={false}>
             <div className={POPUP_WIDTH_CLASS}>
               <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
