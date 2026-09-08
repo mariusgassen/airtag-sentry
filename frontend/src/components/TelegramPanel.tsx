@@ -123,13 +123,10 @@ export function TelegramPanel() {
           </div>
           {commandsError && <p className="mt-2 text-[0.78rem] text-[var(--destructive)]">{commandsError}</p>}
 
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            className="mt-3 rounded-lg border border-[var(--destructive)] px-3 py-1.5 text-sm text-[var(--destructive)]"
-          >
-            Trennen
-          </button>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--divider)] pt-3">
+            <span className="text-sm">Verbunden</span>
+            <Switch checked onChange={handleDisconnect} />
+          </div>
         </div>
       )}
 

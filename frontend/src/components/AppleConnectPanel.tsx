@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import type { AppleLoginResult, AppleTwoFactorMethod } from '../api'
-import { ChevronRightIcon, KeyIcon } from './icons'
-import { Row, Section } from './AirtagDetail'
+import { ChevronRightIcon, PersonIcon } from './icons'
+import { Row, Section, Switch } from './AirtagDetail'
 
 type Step = 'credentials' | 'select-method' | 'code'
 
@@ -161,7 +161,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   return (
     <Section>
       <Row
-        icon={<KeyIcon className="h-5 w-5" />}
+        icon={<PersonIcon className="h-5 w-5" />}
         label={title}
         trailing={
           <span className="flex items-center gap-2">
@@ -189,14 +189,9 @@ export function AppleConnectPanel({ title, adapter }: Props) {
       />
 
       {connected && (
-        <div className="border-t border-[var(--divider)] p-3">
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            className="rounded-lg border border-[var(--destructive)] px-3 py-1.5 text-sm text-[var(--destructive)]"
-          >
-            Trennen
-          </button>
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--divider)] p-3">
+          <span className="text-sm">Verbunden</span>
+          <Switch checked onChange={handleDisconnect} />
         </div>
       )}
 
