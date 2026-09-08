@@ -99,8 +99,10 @@ export function DeviceMapCard({
           </a>
         </div>
       </Popup>
-      <PanToSelection position={selectedIndex >= 0 ? displayedPosition : null} />
+      {/* FitBounds first, PanToSelection second: mirrors MapCard.tsx's own
+          ordering exactly, see the comment there for why. */}
       <FitBounds positions={positions} />
+      <PanToSelection position={displayedPosition} />
       <InvalidateSizeOnResize />
       <MapClickHandler onMapClick={onMapClick} />
     </MapContainer>
