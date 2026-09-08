@@ -43,23 +43,30 @@ class _FakeStopEvent:
 class _FakeDevice:
     """Mirrors the two facts about pyicloud's real AppleDevice that matter here:
     `.location` is a plain attribute (a property in the real SDK, never a
-    method), and `.location_available` gates whether it's populated."""
+    method), and `.location_available` gates whether it's populated. `.data`
+    mirrors the real SDK's raw content dict, read by _snapshot_devices's
+    diagnostic log for a device with no location."""
 
-    def __init__(self, id, name, device_type, location):
+    def __init__(self, id, name, device_type, location, data=None):
         self.id = id
         self.name = name
         self.device_type = device_type
         self.location = location
         self.location_available = location is not None
+        self.data = data if data is not None else {}
 
 
 class _FakeDeviceList:
     def __init__(self, devices):
         self._devices = devices
         self.stop_event = _FakeStopEvent()
+        self.refresh_calls = []
 
     def __iter__(self):
         return iter(self._devices)
+
+    def refresh(self, locate=True):
+        self.refresh_calls.append(locate)
 
 
 class _FakeApi:
@@ -91,6 +98,25 @@ def test_snapshot_devices_reads_location_as_a_property_and_stops_monitor_thread(
         {"id": "d2", "name": "iPad", "device_type": "iPad", "location": None},
     ]
     assert api.devices.stop_event.was_set is True
+
+
+def test_snapshot_devices_forces_a_live_locate_before_reading_locations():
+    """Regression test for a real production failure: every tracked device showed
+    no location at all, even after the two bugs above were fixed. Confirmed
+    against the real pyicloud source: the manager's very first `.devices` access
+    only performs Apple's identity-only `initClient` call - the block that asks
+    Apple to actually locate devices (`shouldLocate`/`isUpdatingAllLocations`) is
+    gated behind an internal `_server_ctx` that doesn't exist yet on that first
+    call. Since this app never touches `.devices` a second time on its own,
+    location data was always whatever Apple happened to have cached (often
+    nothing). _snapshot_devices must explicitly call the manager's own
+    `refresh(locate=True)` to force that second, locate-flagged request."""
+    device = _FakeDevice("d1", "MacBook Air", "Mac", {"latitude": 1.0, "longitude": 2.0})
+    api = _FakeApi([device])
+
+    owner_tracking._snapshot_devices(api)
+
+    assert api.devices.refresh_calls == [True]
 
 
 def test_pyicloud_imports_cleanly():

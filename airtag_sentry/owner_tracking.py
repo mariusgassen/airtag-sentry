@@ -152,6 +152,7 @@ def _connect(cfg: Config, conn):
     if owner tracking was never connected via the dashboard."""
     creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
     if creds is None:
+        logger.debug("Owner tracking not connected - no credentials stored.")
         return None
     password = keystore.decrypt(cfg.key_encryption_key, creds.encrypted_password)
     return _build_api(creds.apple_id, password, cfg.apple.owner_session_dir)
@@ -169,10 +170,39 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
     that leaks one live thread per poll, forever. Collecting everything needed in
     one pass here, then stopping that thread via stop_event.set() as the very
     last thing (any further .devices access after that restarts it), fixes both.
+
+    A third, separate bug (confirmed against the real installed pyicloud source,
+    services/findmyiphone.py): the *very first* `.devices` access only performs
+    Apple's `initClient` call, which fires before `FindMyiPhoneServiceManager`
+    has a `_server_ctx` yet - and the block that sets `isUpdatingAllLocations`/
+    `shouldLocate`/`selectedDevice` in `_refresh_client()` is gated behind
+    `if self._server_ctx:`, so it's unreachable on that first call. Since this
+    app builds a brand-new PyiCloudService every poll and never touches
+    `.devices` a second time, it has only ever sent Apple the plain identity
+    call, never an explicit "locate now" - so `location`/`location_available`
+    reflects whatever Apple happened to have cached, often nothing for a fresh
+    session, which is why tracked devices showed no location even after the
+    bug above was fixed. `refresh(locate=True)` is the manager's own public
+    method for forcing that second, locate-flagged round trip once a
+    `_server_ctx` exists (it does, after the first access) - call it explicitly
+    rather than relying on the constructor's implicit first call.
     """
+    api.devices.refresh(locate=True)
     snapshot = []
+    available = 0
     for device in api.devices:
         location = device.location if device.location_available else None
+        if location is not None:
+            available += 1
+        else:
+            logger.debug(
+                "Owner device '%s' (%s): no location this snapshot (feature "
+                "advertised=%s, content has 'location' key=%s).",
+                device.name,
+                device.id,
+                bool(device.data.get("features", {}).get("LOC", False)),
+                "location" in device.data,
+            )
         snapshot.append(
             {
                 "id": device.id,
@@ -182,6 +212,7 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
             }
         )
     api.devices.stop_event.set()
+    logger.info("Fetched %d owner device(s) from Apple, %d with a location.", len(snapshot), available)
     return snapshot
 
 
@@ -197,7 +228,9 @@ def list_owner_devices(cfg: Config, conn) -> list[OwnerDevice]:
         conn,
         [{"id": d["id"], "name": d["name"], "device_type": d["device_type"]} for d in snapshot],
     )
-    return db_list_owner_devices(conn)
+    devices = db_list_owner_devices(conn)
+    logger.info("Refreshed identity for %d owner device(s) (%d enabled).", len(devices), sum(d.enabled for d in devices))
+    return devices
 
 
 def set_device_enabled(conn, device_id: str, enabled: bool) -> OwnerDevice | None:
@@ -217,12 +250,16 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
 
     enabled_ids = {d.id for d in db_list_owner_devices(conn) if d.enabled}
     if not enabled_ids:
+        logger.info("No owner devices enabled for tracking - skipping location fetch.")
         return []
 
     now = dt.datetime.now(dt.timezone.utc)
     locations = []
     for device in _snapshot_devices(api):
-        if device["id"] not in enabled_ids or device["location"] is None:
+        if device["id"] not in enabled_ids:
+            continue
+        if device["location"] is None:
+            logger.debug("Enabled owner device '%s' (%s) has no location this poll.", device["name"], device["id"])
             continue
         location = device["location"]
         locations.append(
@@ -235,4 +272,9 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
                 horizontal_accuracy=location.get("horizontalAccuracy"),
             )
         )
+    logger.info(
+        "Fetched a fresh location for %d of %d enabled owner device(s) this poll.",
+        len(locations),
+        len(enabled_ids),
+    )
     return locations
