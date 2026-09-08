@@ -72,6 +72,12 @@ export default function App() {
   // to the latest report). Reset whenever `reports` is reloaded (new AirTag,
   // or fresh poll data) so a stale id never lingers past the data it pointed at.
   const [selectedReportId, setSelectedReportId] = useState<number | null>(null)
+  // Same idea as `selectedReportId`, for the selected owner device's location
+  // history - keyed by `recorded_at` since owner-device locations have no id
+  // in the API response (DeviceHistoryList already used `recorded_at` as its
+  // row key). Reset on device switch (handleSelectDevice) - AirTags and
+  // owner devices get the same map navigation features, see CLAUDE.md.
+  const [selectedDeviceLocationKey, setSelectedDeviceLocationKey] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
   // Which detail screen (if any) the sheet/map are drilled into - an AirTag's
   // or a tracked device's. Only one of the two `current*Id` values below is
@@ -184,6 +190,7 @@ export default function App() {
 
   function handleSelectDevice(id: string) {
     setSelectedDeviceId(id)
+    setSelectedDeviceLocationKey(null)
     setDetail('device')
     setActiveTab('objects')
   }
@@ -269,7 +276,12 @@ export default function App() {
             onSelectReport={setSelectedReportId}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
-          <DeviceMapCard device={selectedDevice} locations={ownerLocationHistories[selectedDevice.id] ?? []} />
+          <DeviceMapCard
+            device={selectedDevice}
+            locations={ownerLocationHistories[selectedDevice.id] ?? []}
+            selectedLocationKey={selectedDeviceLocationKey}
+            onSelectLocation={setSelectedDeviceLocationKey}
+          />
         ) : (
           <OverviewMap
             airtags={airtags}
@@ -376,6 +388,8 @@ export default function App() {
                 device={selectedDevice}
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 history={ownerLocationHistories[selectedDevice.id] ?? null}
+                selectedLocationKey={selectedDeviceLocationKey}
+                onSelectLocation={setSelectedDeviceLocationKey}
                 onBack={() => setDetail(null)}
                 onChanged={refreshOwnerDevices}
               />

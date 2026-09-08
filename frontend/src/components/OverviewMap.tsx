@@ -3,8 +3,8 @@ import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
-import { FitBounds, InvalidateSizeOnResize, NoReportsView } from './MapCard'
-import { LocationArrowIcon } from './icons'
+import { FitBounds, InfoRow, InvalidateSizeOnResize, NoReportsView, POPUP_WIDTH_CLASS } from './MapCard'
+import { ClockIcon, LocationArrowIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -56,14 +56,16 @@ export function OverviewMap({
       {located.map(({ airtag, lastReport }) => (
         <Marker key={airtag.id} position={[lastReport.lat, lastReport.lon]} icon={airtagPinIcon(airtag)}>
           <Popup>
-            <div className="text-sm">
-              <p className="mb-1 font-medium">{airtag.name}</p>
-              <p className="mb-2 text-[var(--text-secondary)]">{capitalize(formatRelative(lastReport.timestamp))}</p>
-              <div className="flex flex-wrap gap-2">
+            <div className={POPUP_WIDTH_CLASS}>
+              <p className="mb-2 text-[0.95rem] font-semibold">{airtag.name}</p>
+              <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+                {capitalize(formatRelative(lastReport.timestamp))}
+              </InfoRow>
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => onSelect(airtag.id)}
-                  className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white"
+                  className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
                 >
                   Details anzeigen
                 </button>
@@ -71,7 +73,7 @@ export function OverviewMap({
                   href={mapsUrl(lastReport.lat, lastReport.lon, airtag.name)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
                 >
                   <LocationArrowIcon className="h-3.5 w-3.5" />
                   In Karten öffnen
@@ -99,15 +101,17 @@ export function OverviewMap({
           icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
         >
           <Popup>
-            <div className="text-sm">
-              <p className="mb-1 font-medium">{loc.name ?? 'Gerät'}</p>
-              <p className="mb-2 text-[var(--text-secondary)]">{capitalize(formatRelative(loc.recorded_at))}</p>
+            <div className={POPUP_WIDTH_CLASS}>
+              <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
+              <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+                {capitalize(formatRelative(loc.recorded_at))}
+              </InfoRow>
               {onSelectDevice && (
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => onSelectDevice(loc.device_id)}
-                    className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white"
+                    className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
                   >
                     Details anzeigen
                   </button>
@@ -115,7 +119,7 @@ export function OverviewMap({
                     href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
                   >
                     <LocationArrowIcon className="h-3.5 w-3.5" />
                     In Karten öffnen

@@ -14,6 +14,8 @@ interface Props {
   // Full location history, already fetched by App.tsx for the map's trail -
   // reused here rather than fetched again. null while still loading.
   history: OwnerLocation[] | null
+  selectedLocationKey: string | null
+  onSelectLocation: (recordedAt: string) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
 }
@@ -23,7 +25,15 @@ interface Props {
  * the device's own display name/icon/color live here, mirroring AirtagDetail's
  * Umbenennen/Symbol & Farbe sections exactly - this is the *only* place a
  * device's history renders too (moved out of Settings - see tasks/todo.md). */
-export function DeviceDetail({ device, location, history, onBack, onChanged }: Props) {
+export function DeviceDetail({
+  device,
+  location,
+  history,
+  selectedLocationKey,
+  onSelectLocation,
+  onBack,
+  onChanged,
+}: Props) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -103,7 +113,13 @@ export function DeviceDetail({ device, location, history, onBack, onChanged }: P
               onClick={() => setHistoryOpen((v) => !v)}
               bordered={false}
             />
-            {historyOpen && <DeviceHistoryList history={history} />}
+            {historyOpen && (
+              <DeviceHistoryList
+                history={history}
+                selectedLocationKey={selectedLocationKey}
+                onSelectLocation={onSelectLocation}
+              />
+            )}
           </Section>
         </div>
       </div>
@@ -230,7 +246,15 @@ function DeviceAppearanceForm({ device, onDone }: { device: OwnerDevice; onDone:
   )
 }
 
-function DeviceHistoryList({ history }: { history: OwnerLocation[] | null }) {
+function DeviceHistoryList({
+  history,
+  selectedLocationKey,
+  onSelectLocation,
+}: {
+  history: OwnerLocation[] | null
+  selectedLocationKey: string | null
+  onSelectLocation: (recordedAt: string) => void
+}) {
   if (history === null) {
     return (
       <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
@@ -245,19 +269,25 @@ function DeviceHistoryList({ history }: { history: OwnerLocation[] | null }) {
       </div>
     )
   }
-  const rows = [...history].reverse()
+  // /api/owner-devices/history is already newest-first (unlike AirTag
+  // reports, which arrive oldest-first and get reversed for display in
+  // AirtagDetail's HistoryList) - no reversal needed here.
   return (
     <div className="max-h-64 overflow-y-auto border-t border-[var(--divider)]">
-      {rows.map((loc, i) => (
-        <div
+      {history.map((loc, i) => (
+        <button
+          type="button"
           key={loc.recorded_at}
-          className={`flex items-center justify-between px-4 py-2 text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
+          onClick={() => onSelectLocation(loc.recorded_at)}
+          className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
+            loc.recorded_at === selectedLocationKey ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
+          }`}
         >
           <span>{new Date(loc.recorded_at).toLocaleString()}</span>
           <span className="text-[var(--text-secondary)]">
             {loc.lat.toFixed(4)}, {loc.lon.toFixed(4)}
           </span>
-        </div>
+        </button>
       ))}
     </div>
   )

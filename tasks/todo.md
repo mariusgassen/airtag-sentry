@@ -2384,3 +2384,70 @@ AirTags already had:
   effect warnings as v31, plus one new one of the same class in
   `MapCard.tsx`'s `AddressLine` - consistent with the rest of the codebase,
   not a new warning category).
+
+## v33: Extend v32's map navigation to owner devices; CLAUDE.md parity rule
+
+v32 shipped jump-to-entry/marker-selection/timestamp/address/prev-next only
+for AirTags - `DeviceDetail.tsx`/`DeviceMapCard.tsx` (the owner-device
+counterparts) didn't get it, breaking the parity the dashboard otherwise
+maintains between the two object types (see v31). Brought them up to the
+same feature set, and added a hard-constraint section to CLAUDE.md so this
+doesn't happen a third time.
+
+- [x] `MapCard.tsx`'s `PanToSelection` and `AddressLine` are now exported
+      (were previously module-private) so `DeviceMapCard.tsx` can reuse them
+      instead of duplicating - matches how it already reuses `FitBounds`/
+      `InvalidateSizeOnResize`/`NoReportsView` from the same file.
+- [x] `DeviceMapCard.tsx` gained the same `selectedLocationKey`/
+      `onSelectLocation` selection props as `MapCard.tsx`'s
+      `selectedReportId`/`onSelectReport`, with the same marker-follows-
+      selection, pan-on-select, popup-timestamp/address, and Previous/Next
+      behavior. Selection is keyed by `recorded_at` (a stable string),
+      not a numeric id - `OwnerLocation` has none in the API response,
+      and `DeviceHistoryList` already used `recorded_at` as its row key.
+      `/api/owner-devices/history` is newest-first (unlike AirTag reports),
+      so "older"/"newer" step in the *opposite* array-index direction from
+      `MapCard.tsx` - documented inline to head off re-introducing the same
+      inverted-index bug the next section describes.
+- [x] Fixed a pre-existing ordering bug found while doing this:
+      `DeviceHistoryList` did `[...history].reverse()`, but `history` is
+      already newest-first from the backend - the reverse silently flipped
+      it to oldest-first, the wrong direction, unnoticed because nothing
+      compared it against `AirtagDetail.tsx`'s `HistoryList` (correctly
+      newest-first) side by side until now. Removed the reverse; rows are
+      also now buttons (`onSelectLocation`), highlighted when selected,
+      mirroring `HistoryList`'s row treatment exactly.
+- [x] `App.tsx`: new `selectedDeviceLocationKey` state, lifted the same way
+      as `selectedReportId`, reset in `handleSelectDevice` (device switch) -
+      no reports-reload-triggered reset exists for devices since their
+      history isn't fetched per-selection (see `ownerLocationHistories`
+      effect), so device-switch is the only reset point, unlike AirTags'
+      reset-on-`currentId`-change.
+- [x] `CLAUDE.md`: new "AirTags and owner devices get the same user-facing
+      features" hard-constraint section, naming the pairs expected to stay
+      in lockstep (`AirtagDetail`/`DeviceDetail`, `MapCard`/`DeviceMapCard`,
+      `api.ts` routes, `telegram_bot.py`'s `/list`) and calling out the two
+      real implementation differences (report `id` vs. `recorded_at` key,
+      opposite list ordering) that a future parity pass needs to account
+      for without using them as an excuse to skip a side.
+
+## Review (v33)
+
+- Frontend only: `MapCard.tsx`, `DeviceMapCard.tsx`, `DeviceDetail.tsx`,
+  `App.tsx`, plus `CLAUDE.md`. No backend/schema changes.
+- Root cause of the `DeviceHistoryList` ordering bug: written before
+  `fetch_owner_device_location_history` existed in its current newest-first
+  form, likely copy-pasted from `AirtagDetail.tsx`'s `HistoryList` (which
+  correctly reverses an oldest-first list) without re-deriving whether the
+  reverse was still needed for owner-device data's different native order -
+  the same class of ordering-assumption mismatch v31's review already
+  flagged once for `DeviceMapCard.tsx`'s `positions[length - 1]` bug.
+- Verified: `cd frontend && npx tsc -b && npx vite build && npx oxlint`
+  clean (same 4 pre-existing set-state-in-effect warnings as before this
+  diff, no new ones). Backend untouched by this change, so re-ran only the
+  DB-independent suites already validated in v32
+  (`test_geocode.py`/`test_movement.py`/`test_config.py`/`test_keystore.py`)
+  as a sanity check, not a full run. Manual browser click-through (jump
+  from a device's history row, Previous/Next stepping at both ends of a
+  device's trail, address text appearing) not verified in this sandbox -
+  same limitation noted in v32.

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type L from 'leaflet'
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
@@ -6,7 +7,23 @@ import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon } from '../mapIcons'
 import { mapsUrl } from '../maps'
-import { ChevronLeftIcon, ChevronRightIcon, LocationArrowIcon } from './icons'
+import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+
+// Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
+// shares this shape - a fixed width so the card doesn't reflow oddly between
+// a short ("Letzte Position" only) and a long (address + prev/next) variant.
+export const POPUP_WIDTH_CLASS = 'w-60'
+
+/** One icon-prefixed line of secondary popup info (timestamp, address, relative
+ * time) - shared so every popup's metadata reads the same way. */
+export function InfoRow({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="mb-1 flex items-start gap-1.5 text-xs text-[var(--text-secondary)] last:mb-0">
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <span>{children}</span>
+    </div>
+  )
+}
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
@@ -56,8 +73,9 @@ function useCurrentPosition() {
 
 /** Pans (without changing zoom) to an explicitly-selected report's position -
  * separate from FitBounds, which only reframes the whole trail when the
- * report list itself changes, not on every selection. */
-function PanToSelection({ position }: { position: [number, number] | null }) {
+ * report list itself changes, not on every selection. Exported for
+ * DeviceMapCard.tsx, which shares this same selection behavior. */
+export function PanToSelection({ position }: { position: [number, number] | null }) {
   const map = useMap()
   const lat = position?.[0]
   const lon = position?.[1]
@@ -73,8 +91,9 @@ function PanToSelection({ position }: { position: [number, number] | null }) {
 const addressCache = new Map<string, string | null>()
 
 /** Best-effort address line for a marker popup - starts blank, fills in (or
- * silently stays empty) once the lookup resolves, never blocks the popup. */
-function AddressLine({ lat, lon }: { lat: number; lon: number }) {
+ * silently stays empty) once the lookup resolves, never blocks the popup.
+ * Exported for DeviceMapCard.tsx, which shares this same popup content. */
+export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   const key = `${lat},${lon}`
   const [address, setAddress] = useState<string | null | undefined>(() => addressCache.get(key))
 
@@ -99,7 +118,11 @@ function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   }, [key, lat, lon])
 
   if (!address) return null
-  return <p className="mb-2 text-[var(--text-secondary)]">{address}</p>
+  return (
+    <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>
+      <span>{address}</span>
+    </InfoRow>
+  )
 }
 
 export function NoReportsView() {
@@ -191,17 +214,21 @@ export function MapCard({
       })}
       <Marker ref={markerRef} position={displayedPosition} icon={airtagPinIcon(airtag)}>
         <Popup>
-          <div className="text-sm">
-            <p className="mb-1 font-medium">{selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}</p>
-            <p className="mb-1 text-[var(--text-secondary)]">{new Date(displayed.timestamp).toLocaleString()}</p>
+          <div className={POPUP_WIDTH_CLASS}>
+            <p className="mb-2 text-[0.95rem] font-semibold">
+              {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
+            </p>
+            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+              {new Date(displayed.timestamp).toLocaleString()}
+            </InfoRow>
             <AddressLine lat={displayed.lat} lon={displayed.lon} />
             {onSelectReport && (older || newer) && (
-              <div className="mb-2 flex gap-2">
+              <div className="mt-3 flex gap-1 rounded-lg bg-[var(--surface-2)] p-1">
                 <button
                   type="button"
                   onClick={() => older && onSelectReport(older.id)}
                   disabled={!older}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--accent)] disabled:opacity-30"
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
                 >
                   <ChevronLeftIcon className="h-3.5 w-3.5" />
                   Älter
@@ -210,7 +237,7 @@ export function MapCard({
                   type="button"
                   onClick={() => newer && onSelectReport(newer.id)}
                   disabled={!newer}
-                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-[var(--accent)] px-2 py-1 text-xs font-medium text-[var(--accent)] disabled:opacity-30"
+                  className="inline-flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-[var(--text)] disabled:opacity-30"
                 >
                   Neuer
                   <ChevronRightIcon className="h-3.5 w-3.5" />
@@ -221,7 +248,7 @@ export function MapCard({
               href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white"
             >
               <LocationArrowIcon className="h-3.5 w-3.5" />
               In Karten öffnen
@@ -236,15 +263,17 @@ export function MapCard({
           icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
         >
           <Popup>
-            <div className="text-sm">
-              <p className="mb-1 font-medium">{loc.name ?? 'Gerät'}</p>
-              <p className="mb-2 text-[var(--text-secondary)]">{capitalize(formatRelative(loc.recorded_at))}</p>
+            <div className={POPUP_WIDTH_CLASS}>
+              <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
+              <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+                {capitalize(formatRelative(loc.recorded_at))}
+              </InfoRow>
               {onSelectDevice && (
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => onSelectDevice(loc.device_id)}
-                    className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white"
+                    className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
                   >
                     Details anzeigen
                   </button>
@@ -252,7 +281,7 @@ export function MapCard({
                     href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1 text-xs font-medium text-[var(--accent)]"
+                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
                   >
                     <LocationArrowIcon className="h-3.5 w-3.5" />
                     In Karten öffnen
