@@ -4,7 +4,7 @@ import type { AppSettings } from '../api'
 import { getSettings, updateSettings } from '../api'
 import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
-import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, KeyIcon, LogoutIcon } from './icons'
+import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, LogoutIcon, PersonIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 import { SettingsAppleAccounts } from './SettingsAppleAccounts'
 import { SettingsNotifications } from './SettingsNotifications'
@@ -217,7 +217,7 @@ export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePus
               onClick={() => setPage('notifications')}
             />
             <Row
-              icon={<KeyIcon className="h-5 w-5" />}
+              icon={<PersonIcon className="h-5 w-5" />}
               label="Apple-Konten"
               trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
               onClick={() => setPage('apple')}
