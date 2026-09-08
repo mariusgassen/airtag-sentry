@@ -64,7 +64,7 @@ false-positive-fatigue mitigation for any motion-based alarm.
 
 ## 7. Per-AirTag notification routing
 
-Every configured notifier (ntfy/Telegram/push) currently fires for every
+Every configured notifier (Telegram/push) currently fires for every
 AirTag. Multi-item households may want e.g. only Telegram for the bike,
 only push for the backpack.
 
