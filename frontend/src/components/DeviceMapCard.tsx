@@ -2,11 +2,12 @@ import { useMemo } from 'react'
 import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
-import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
+import { airtagPinIcon, deviceColor } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
 import {
   AddressLine,
   FitBounds,
+  HistoryPoints,
   InfoRow,
   InvalidateSizeOnResize,
   MapClickHandler,
@@ -27,6 +28,7 @@ export function DeviceMapCard({
   device,
   locations,
   selectedLocationKey = null,
+  onSelectLocation,
   onMapClick,
 }: {
   device: OwnerDevice
@@ -38,6 +40,10 @@ export function DeviceMapCard({
   // older/newer in the mobile title bar (see App.tsx) both flow through
   // this same prop.
   selectedLocationKey?: string | null
+  // Fired when one of the trail's subtle history-point dots is clicked -
+  // mirrors MapCard.tsx's onSelectReport exactly (see CLAUDE.md's
+  // AirTag/device parity constraint).
+  onSelectLocation?: (recordedAt: string) => void
   // Fired when the map background (not a marker/popup) is tapped - lets the
   // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
@@ -68,6 +74,10 @@ export function DeviceMapCard({
     return <NoReportsView onMapClick={onMapClick} />
   }
 
+  // This device's own chosen (or hash-derived) color - matches MapCard.tsx's
+  // identical trailColor for an AirTag, see the comment there.
+  const trailColor = deviceColor(device)
+
   return (
     <MapContainer center={displayedPosition} zoom={15} className="h-full w-full">
       <TileLayer
@@ -75,8 +85,15 @@ export function DeviceMapCard({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {positions.length > 1 && (
-        <Polyline positions={positions} pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 4 }} />
+        <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
       )}
+      <HistoryPoints
+        points={locations}
+        displayedIndex={displayedIndex}
+        color={trailColor}
+        getKey={(l) => l.recorded_at}
+        onSelect={onSelectLocation ? (l) => onSelectLocation(l.recorded_at) : undefined}
+      />
       <Marker position={displayedPosition} icon={airtagPinIcon(device)} eventHandlers={{ click: centerMarkerOnClick }} />
       {/* Standalone (not nested in the Marker above) and explicitly
           position-controlled - mirrors MapCard.tsx's selected-pin popup

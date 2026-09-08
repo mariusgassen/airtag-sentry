@@ -316,6 +316,7 @@ export default function App() {
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
             selectedReportId={selectedReportId}
+            onSelectReport={handleSelectReport}
             onMapClick={() => setDetail(null)}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
@@ -323,6 +324,7 @@ export default function App() {
             device={selectedDevice}
             locations={ownerLocationHistories[selectedDevice.id] ?? []}
             selectedLocationKey={selectedDeviceLocationKey}
+            onSelectLocation={handleSelectDeviceLocation}
             onMapClick={() => setDetail(null)}
           />
         ) : (
@@ -365,23 +367,33 @@ export default function App() {
         </span>
         {(stepOlder || stepNewer) && (
           <div className="pointer-events-auto absolute right-2 flex items-center gap-0.5 rounded-full bg-[var(--surface-2)] p-0.5">
+            {/* Not a real `disabled` button at the trail's start/end: iOS
+                Safari lets a tap on a disabled control fall through to
+                whatever's rendered underneath instead of swallowing it, and
+                this bar floats directly over the Leaflet map - the tap was
+                landing on the map itself and MapClickHandler treated it as
+                "click away from a pin", kicking the whole detail view back
+                out to the overview. Staying enabled and just no-op'ing via
+                `stepOlder?.()` keeps the tap on the button, where it belongs;
+                aria-disabled still announces the state without triggering
+                that hit-testing quirk the way a real `disabled` attribute does. */}
             <button
               type="button"
               onClick={() => stepOlder?.()}
-              disabled={!stepOlder}
+              aria-disabled={!stepOlder}
               aria-label="Älterer Standort"
               title="Älterer Standort"
-              className="rounded-full p-1.5 text-[var(--text)] disabled:opacity-30"
+              className={`rounded-full p-1.5 text-[var(--text)] ${stepOlder ? '' : 'opacity-30'}`}
             >
               <ChevronDownIcon className="h-4 w-4" />
             </button>
             <button
               type="button"
               onClick={() => stepNewer?.()}
-              disabled={!stepNewer}
+              aria-disabled={!stepNewer}
               aria-label="Neuerer Standort"
               title="Neuerer Standort"
-              className="rounded-full p-1.5 text-[var(--text)] disabled:opacity-30"
+              className={`rounded-full p-1.5 text-[var(--text)] ${stepNewer ? '' : 'opacity-30'}`}
             >
               <ChevronUpIcon className="h-4 w-4" />
             </button>
