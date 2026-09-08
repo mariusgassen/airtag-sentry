@@ -1772,3 +1772,69 @@ sent and failed for a real (and previously invisible) reason.
   standing one up for a two-branch `try`/`catch` would be disproportionate;
   covered instead by the build/lint verification above plus manual code
   review against the working `KeyForm` precedent.
+
+## v23: Fix 405 on owner-device routes for ids containing "/"
+
+Trigger: v22's alert() surfaced what v20/v22 previously hid - a real
+405 Method Not Allowed on `PUT /api/owner-devices/{id}/primary` for a
+specific device. The id in question was a base64-ish blob (Apple's own
+`AppleDevice.id` from pyicloud, not something this app generates) that
+legitimately contains a `/`, e.g. `AYPw...cDrA/XrQD...3bA==`.
+
+`frontend/src/api.ts` already `encodeURIComponent()`-ed the id before
+building the URL, so the browser sent `%2F` correctly - but that alone
+isn't enough. Percent-encoded slashes inside a URL *path segment* are not
+reliably preserved end-to-end: ASGI (uvicorn/Starlette) decodes the
+entire raw request target - `%2F` included - into `scope["path"]` before
+routing ever runs, and the same is true of common reverse
+proxies/dev-server proxies. That silently splits what should be one
+`{device_id}` path segment into two, so `PUT /api/owner-devices/{id}/primary`
+no longer matches - and because the split path happened to still match
+some *other* registered route by segment count, FastAPI returned 405
+(wrong method for that route) rather than a more diagnosable 404. `+` and
+`=` in the same id "worked" only because decoding them back to literal
+characters doesn't introduce a new `/` delimiter - the bug was specific to
+ids containing an actual slash.
+
+The only sound fix is to stop putting this opaque id where `/` can act as
+a delimiter at all - not to chase encoding differences across whatever
+ASGI/proxy layers happen to be in front of the app, since that's out of
+this codebase's control at every layer.
+
+- [x] `web/app.py`: `PUT /api/owner-devices/{device_id}` →
+      `PUT /api/owner-devices` with `device_id` added to
+      `OwnerDeviceEnabledIn`'s body. `PUT /api/owner-devices/{device_id}/primary`
+      → `PUT /api/owner-devices/primary` with a new `OwnerDevicePrimaryIn`
+      body (`device_id` only) - coexists fine with the existing
+      `DELETE /api/owner-devices/primary`, different HTTP method on the
+      same static path. `GET /api/owner-devices/{device_id}/history` →
+      `GET /api/owner-devices/history` with `device_id` as a query param -
+      query-string parsing splits only on `&`/`=`, never `/`, so this is
+      immune to the same problem regardless of what decodes it downstream.
+- [x] `api.ts`: the three matching client functions updated to match -
+      `device_id` moved into the JSON body for both PUT calls, and into a
+      `URLSearchParams`-equivalent query string (still `encodeURIComponent`-ed,
+      since `+`/`&`/`=` are still meaningful in a query string) for the
+      history GET.
+- [x] `test_web_auth.py`: new
+      `test_owner_device_routes_accept_ids_containing_a_slash`, exercising
+      all three routes with a real slash-containing id and asserting each
+      one reaches the underlying `owner_tracking`/`db` call with the id
+      intact (200, not 404/405).
+
+## Review (v23)
+- 3 files touched (1 backend, 1 frontend, 1 test), no new dependencies, no
+  migration (no schema/storage change - `owner_devices.id` was always
+  stored as-is, only how it traveled in a request URL changes).
+- Verified: `pytest tests/` - 53 passed (52 prior + the new regression
+  test), 21 skipped (Postgres-dependent, no live Postgres in this
+  sandbox). `cd frontend && npx tsc -b && npx vite build` clean; `npx
+  oxlint` shows only the same three pre-existing `set-state-in-effect`
+  warnings, no new ones. `docker compose config` parses cleanly with a
+  throwaway `.env`.
+- Not verified in this sandbox (no real owner-tracking Apple session):
+  that the specific device id the user hit actually round-trips against
+  a live Apple account end-to-end now - the regression test proves the
+  routes accept and forward a slash-containing id correctly, but the
+  original report was diagnosed from a raw request line, not reproduced
+  against a real pyicloud session here.

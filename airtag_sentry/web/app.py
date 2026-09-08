@@ -254,7 +254,20 @@ class OwnerLoginIn(BaseModel):
 
 
 class OwnerDeviceEnabledIn(BaseModel):
+    # device_id travels in the body, not the URL path: Apple's own device ids
+    # (see owner_tracking.py) are opaque base64-ish blobs that can contain a
+    # literal "/" - as a path segment that gets mangled by ASGI/proxy layers
+    # decoding "%2F" back into a delimiter before routing ever sees it,
+    # splitting one {device_id} segment into two and breaking route matching
+    # (surfacing as a 405, not a 404, when the split path happens to collide
+    # with another route's method set). A JSON body field never has this
+    # problem since nothing about it is delimited on "/".
+    device_id: str
     enabled: bool
+
+
+class OwnerDevicePrimaryIn(BaseModel):
+    device_id: str
 
 
 class TelegramCredentialsIn(BaseModel):
@@ -701,23 +714,24 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return [dataclasses.asdict(d) for d in devices]
 
-    @app.put("/api/owner-devices/{device_id}")
-    def set_owner_device_enabled_route(device_id: str, body: OwnerDeviceEnabledIn):
+    @app.put("/api/owner-devices")
+    def set_owner_device_enabled_route(body: OwnerDeviceEnabledIn):
+        # device_id is a body field, not a path segment - see OwnerDeviceEnabledIn.
         with get_conn(cfg.database_url) as conn:
-            device = owner_tracking.set_device_enabled(conn, device_id, body.enabled)
+            device = owner_tracking.set_device_enabled(conn, body.device_id, body.enabled)
         if device is None:
-            raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
         return dataclasses.asdict(device)
 
-    @app.put("/api/owner-devices/{device_id}/primary")
-    def set_owner_device_primary_route(device_id: str):
-        """Marks `device_id` as the one device used for "moved without you"
+    @app.put("/api/owner-devices/primary")
+    def set_owner_device_primary_route(body: OwnerDevicePrimaryIn):
+        """Marks `body.device_id` as the one device used for "moved without you"
         away-correlation and the map's location trail - also enables it, since a
         disabled device never gets a fresh location. Clears any previous primary."""
         with get_conn(cfg.database_url) as conn:
-            device = owner_tracking.set_device_primary(conn, device_id)
+            device = owner_tracking.set_device_primary(conn, body.device_id)
         if device is None:
-            raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
         return dataclasses.asdict(device)
 
     @app.delete("/api/owner-devices/primary")
@@ -746,9 +760,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             for loc in locations
         ]
 
-    @app.get("/api/owner-devices/{device_id}/history")
+    @app.get("/api/owner-devices/history")
     def get_owner_device_history(device_id: str, limit: int = 200):
-        """History of one owner device's location, newest first."""
+        """History of one owner device's location, newest first. device_id is a
+        query param, not a path segment - see OwnerDeviceEnabledIn for why."""
         with get_conn(cfg.database_url) as conn:
             locations = fetch_owner_device_location_history(conn, device_id, limit=limit)
         return [
