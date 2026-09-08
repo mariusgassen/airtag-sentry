@@ -4,20 +4,8 @@ import pytest
 from pywebpush import WebPushException
 
 from airtag_sentry.db import PushSubscription
-from airtag_sentry.notifiers.ntfy import NtfyNotifier
 from airtag_sentry.notifiers.telegram import TelegramNotifier
 from airtag_sentry.notifiers.webpush import WebPushConfig, WebPushNotifier
-
-
-@patch("airtag_sentry.notifiers.ntfy.requests.post")
-def test_ntfy_notifier_posts_to_topic(mock_post):
-    mock_post.return_value.raise_for_status = MagicMock()
-    NtfyNotifier("https://ntfy.sh/my-topic").send("Titel", "Nachricht")
-
-    args, kwargs = mock_post.call_args
-    assert args[0] == "https://ntfy.sh/my-topic"
-    assert kwargs["data"] == b"Nachricht"
-    assert kwargs["headers"]["Title"] == "Titel"
 
 
 @patch("airtag_sentry.notifiers.telegram.requests.post")

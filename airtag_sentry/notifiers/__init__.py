@@ -1,4 +1,4 @@
-"""Pluggable notification backends: ntfy.sh, Telegram, Web Push.
+"""Pluggable notification backends: Telegram, Web Push.
 
 Each backend implements the same tiny Notifier protocol; build_notifiers() includes
 whichever backends have their config/credentials present and broadcasts every alert
@@ -22,13 +22,10 @@ class Notifier(Protocol):
 def build_notifiers(cfg: Config, conn) -> list[Notifier]:
     from airtag_sentry import keystore
     from airtag_sentry.db import get_telegram_credentials
-    from airtag_sentry.notifiers.ntfy import NtfyNotifier
     from airtag_sentry.notifiers.telegram import TelegramNotifier
     from airtag_sentry.notifiers.webpush import WebPushNotifier
 
     notifiers: list[Notifier] = []
-    if cfg.notifications.ntfy:
-        notifiers.append(NtfyNotifier(cfg.notifications.ntfy.topic_url))
     telegram = get_telegram_credentials(conn)
     if telegram:
         bot_token = keystore.decrypt(cfg.key_encryption_key, telegram.bot_token_encrypted)

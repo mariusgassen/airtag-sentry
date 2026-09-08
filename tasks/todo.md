@@ -1937,7 +1937,39 @@ requirement was already met; it just had nothing to persist.
   The new grouped Objekte list and DeviceDetail's map trail/history also
   need a real-account visual check.
 
-## v25: Fix `ModuleNotFoundError: No module named 'cryptography'` in Getting Started
+## v25: Remove ntfy.sh notifier
+
+Trigger: user request - drop the ntfy.sh backend entirely; Telegram and Web
+Push already cover the same "push a movement alert somewhere" need without
+a third-party relay topic to keep secret.
+
+- [x] Deleted `airtag_sentry/notifiers/ntfy.py` and its `NtfyNotifier`
+      class/test (`test_notifiers.py`).
+- [x] `notifiers/__init__.py`'s `build_notifiers()` no longer imports or
+      instantiates it.
+- [x] `config.py`: dropped `NtfyConfig`, the `notifications.ntfy` field, and
+      `NTFY_TOPIC_URL` env var parsing; the "no notifier configured" startup
+      warning now only mentions Web Push/Telegram.
+- [x] Dropped `NTFY_TOPIC_URL` from `docker-compose.yml` (both `app` and
+      `dashboard` services), `.env.example`, and the README's notifiers
+      table.
+- [x] `tasks/roadmap.md`'s per-AirTag routing item updated to drop the
+      now-gone backend from its notifier list.
+
+## Review (v25)
+
+- 7 files touched (2 backend, 1 deleted, 1 test, 3 docs/config), no new
+  dependencies, no migration - a pure removal, no compat shim per this
+  repo's established "no backward-compatibility shims" convention. Anyone
+  with `NTFY_TOPIC_URL` still set in their `.env` just has it silently
+  ignored, same treatment prior config-shape breaks in this changelog got.
+- Verified: `pytest tests/` and `ruff`/type-checks pass with no leftover
+  `ntfy` references; grepped the full repo (case-insensitive) for `ntfy`
+  and confirmed only this changelog entry and the historical v21/pre-v21
+  entries above (left as the historical record, not rewritten) still
+  mention it.
+
+## v26: Fix `ModuleNotFoundError: No module named 'cryptography'` in Getting Started
 
 Trigger: real-user report - running the first commands in README's "Getting
 started -> 1. Configure secrets" (`python -c "from cryptography.fernet
@@ -1961,7 +1993,7 @@ very first command.
       unrelated at this point and heavier) before the two key-generation
       commands.
 
-## Review (v25)
+## Review (v26)
 - 1 file touched (README.md), no code/dependency/migration changes - the
   dependency was already correctly declared, only the setup doc was wrong.
 - Verified: reproduced the exact reported traceback in a fresh venv with no

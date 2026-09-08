@@ -45,11 +45,6 @@ class AuthConfig:
 
 
 @dataclasses.dataclass
-class NtfyConfig:
-    topic_url: str
-
-
-@dataclasses.dataclass
 class WebPushConfig:
     public_key: str
     private_key: str
@@ -58,7 +53,6 @@ class WebPushConfig:
 
 @dataclasses.dataclass
 class NotificationsConfig:
-    ntfy: NtfyConfig | None
     # Telegram is not here: it's entered via the dashboard's Settings panel
     # and stored encrypted in Postgres (see db.get_telegram_credentials),
     # not read from the environment at startup - same treatment owner-
@@ -170,9 +164,6 @@ def load_config() -> Config:
     except ValueError as exc:
         raise ConfigError(f"AIRTAG_KEY_ENCRYPTION_KEY is not a valid Fernet key: {exc}") from exc
 
-    ntfy_url = _env("NTFY_TOPIC_URL")
-    ntfy = NtfyConfig(topic_url=ntfy_url) if ntfy_url else None
-
     vapid_public = _env("VAPID_PUBLIC_KEY")
     vapid_private = _env("VAPID_PRIVATE_KEY")
     vapid_subject = _env("VAPID_SUBJECT")
@@ -182,12 +173,12 @@ def load_config() -> Config:
         else None
     )
 
-    notifications = NotificationsConfig(ntfy=ntfy, webpush=webpush)
-    if not any([ntfy, webpush]):
+    notifications = NotificationsConfig(webpush=webpush)
+    if not webpush:
         logger.warning(
-            "Neither NTFY_TOPIC_URL nor VAPID web push is configured, and Telegram "
-            "is set up separately in the dashboard's Settings panel - movement "
-            "alerts may only show up in the logs and the dashboard's alert list."
+            "VAPID web push is not configured, and Telegram is set up separately "
+            "in the dashboard's Settings panel - movement alerts may only show up "
+            "in the logs and the dashboard's alert list."
         )
 
     return Config(
