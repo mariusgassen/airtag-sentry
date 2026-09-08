@@ -17,7 +17,15 @@ import logging
 
 import requests
 
-from airtag_sentry.db import AirtagRecord, OwnerDevice, Report, fetch_reports, list_airtags, list_owner_devices
+from airtag_sentry.db import (
+    AirtagRecord,
+    OwnerDevice,
+    Report,
+    fetch_owner_device_location_history,
+    fetch_reports,
+    list_airtags,
+    list_owner_devices,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +34,13 @@ _API_TIMEOUT = 10
 _HELP_TEXT = (
     "Verfügbare Befehle:\n"
     "/list – alle Geräte und AirTags anzeigen\n"
-    "/where [Name] – letzten Standort eines AirTags anzeigen "
+    "/where [Name] – letzten Standort eines Geräts oder AirTags anzeigen "
     "(ohne Namen: Auswahl zum Antippen)"
 )
+
+# A /where target is either an owner device or an AirTag - see CLAUDE.md's
+# "AirTags and owner devices get the same user-facing features" constraint.
+_WhereItem = tuple[str, OwnerDevice] | tuple[str, AirtagRecord]
 
 
 def _api_url(bot_token: str, method: str) -> str:
@@ -71,7 +83,7 @@ def set_webhook(bot_token: str, url: str, secret: str) -> None:
         json={
             "commands": [
                 {"command": "list", "description": "Alle Geräte und AirTags anzeigen"},
-                {"command": "where", "description": "Standort eines AirTags anzeigen"},
+                {"command": "where", "description": "Standort eines Geräts oder AirTags anzeigen"},
                 {"command": "help", "description": "Verfügbare Befehle anzeigen"},
             ]
         },
@@ -142,32 +154,63 @@ def _format_list(devices: list[OwnerDevice], airtags: list[AirtagRecord]) -> str
     return "\n\n".join(sections)
 
 
-def _handle_where(conn, bot_token: str, chat_id: str, arg: str) -> None:
+def _where_items(conn) -> list[_WhereItem]:
+    """Devices (primary first) then AirTags - same ordering as /list's
+    _format_list, so the picker and search match what /list shows."""
+    devices = sorted((d for d in list_owner_devices(conn) if d.enabled), key=lambda d: not d.is_primary)
     airtags = list_airtags(conn)
-    if not airtags:
-        _send_message(bot_token, chat_id, "Keine AirTags konfiguriert.")
+    return [("device", d) for d in devices] + [("airtag", a) for a in airtags]
+
+
+def _item_name(item: _WhereItem) -> str:
+    kind, obj = item
+    return (obj.display_name or obj.name) if kind == "device" else obj.name
+
+
+def _item_button_label(item: _WhereItem) -> str:
+    kind, obj = item
+    name = _item_name(item)
+    return f"⭐ {name}" if kind == "device" and obj.is_primary else name
+
+
+def _handle_where(conn, bot_token: str, chat_id: str, arg: str) -> None:
+    items = _where_items(conn)
+    if not items:
+        _send_message(bot_token, chat_id, "Keine Geräte oder AirTags konfiguriert.")
         return
 
     if not arg:
-        _send_picker(bot_token, chat_id, "Welches AirTag?", list(enumerate(airtags)))
+        _send_picker(bot_token, chat_id, "Welches Gerät oder AirTag?", list(enumerate(items)))
         return
 
     query = arg.lower()
-    matches = [(i, a) for i, a in enumerate(airtags) if query in a.name.lower()]
+    matches = [(i, item) for i, item in enumerate(items) if query in _item_name(item).lower()]
     if not matches:
-        _send_message(bot_token, chat_id, f"Kein AirTag gefunden für „{arg}“. /list zeigt alle an.")
+        _send_message(bot_token, chat_id, f"Nichts gefunden für „{arg}“. /list zeigt alle an.")
     elif len(matches) == 1:
         _send_message(bot_token, chat_id, _format_location(matches[0][1], conn))
     else:
-        _send_picker(bot_token, chat_id, f"Mehrere Treffer für „{arg}“ – welches AirTag?", matches)
+        _send_picker(bot_token, chat_id, f"Mehrere Treffer für „{arg}“ – welches Gerät oder AirTag?", matches)
 
 
-def _send_picker(bot_token: str, chat_id: str, prompt: str, indexed_airtags: list[tuple[int, AirtagRecord]]) -> None:
-    buttons = [[{"text": airtag.name, "callback_data": f"where:{index}"}] for index, airtag in indexed_airtags]
+def _send_picker(bot_token: str, chat_id: str, prompt: str, indexed_items: list[tuple[int, _WhereItem]]) -> None:
+    buttons = [[{"text": _item_button_label(item), "callback_data": f"where:{index}"}] for index, item in indexed_items]
     _send_message(bot_token, chat_id, prompt, reply_markup={"inline_keyboard": buttons})
 
 
-def _format_location(airtag: AirtagRecord, conn) -> str:
+def _format_location(item: _WhereItem, conn) -> str:
+    kind, obj = item
+    if kind == "device":
+        name = obj.display_name or obj.name
+        history = fetch_owner_device_location_history(conn, obj.id, limit=1)
+        if not history:
+            return f"{name}: noch kein Standort bekannt."
+        location = history[0]  # newest-first, unlike fetch_reports
+        maps_url = f"https://maps.google.com/?q={location.lat},{location.lon}"
+        timestamp = location.recorded_at.strftime("%d.%m.%Y %H:%M")
+        return f"{name}\n{timestamp}\n{maps_url}"
+
+    airtag = obj
     reports: list[Report] = fetch_reports(conn, airtag.id, limit=1)
     if not reports:
         return f"{airtag.name}: noch kein Standort bekannt."
@@ -189,15 +232,15 @@ def _handle_callback_query(conn, bot_token: str, chat_id: str, callback_query: d
             _answer_callback_query(bot_token, callback_id)
         return
 
-    airtags = list_airtags(conn)
+    items = _where_items(conn)
     try:
-        airtag = airtags[int(index_str)]
+        item = items[int(index_str)]
     except (ValueError, IndexError):
         if callback_id:
             _answer_callback_query(bot_token, callback_id)
         return
 
-    text = _format_location(airtag, conn)
+    text = _format_location(item, conn)
     if callback_id:
         _answer_callback_query(bot_token, callback_id)
     message_id = message.get("message_id")
