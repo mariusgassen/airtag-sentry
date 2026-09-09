@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from 'react-leaflet'
+import { MapContainer, TileLayer, Polyline } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
 import { airtagPinIcon, deviceColor } from '../mapIcons'
-import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { mapsUrl } from '../maps'
 import {
   AddressLine,
   FitBounds,
@@ -14,6 +14,7 @@ import {
   NoReportsView,
   PanToSelection,
   POPUP_WIDTH_CLASS,
+  SelectedPin,
 } from './MapCard'
 import { ClockIcon, LocationArrowIcon } from './icons'
 
@@ -94,11 +95,9 @@ export function DeviceMapCard({
         getKey={(l) => l.recorded_at}
         onSelect={onSelectLocation ? (l) => onSelectLocation(l.recorded_at) : undefined}
       />
-      <Marker position={displayedPosition} icon={airtagPinIcon(device)} eventHandlers={{ click: centerMarkerOnClick }} />
-      {/* Standalone (not nested in the Marker above) and explicitly
-          position-controlled - mirrors MapCard.tsx's selected-pin popup
-          exactly, see the comment there for why. */}
-      <Popup position={displayedPosition} autoPan={false}>
+      {/* Marker + popup mirrors MapCard.tsx's SelectedPin exactly, see the
+          comment there for why it isn't a plain bound Marker/Popup pair. */}
+      <SelectedPin position={displayedPosition} icon={airtagPinIcon(device)}>
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
@@ -115,7 +114,7 @@ export function DeviceMapCard({
             In Karten öffnen
           </a>
         </div>
-      </Popup>
+      </SelectedPin>
       {/* FitBounds first, PanToSelection second: mirrors MapCard.tsx's own
           ordering exactly, see the comment there for why. */}
       <FitBounds positions={positions} />

@@ -361,7 +361,12 @@ export default function App() {
           the stepper is showing. The slot is otherwise still generic so
           future per-item meta (e.g. battery, last-seen) can go here too
           without a layout change. */}
-      <div className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-10 flex h-[var(--header-h)] items-center justify-center border-b border-[var(--divider)] chrome-blur md:hidden">
+      {/* select-none (+ the iOS-specific touch-callout suppression):
+          pointer-events-none above stops taps/clicks from targeting this
+          bar, but not WebKit's own text-selection/callout gesture, which
+          hit-tests independently of it - without this a press-drag here
+          selects the title text instead of passing through to the map. */}
+      <div className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-10 flex h-[var(--header-h)] items-center justify-center border-b border-[var(--divider)] chrome-blur select-none [-webkit-touch-callout:none] md:hidden">
         <span className="truncate px-12 text-[15px] font-semibold text-[var(--text)]">
           {detailName ?? 'AirTags'}
         </span>
