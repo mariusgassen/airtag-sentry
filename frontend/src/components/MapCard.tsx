@@ -7,7 +7,7 @@ import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, PIN_POPUP_OFFSET, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
-import { centerMarkerOnClick, markerMap, mapsUrl } from '../maps'
+import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
 // Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
@@ -211,13 +211,21 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
  * rather than nested in the Marker, and opens itself unconditionally on
  * mount (react-leaflet's default behavior for a Popup with no parent
  * layer). That standalone-ness has two costs this component works around:
- * a Marker's own click only opens a *bound* popup, so a popup closed by the
- * user (X button, tap elsewhere) never reopens on a re-click without the
- * ref-driven `openOn` below; and a standalone Popup has no icon to read
- * `popupAnchor` from, so it needs `offset` passed explicitly (PIN_POPUP_OFFSET)
- * or it renders low enough to cover the pin's own badge. Exported for
- * DeviceMapCard.tsx, which shares this same selected-pin behavior (see
- * CLAUDE.md's AirTag/device parity constraint). */
+ * a Marker's own click, or picking a different position entirely (a
+ * HistoryPoints dot, the header's older/newer stepper, a history-list row),
+ * only ever *moves* a closed popup - Leaflet doesn't reopen it just because
+ * its position changed - so a popup the user dismissed (X button, tap
+ * elsewhere) stayed closed no matter which position got selected next,
+ * silently showing nothing for it; the effect below reopens it on every
+ * position change (including the initial mount, redundantly with the
+ * default-open behavior above - openOn on an already-open popup is a no-op)
+ * and the Marker's click handler covers the one case that isn't a position
+ * change, re-clicking the same already-displayed pin. And a standalone
+ * Popup has no icon to read `popupAnchor` from, so it needs `offset` passed
+ * explicitly (PIN_POPUP_OFFSET) or it renders low enough to cover the pin's
+ * own badge. Exported for DeviceMapCard.tsx, which shares this same
+ * selected-pin behavior (see CLAUDE.md's AirTag/device parity
+ * constraint). */
 export function SelectedPin({
   position,
   icon,
@@ -227,7 +235,12 @@ export function SelectedPin({
   icon: L.DivIcon
   children: ReactNode
 }) {
+  const map = useMap()
   const popupRef = useRef<L.Popup>(null)
+  const [lat, lon] = position
+  useEffect(() => {
+    popupRef.current?.openOn(map)
+  }, [map, lat, lon])
   return (
     <>
       <Marker
@@ -236,8 +249,7 @@ export function SelectedPin({
         eventHandlers={{
           click: (e) => {
             centerMarkerOnClick(e)
-            const map = markerMap(e.target as L.Marker)
-            if (map) popupRef.current?.openOn(map)
+            popupRef.current?.openOn(map)
           },
         }}
       />
