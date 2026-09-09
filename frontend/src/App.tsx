@@ -33,6 +33,15 @@ type SheetState = 'minimized' | 'default' | 'expanded'
 const CLICK_THRESHOLD_PX = 6
 const SNAP_THRESHOLD_PX = 40
 
+// How often the whole app re-fetches from the DB in the background, so a
+// new poller fix (tracker.py) or a change made elsewhere (e.g. a device
+// toggled in Settings -> Apple-Konten, which keeps its own local state -
+// see OwnerDevicesPanel.tsx) shows up here without a manual reload. Reads
+// are cheap (plain Postgres selects, no live Apple calls), so this is
+// independent of - and much shorter than - the user-configurable
+// polling_interval_minutes that gates actual Apple polling.
+const AUTO_REFRESH_MS = 20_000
+
 // Drag/tap gesture resolution for the sheet's grab handle, kept pure and
 // outside the component so the transition table is easy to read/test in
 // isolation. `delta` is dragStartY - pointerUp.clientY (positive = dragged
@@ -117,6 +126,18 @@ export default function App() {
     refreshAirtags()
   }, [refreshAirtags])
 
+  const refreshOwnerConnected = useCallback(async () => {
+    await getOwnerAppleStatus()
+      .then((s) => setOwnerConnected(s.connected))
+      .catch(() => setOwnerConnected(false))
+  }, [])
+
+  // Devices, their live locations, and their histories all come from the
+  // same enabled/disabled registry, so they're refreshed together - a
+  // device newly enabled (or disabled) in Settings -> Apple-Konten ->
+  // Eigene Geräte (OwnerDevicesPanel.tsx, which keeps its own local state)
+  // only reaches the Objects list/map through this call, same as a fresh
+  // poller fix.
   const refreshOwnerDevices = useCallback(async () => {
     await getOwnerDeviceLocations()
       .then(setOwnerLocations)
@@ -124,52 +145,74 @@ export default function App() {
     // Full enabled/disabled registry, not just devices with a recorded fix -
     // without this, a freshly-enabled device with no location yet is
     // invisible everywhere outside Settings (see tasks/todo.md).
-    await getOwnerDevices()
-      .then((ds) => setOwnerDevices(ds.filter((d) => d.enabled)))
-      .catch(() => setOwnerDevices([]))
-  }, [])
-
-  useEffect(() => {
-    getOwnerAppleStatus()
-      .then((s) => setOwnerConnected(s.connected))
-      .catch(() => setOwnerConnected(false))
-    refreshOwnerDevices()
-  }, [refreshOwnerDevices])
-
-  useEffect(() => {
-    if (ownerDevices.length === 0) {
+    const enabled = await getOwnerDevices()
+      .then((ds) => ds.filter((d) => d.enabled))
+      .catch(() => [] as OwnerDevice[])
+    setOwnerDevices(enabled)
+    if (enabled.length === 0) {
       setOwnerLocationHistories({})
       return
     }
-    let cancelled = false
-    Promise.all(
-      ownerDevices.map((d) =>
+    const entries = await Promise.all(
+      enabled.map((d) =>
         getOwnerDeviceHistory(d.id)
           .then((rows) => [d.id, rows] as const)
           .catch(() => [d.id, []] as const),
       ),
-    ).then((entries) => {
-      if (!cancelled) setOwnerLocationHistories(Object.fromEntries(entries))
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [ownerDevices])
+    )
+    setOwnerLocationHistories(Object.fromEntries(entries))
+  }, [])
 
   useEffect(() => {
-    if (!currentId) {
+    refreshOwnerConnected()
+    refreshOwnerDevices()
+  }, [refreshOwnerConnected, refreshOwnerDevices])
+
+  // Guards refreshReports below against a slow response for an airtag the
+  // user has since switched away from (or a poll tick that lands mid-
+  // switch) landing after a fresher one already resolved.
+  const currentIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    currentIdRef.current = currentId
+  }, [currentId])
+
+  const refreshReports = useCallback(async () => {
+    const id = currentId
+    if (!id) {
       setReports([])
       return
     }
-    let cancelled = false
-    getReports(currentId).then((r) => {
-      if (!cancelled) setReports(r)
-    })
-    setSelectedReportId(null)
-    return () => {
-      cancelled = true
-    }
+    const r = await getReports(id)
+    if (currentIdRef.current === id) setReports(r)
   }, [currentId])
+
+  useEffect(() => {
+    setSelectedReportId(null)
+    refreshReports()
+  }, [currentId, refreshReports])
+
+  // Background auto-refresh: re-fetch everything periodically, plus
+  // immediately whenever the tab/app regains visibility (switching back
+  // from another app, unlocking the screen, ...) so newly-polled locations
+  // and settings changes made elsewhere always show up without a manual
+  // reload - see AUTO_REFRESH_MS.
+  useEffect(() => {
+    function tick() {
+      refreshAirtags()
+      refreshOwnerConnected()
+      refreshOwnerDevices()
+      refreshReports()
+    }
+    const id = window.setInterval(tick, AUTO_REFRESH_MS)
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') tick()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports])
 
   const currentAirtag = airtags.find((a) => a.id === currentId) ?? null
   const selectedDevice = ownerDevices.find((d) => d.id === selectedDeviceId) ?? null
