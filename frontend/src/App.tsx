@@ -379,16 +379,18 @@ export default function App() {
                 the pointer-events-none title bar behind it, landing on the
                 Leaflet map underneath - MapClickHandler read that as "tapped
                 away from a pin" and closed the whole detail view back to
-                the overview. Sized generously (44px target) since a small
+                the overview. Sized generously but wide rather than tall
+                (extra horizontal padding, modest vertical) since a small
                 disabled hit target made stray taps here more likely in the
-                first place. */}
+                first place - it still has to fit inside the fixed
+                44px-tall title bar without filling it edge to edge. */}
             <span onClick={() => stepOlder?.()} className="rounded-full">
               <button
                 type="button"
                 disabled={!stepOlder}
                 aria-label="Älterer Standort"
                 title="Älterer Standort"
-                className="rounded-full p-2.5 text-[var(--text)] disabled:opacity-30"
+                className="rounded-full px-3.5 py-1.5 text-[var(--text)] disabled:opacity-30"
               >
                 <ChevronDownIcon className="h-5 w-5" />
               </button>
@@ -399,7 +401,7 @@ export default function App() {
                 disabled={!stepNewer}
                 aria-label="Neuerer Standort"
                 title="Neuerer Standort"
-                className="rounded-full p-2.5 text-[var(--text)] disabled:opacity-30"
+                className="rounded-full px-3.5 py-1.5 text-[var(--text)] disabled:opacity-30"
               >
                 <ChevronUpIcon className="h-5 w-5" />
               </button>
