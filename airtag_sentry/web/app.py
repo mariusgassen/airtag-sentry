@@ -288,6 +288,14 @@ class OwnerDeviceAppearanceIn(BaseModel):
     color: str | None = None
 
 
+class OwnerDevicePlaySoundIn(BaseModel):
+    device_id: str
+
+
+class OwnerFamilyIn(BaseModel):
+    include_family: bool
+
+
 class TelegramCredentialsIn(BaseModel):
     bot_token: str
     chat_id: str
@@ -769,6 +777,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
         return dataclasses.asdict(device)
 
+    @app.post("/api/owner-devices/play-sound")
+    def play_owner_device_sound_route(body: OwnerDevicePlaySoundIn):
+        """Live "play sound" request - see owner_tracking.play_sound for why
+        there's no AirTag equivalent."""
+        with get_conn(cfg.database_url) as conn:
+            try:
+                owner_tracking.play_sound(cfg, conn, body.device_id)
+            except LookupError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except Exception as exc:
+                logger.exception("Play sound failed for owner device '%s'.", body.device_id)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"ok": True}
+
     @app.get("/api/owner-device-locations")
     def get_owner_device_locations():
         """Latest known location of every *enabled* owner device, used to correlate
@@ -891,6 +915,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def owner_apple_disconnect():
         with get_conn(cfg.database_url) as conn:
             owner_tracking.disconnect(conn)
+        return {"ok": True}
+
+    @app.patch("/api/apple/owner/family")
+    def owner_apple_family_route(body: OwnerFamilyIn):
+        """Flips the Family Sharing filter on an already-connected account - see
+        owner_tracking.set_include_family. Unlike the connect dialog's checkbox,
+        this doesn't need a re-login: the flag is just re-read from Postgres on
+        the next poll."""
+        with get_conn(cfg.database_url) as conn:
+            if not owner_tracking.set_include_family(conn, body.include_family):
+                raise HTTPException(status_code=404, detail="Owner tracking not connected.")
         return {"ok": True}
 
     @app.get("/api/notifications/telegram")

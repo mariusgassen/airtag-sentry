@@ -18,6 +18,9 @@ export interface AppleConnectAdapter {
     // poller's most recent live-Apple-call failure (lapsed session,
     // transient network error, ...), cleared again on the next success.
     last_sync_error?: string | null
+    // Only meaningful for the owner-tracking adapter - current Family Sharing
+    // filter, see familySharingToggle/setFamilySharing below.
+    include_family_devices?: boolean
   }>
   login: (email: string, password: string, includeFamily?: boolean) => Promise<AppleLoginResult>
   // Only present where a live-login fallback exists (AirTag tracking) - lets
@@ -31,6 +34,10 @@ export interface AppleConnectAdapter {
   // of this flag is what shows the "shared with me" checkbox below; the
   // AirTag adapter (FindMy.py, no such concept) omits it.
   familySharingToggle?: boolean
+  // Present alongside familySharingToggle - flips the filter on an already-
+  // connected account (owner_tracking.set_include_family), no re-login
+  // needed since it's just read fresh from Postgres on the next poll.
+  setFamilySharing?: (includeFamily: boolean) => Promise<void>
   // Absent for adapters whose underlying login never offers a method choice
   // (owner tracking/pyicloud) - the wizard skips straight to the code step.
   selectMethod?: (methodIndex: number) => Promise<void>
@@ -50,6 +57,8 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [primaryDeviceName, setPrimaryDeviceName] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [familySharing, setFamilySharingState] = useState(false)
+  const [familySharingBusy, setFamilySharingBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>('credentials')
   const [email, setEmail] = useState('')
@@ -65,6 +74,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
       setConnected(s.connected)
       setPrimaryDeviceName(s.primary_device_name ?? null)
       setSyncError(s.last_sync_error ?? null)
+      setFamilySharingState(s.include_family_devices ?? false)
     })
   }, [adapter])
 
@@ -73,6 +83,18 @@ export function AppleConnectPanel({ title, adapter }: Props) {
     setConnected(s.connected)
     setPrimaryDeviceName(s.primary_device_name ?? null)
     setSyncError(s.last_sync_error ?? null)
+    setFamilySharingState(s.include_family_devices ?? false)
+  }
+
+  async function handleToggleFamilySharing() {
+    if (!adapter.setFamilySharing) return
+    setFamilySharingBusy(true)
+    try {
+      await adapter.setFamilySharing(!familySharing)
+      await refreshStatus()
+    } finally {
+      setFamilySharingBusy(false)
+    }
   }
 
   function reset() {
@@ -209,6 +231,12 @@ export function AppleConnectPanel({ title, adapter }: Props) {
             <span className="text-sm">Verbunden</span>
             <Switch checked onChange={handleDisconnect} />
           </div>
+          {adapter.setFamilySharing && (
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--divider)] pt-3">
+              <span className="text-sm">Auch mit mir geteilte Geräte (Familienfreigabe)</span>
+              <Switch checked={familySharing} disabled={familySharingBusy} onChange={handleToggleFamilySharing} />
+            </div>
+          )}
           {syncError && (
             <p className="mt-2 text-[0.78rem] text-[var(--destructive)]">
               Letzte Synchronisierung fehlgeschlagen: {syncError}

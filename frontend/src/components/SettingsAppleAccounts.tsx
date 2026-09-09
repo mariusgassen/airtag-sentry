@@ -8,6 +8,7 @@ import {
   getOwnerAppleStatus,
   ownerAppleDisconnect,
   ownerAppleLogin,
+  ownerAppleSetIncludeFamily,
   ownerAppleSubmitTwoFactorCode,
 } from '../api'
 import type { AppleConnectAdapter } from './AppleConnectPanel'
@@ -29,6 +30,7 @@ const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
   submitCode: ownerAppleSubmitTwoFactorCode,
   disconnect: ownerAppleDisconnect,
   familySharingToggle: true,
+  setFamilySharing: ownerAppleSetIncludeFamily,
 }
 
 export function SettingsAppleAccounts() {

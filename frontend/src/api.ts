@@ -238,6 +238,13 @@ export async function getOwnerDeviceHistory(id: string, limit = 200): Promise<Ow
   ).json()
 }
 
+export async function playOwnerDeviceSound(id: string): Promise<void> {
+  await apiFetch('/api/owner-devices/play-sound', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: id }),
+  })
+}
+
 export async function getAppleStatus(): Promise<{ connected: boolean }> {
   return (await apiFetch('/api/apple/status')).json()
 }
@@ -278,6 +285,9 @@ export async function getOwnerAppleStatus(): Promise<{
   // session, a transient network error, ...), if any - cleared again on the
   // next successful sync.
   last_sync_error: string | null
+  // Current Family Sharing filter, settable via ownerAppleSetIncludeFamily
+  // without a re-login - see owner_tracking.set_include_family.
+  include_family_devices: boolean
 }> {
   return (await apiFetch('/api/apple/owner/status')).json()
 }
@@ -301,6 +311,13 @@ export async function ownerAppleSubmitTwoFactorCode(code: string): Promise<void>
 
 export async function ownerAppleDisconnect(): Promise<void> {
   await apiFetch('/api/apple/owner', { method: 'DELETE' })
+}
+
+export async function ownerAppleSetIncludeFamily(includeFamily: boolean): Promise<void> {
+  await apiFetch('/api/apple/owner/family', {
+    method: 'PATCH',
+    body: JSON.stringify({ include_family: includeFamily }),
+  })
 }
 
 export interface TelegramStatus {
