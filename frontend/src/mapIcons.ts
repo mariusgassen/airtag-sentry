@@ -96,6 +96,16 @@ export function deviceColor(item: { id: string; color?: string | null }): string
   return item.color ?? airtagColor(item.id)
 }
 
+/** Popup offset for an airtagPinIcon marker - far enough above the icon's
+ * anchor (the tail's tip) to clear the whole badge+tail rather than
+ * overlapping it. A bound `<Marker><Popup>` reads this automatically from
+ * the icon's own `popupAnchor`, but a *standalone* Popup (MapCard.tsx's/
+ * DeviceMapCard.tsx's SelectedPin, positioned directly rather than nested
+ * in the Marker) has no icon to read it from, so it's exported here to be
+ * passed explicitly as that Popup's own `offset` - without it, the popup's
+ * default offset renders it low enough to cover the pin. */
+export const PIN_POPUP_OFFSET: L.PointExpression = [0, -(SIZE + 4)]
+
 /** A colored circular badge pin for an AirTag's map marker, matching the
  * same chosen (or, if unset, hash-derived) icon/color used for its
  * list/detail avatar so an item reads as the same item on the map as it
@@ -111,7 +121,7 @@ export function airtagPinIcon(airtag: { id: string; icon?: string | null; color?
     `,
     iconSize: [SIZE, SIZE + 7],
     iconAnchor: [SIZE / 2, SIZE + 7],
-    popupAnchor: [0, -(SIZE + 4)],
+    popupAnchor: PIN_POPUP_OFFSET,
   })
 }
 

@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import type L from 'leaflet'
+import { DomEvent } from 'leaflet'
 import { CircleMarker, MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
-import { OWNER_TRAIL_COLOR, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
-import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { OWNER_TRAIL_COLOR, PIN_POPUP_OFFSET, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
+import { centerMarkerOnClick, markerMap, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
 // Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
@@ -149,11 +151,13 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   )
 }
 
-/** Small, low-opacity dots along a trail for every history point other than
- * the one currently displayed (which already has its own full pin/popup) -
- * lets a point be picked directly on the map, not just via the sidebar
- * history list. Exported for DeviceMapCard.tsx, which shares this same
- * behavior (see CLAUDE.md's AirTag/device parity constraint). */
+/** Dots along a trail for every history point other than the one currently
+ * displayed (which already has its own full pin/popup) - lets a point be
+ * picked directly on the map, not just via the sidebar history list. A
+ * white ring around each device-colored fill keeps them visible against
+ * the same-colored trail line they sit on, rather than blending into it.
+ * Exported for DeviceMapCard.tsx, which shares this same behavior (see
+ * CLAUDE.md's AirTag/device parity constraint). */
 export function HistoryPoints<T extends { lat: number; lon: number }>({
   points,
   displayedIndex,
@@ -174,12 +178,74 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
           <CircleMarker
             key={getKey(point, i)}
             center={[point.lat, point.lon]}
-            radius={4}
-            pathOptions={{ color, weight: 1, fillColor: color, fillOpacity: 0.45, opacity: 0.6 }}
-            eventHandlers={onSelect ? { click: () => onSelect(point) } : undefined}
+            radius={6}
+            pathOptions={{ color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.9, opacity: 0.9 }}
+            eventHandlers={
+              onSelect
+                ? {
+                    // CircleMarker (unlike Marker) bubbles its click to the
+                    // map by default - left unstopped, picking a point also
+                    // fired MapClickHandler's onMapClick right after,
+                    // reading it as "tapped away from a pin" and closing
+                    // the whole detail view the click was meant to refine.
+                    click: (e) => {
+                      DomEvent.stopPropagation(e)
+                      onSelect(point)
+                    },
+                  }
+                : undefined
+            }
           />
         ),
       )}
+    </>
+  )
+}
+
+/** Marker + popup for the map's one "selected" pin - the AirTag/device's own
+ * currently displayed position. Not a plain `<Marker><Popup>` pair: a bound
+ * Popup only opens on click, and there's no reliable way to force it open
+ * on mount instead (an imperative `openPopup()` call from a sibling effect
+ * empirically doesn't reliably run after react-leaflet's own bind-to-marker
+ * effect finishes) - so the Popup here is standalone, positioned directly
+ * rather than nested in the Marker, and opens itself unconditionally on
+ * mount (react-leaflet's default behavior for a Popup with no parent
+ * layer). That standalone-ness has two costs this component works around:
+ * a Marker's own click only opens a *bound* popup, so a popup closed by the
+ * user (X button, tap elsewhere) never reopens on a re-click without the
+ * ref-driven `openOn` below; and a standalone Popup has no icon to read
+ * `popupAnchor` from, so it needs `offset` passed explicitly (PIN_POPUP_OFFSET)
+ * or it renders low enough to cover the pin's own badge. Exported for
+ * DeviceMapCard.tsx, which shares this same selected-pin behavior (see
+ * CLAUDE.md's AirTag/device parity constraint). */
+export function SelectedPin({
+  position,
+  icon,
+  children,
+}: {
+  position: [number, number]
+  icon: L.DivIcon
+  children: ReactNode
+}) {
+  const popupRef = useRef<L.Popup>(null)
+  return (
+    <>
+      <Marker
+        position={position}
+        icon={icon}
+        eventHandlers={{
+          click: (e) => {
+            centerMarkerOnClick(e)
+            const map = markerMap(e.target as L.Marker)
+            if (map) popupRef.current?.openOn(map)
+          },
+        }}
+      />
+      {/* autoPan off: centerMarkerOnClick above already centers this pin
+          explicitly on click. */}
+      <Popup ref={popupRef} position={position} offset={PIN_POPUP_OFFSET} autoPan={false}>
+        {children}
+      </Popup>
     </>
   )
 }
@@ -319,22 +385,7 @@ export function MapCard({
           />
         )
       })}
-      <Marker position={displayedPosition} icon={airtagPinIcon(airtag)} eventHandlers={{ click: centerMarkerOnClick }} />
-      {/* Standalone (not nested in the Marker above) and explicitly
-          position-controlled, rather than a bound popup opened imperatively
-          via a marker ref: that ref-based open() call ran in this
-          component's own effect, which (empirically - a nested Popup's own
-          bind-to-marker effect does NOT reliably finish first) could fire
-          before the popup had actually bound itself to the marker, silently
-          no-opping and leaving the "current" pin's info never shown by
-          default. A standalone Popup opens itself on mount unconditionally
-          (react-leaflet's own behavior for a Popup that isn't a layer's
-          child), sidestepping that ordering entirely - autoPan off since
-          PanToSelection/centerMarkerOnClick already handle centering
-          explicitly (see CLAUDE.md's map-navigation-experience note on
-          AirTag/device parity - this fix and DeviceMapCard's mirror it
-          exactly). */}
-      <Popup position={displayedPosition} autoPan={false}>
+      <SelectedPin position={displayedPosition} icon={airtagPinIcon(airtag)}>
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">
             {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
@@ -353,7 +404,7 @@ export function MapCard({
             In Karten öffnen
           </a>
         </div>
-      </Popup>
+      </SelectedPin>
       {ownerLocations.map((loc) => (
         <Marker
           key={loc.device_id}
