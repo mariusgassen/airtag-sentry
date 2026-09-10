@@ -86,10 +86,14 @@ constraint, shipped for both: new `location_reports.battery_level` /
 `DeviceDetail.tsx`'s header and `ObjectsList.tsx`'s row subtitle for both
 AirTags and owner devices alike.
 
+Telegram's `/where` now shows battery too (`telegram_bot.py`'s
+`_format_location_text`, reusing `geocode.py`'s reverse geocoder for a
+human-readable address alongside the maps link).
+
 Not yet done, left as a fast-follow: map popups (`MapCard.tsx`/
-`DeviceMapCard.tsx`) and Telegram's `/where` don't show battery yet, and
-there's no low-battery alerting (a dying AirTag/phone silently going quiet
-is still just "no new reports", not a distinct alert reason).
+`DeviceMapCard.tsx`) don't show battery yet, and there's no low-battery
+alerting (a dying AirTag/phone silently going quiet is still just "no new
+reports", not a distinct alert reason).
 
 ## 14. Home Assistant integration
 

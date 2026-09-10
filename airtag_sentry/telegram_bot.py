@@ -13,6 +13,7 @@ replies without going through that check first.
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 import requests
@@ -26,6 +27,7 @@ from airtag_sentry.db import (
     list_airtags,
     list_owner_devices,
 )
+from airtag_sentry.geocode import reverse_geocode
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +200,34 @@ def _send_picker(bot_token: str, chat_id: str, prompt: str, indexed_items: list[
     _send_message(bot_token, chat_id, prompt, reply_markup={"inline_keyboard": buttons})
 
 
+# Same qualitative labels as frontend/src/format.ts's AIRTAG_BATTERY_LABELS,
+# for FindMy.py-decoded Report.battery_level.
+_AIRTAG_BATTERY_LABELS = {"full": "Voll", "medium": "Mittel", "low": "Niedrig", "very_low": "Sehr niedrig"}
+
+
+def _format_airtag_battery(level: str) -> str:
+    return _AIRTAG_BATTERY_LABELS.get(level, level)
+
+
+def _format_device_battery(level: float, status: str | None) -> str:
+    """OwnerLocation.battery_level is a 0.0-1.0 fraction (pyicloud); mirrors
+    frontend/src/format.ts's formatDeviceBattery."""
+    percent = f"{round(level * 100)} %"
+    return f"{percent} (lädt)" if status == "Charging" else percent
+
+
+def _format_location_text(name: str, lat: float, lon: float, timestamp: dt.datetime, battery: str | None) -> str:
+    lines = [name]
+    if battery is not None:
+        lines.append(f"Batterie: {battery}")
+    lines.append(timestamp.strftime("%d.%m.%Y %H:%M"))
+    address = reverse_geocode(lat, lon)
+    if address:
+        lines.append(address)
+    lines.append(f"https://maps.google.com/?q={lat},{lon}")
+    return "\n".join(lines)
+
+
 def _format_location(item: _WhereItem, conn) -> str:
     kind, obj = item
     if kind == "device":
@@ -206,18 +236,16 @@ def _format_location(item: _WhereItem, conn) -> str:
         if not history:
             return f"{name}: noch kein Standort bekannt."
         location = history[0]  # newest-first, unlike fetch_reports
-        maps_url = f"https://maps.google.com/?q={location.lat},{location.lon}"
-        timestamp = location.recorded_at.strftime("%d.%m.%Y %H:%M")
-        return f"{name}\n{timestamp}\n{maps_url}"
+        battery = _format_device_battery(location.battery_level, location.battery_status) if location.battery_level is not None else None
+        return _format_location_text(name, location.lat, location.lon, location.recorded_at, battery)
 
     airtag = obj
     reports: list[Report] = fetch_reports(conn, airtag.id, limit=1)
     if not reports:
         return f"{airtag.name}: noch kein Standort bekannt."
     report = reports[-1]
-    maps_url = f"https://maps.google.com/?q={report.lat},{report.lon}"
-    timestamp = report.timestamp.strftime("%d.%m.%Y %H:%M")
-    return f"{airtag.name}\n{timestamp}\n{maps_url}"
+    battery = _format_airtag_battery(report.battery_level) if report.battery_level else None
+    return _format_location_text(airtag.name, report.lat, report.lon, report.timestamp, battery)
 
 
 def _handle_callback_query(conn, bot_token: str, chat_id: str, callback_query: dict) -> None:
