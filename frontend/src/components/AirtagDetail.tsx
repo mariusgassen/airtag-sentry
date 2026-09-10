@@ -11,7 +11,7 @@ import {
 } from '../api'
 import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import { formatAlertReason, formatRelative } from '../format'
+import { formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { AirtagGlyph, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PaletteIcon, PencilIcon, TrashIcon } from './icons'
 
@@ -136,6 +136,15 @@ export function AirtagDetail({
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {status?.last_report ? `Zuletzt gesehen ${formatRelative(status.last_report.timestamp)}` : 'Kein Standort verfügbar'}
           </p>
+          {status?.last_report?.battery_level && (
+            <p
+              className={`mt-1 text-sm ${
+                isLowBattery(status.last_report.battery_level) ? 'text-[var(--destructive)]' : 'text-[var(--text-secondary)]'
+              }`}
+            >
+              Batterie: {formatAirtagBattery(status.last_report.battery_level)}
+            </p>
+          )}
           {status?.last_alert && (
             <p className="mt-1 text-sm text-[var(--destructive)]">
               Alarm: {formatAlertReason(status.last_alert.reason)} · {formatRelative(status.last_alert.timestamp)}

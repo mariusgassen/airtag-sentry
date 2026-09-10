@@ -651,6 +651,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "lon": r.lon,
                 "accuracy": r.accuracy,
                 "confidence": r.confidence,
+                "battery_level": r.battery_level,
             }
             for r in reports
         ]
@@ -675,6 +676,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "timestamp": reports[0].timestamp.isoformat(),
                     "lat": reports[0].lat,
                     "lon": reports[0].lon,
+                    "battery_level": reports[0].battery_level,
                 }
                 if reports
                 else None
@@ -814,6 +816,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "lat": loc.lat,
                     "lon": loc.lon,
                     "horizontal_accuracy": loc.horizontal_accuracy,
+                    "battery_level": loc.battery_level,
+                    "battery_status": loc.battery_status,
                 }
             )
         return results
@@ -830,6 +834,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "lat": loc.lat,
                 "lon": loc.lon,
                 "horizontal_accuracy": loc.horizontal_accuracy,
+                "battery_level": loc.battery_level,
+                "battery_status": loc.battery_status,
             }
             for loc in locations
         ]

@@ -1,7 +1,26 @@
 import contextlib
 import types
 
+import pytest
+
 from airtag_sentry import tracker
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        (0b00_000000, "full"),
+        (0b01_000000, "medium"),
+        (0b10_000000, "low"),
+        (0b11_000000, "very_low"),
+        (0b11_101010, "very_low"),  # lower bits (device type etc.) don't affect the reading
+    ],
+)
+def test_battery_level_decodes_top_two_bits_of_status_byte(status, expected):
+    """FindMy.py's LocationReport.status is the raw status byte; battery is its
+    top 2 bits, per the library's own scanner.BATTERY_LEVEL encoding (only
+    exposed there as a property, not on LocationReport - see tracker.py)."""
+    assert tracker._battery_level(status) == expected
 
 
 def test_poll_once_still_updates_owner_devices_when_airtag_session_missing(monkeypatch):

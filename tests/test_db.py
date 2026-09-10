@@ -87,7 +87,7 @@ def conn():
         pytest.skip(f"Postgres not reachable at {TEST_DATABASE_URL}; start it to run this test.")
 
 
-def _report(iso: str, lat: float, lon: float, airtag_id: str = "bike") -> Report:
+def _report(iso: str, lat: float, lon: float, airtag_id: str = "bike", battery_level: str | None = None) -> Report:
     return Report(
         id=None,
         airtag_id=airtag_id,
@@ -96,6 +96,7 @@ def _report(iso: str, lat: float, lon: float, airtag_id: str = "bike") -> Report
         lon=lon,
         accuracy=5.0,
         confidence=2,
+        battery_level=battery_level,
     )
 
 
@@ -204,6 +205,11 @@ def test_insert_reports_returns_only_new_rows(conn):
     assert count == 3
 
 
+def test_insert_reports_persists_battery_level(conn):
+    [inserted] = insert_reports(conn, [_report("2026-01-01T10:00:00", 52.5, 13.4, battery_level="low")])
+    assert inserted.battery_level == "low"
+
+
 def test_insert_reports_allows_same_timestamp_for_different_airtag(conn):
     ts = "2026-01-01T10:00:00"
     inserted_a = insert_reports(conn, [_report(ts, 52.5, 13.4, airtag_id="bike")])
@@ -270,7 +276,15 @@ def test_update_settings_round_trips(conn):
 _SEEN_AT = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
 
 
-def _owner_location(device_id: str, iso: str, lat: float, lon: float, accuracy: float = 10.0) -> OwnerLocation:
+def _owner_location(
+    device_id: str,
+    iso: str,
+    lat: float,
+    lon: float,
+    accuracy: float = 10.0,
+    battery_level: float | None = None,
+    battery_status: str | None = None,
+) -> OwnerLocation:
     return OwnerLocation(
         id=None,
         device_id=device_id,
@@ -278,7 +292,19 @@ def _owner_location(device_id: str, iso: str, lat: float, lon: float, accuracy: 
         lat=lat,
         lon=lon,
         horizontal_accuracy=accuracy,
+        battery_level=battery_level,
+        battery_status=battery_status,
     )
+
+
+def test_record_owner_device_location_persists_battery(conn):
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    loc = record_owner_device_location(
+        conn,
+        _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4, battery_level=0.42, battery_status="Charging"),
+    )
+    assert loc.battery_level == 0.42
+    assert loc.battery_status == "Charging"
 
 
 def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):

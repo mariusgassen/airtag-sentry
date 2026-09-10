@@ -95,10 +95,36 @@ def test_snapshot_devices_reads_location_as_a_property_and_stops_monitor_thread(
     snapshot = owner_tracking._snapshot_devices(api)
 
     assert snapshot == [
-        {"id": "d1", "name": "MacBook Air", "device_type": "Mac", "location": online.location},
-        {"id": "d2", "name": "iPad", "device_type": "iPad", "location": None},
+        {
+            "id": "d1",
+            "name": "MacBook Air",
+            "device_type": "Mac",
+            "location": online.location,
+            "battery_level": None,
+            "battery_status": None,
+        },
+        {
+            "id": "d2",
+            "name": "iPad",
+            "device_type": "iPad",
+            "location": None,
+            "battery_level": None,
+            "battery_status": None,
+        },
     ]
     assert api.devices.stop_event.was_set is True
+
+
+def test_snapshot_devices_reads_battery_from_device_data():
+    device = _FakeDevice(
+        "d1", "iPhone", "iPhone", {"latitude": 1.0, "longitude": 2.0}, data={"batteryLevel": 0.42, "batteryStatus": "Charging"}
+    )
+    api = _FakeApi([device])
+
+    snapshot = owner_tracking._snapshot_devices(api)
+
+    assert snapshot[0]["battery_level"] == 0.42
+    assert snapshot[0]["battery_status"] == "Charging"
 
 
 def test_snapshot_devices_forces_a_live_locate_before_reading_locations():

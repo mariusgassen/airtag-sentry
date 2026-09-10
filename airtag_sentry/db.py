@@ -32,6 +32,10 @@ class Report:
     lon: float
     accuracy: float | None
     confidence: int | None
+    # Decoded from FindMy.py's LocationReport.status top 2 bits (see
+    # tracker._battery_level): "full" | "medium" | "low" | "very_low", or None
+    # for older rows recorded before this column existed.
+    battery_level: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -128,6 +132,12 @@ class OwnerLocation:
     lat: float
     lon: float
     horizontal_accuracy: float | None
+    # From pyicloud's AppleDevice content dict (owner_tracking._snapshot_devices):
+    # battery_level is a 0.0-1.0 fraction, battery_status a raw Apple string
+    # ("Charging"/"NotCharging"/"Unplugged"). Both None for older rows or a
+    # device that didn't report battery this poll.
+    battery_level: float | None = None
+    battery_status: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -209,10 +219,10 @@ def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Repo
         for report in sorted(reports, key=lambda r: r.timestamp):
             cur.execute(
                 """
-                INSERT INTO location_reports (airtag_id, timestamp, lat, lon, accuracy, confidence)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO location_reports (airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (airtag_id, "timestamp") DO NOTHING
-                RETURNING id, airtag_id, timestamp, lat, lon, accuracy, confidence
+                RETURNING id, airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level
                 """,
                 (
                     report.airtag_id,
@@ -221,6 +231,7 @@ def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Repo
                     report.lon,
                     report.accuracy,
                     report.confidence,
+                    report.battery_level,
                 ),
             )
             row = cur.fetchone()
@@ -239,14 +250,14 @@ def count_reports(conn: psycopg.Connection, airtag_id: str) -> int:
 
 def fetch_reports(conn: psycopg.Connection, airtag_id: str, limit: int | None = None) -> list[Report]:
     query = (
-        'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence FROM location_reports '
+        'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM location_reports '
         'WHERE airtag_id = %s ORDER BY "timestamp" ASC'
     )
     params: tuple = (airtag_id,)
     if limit is not None:
         query = (
-            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence FROM ('
-            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence FROM location_reports '
+            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM ('
+            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM location_reports '
             'WHERE airtag_id = %s ORDER BY "timestamp" DESC LIMIT %s'
             ") sub ORDER BY \"timestamp\" ASC"
         )
@@ -261,7 +272,7 @@ def fetch_reports_before(
 ) -> list[Report]:
     with conn.cursor() as cur:
         cur.execute(
-            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence FROM location_reports '
+            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM location_reports '
             'WHERE airtag_id = %s AND "timestamp" < %s ORDER BY "timestamp" ASC',
             (airtag_id, timestamp),
         )
@@ -620,9 +631,10 @@ def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocati
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO owner_device_locations (device_id, recorded_at, lat, lon, horizontal_accuracy)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id, device_id, recorded_at, lat, lon, horizontal_accuracy
+            INSERT INTO owner_device_locations
+                (device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status
             """,
             (
                 location.device_id,
@@ -630,6 +642,8 @@ def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocati
                 location.lat,
                 location.lon,
                 location.horizontal_accuracy,
+                location.battery_level,
+                location.battery_status,
             ),
         )
         row = cur.fetchone()
@@ -643,7 +657,8 @@ def latest_owner_device_locations(conn: psycopg.Connection) -> list[OwnerLocatio
         cur.execute(
             """
             SELECT DISTINCT ON (odl.device_id)
-                odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy
+                odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
+                odl.battery_level, odl.battery_status
             FROM owner_device_locations odl
             JOIN owner_devices od ON od.id = odl.device_id
             WHERE od.enabled
@@ -659,7 +674,8 @@ def latest_primary_owner_device_location(conn: psycopg.Connection) -> OwnerLocat
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy
+            SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
+                odl.battery_level, odl.battery_status
             FROM owner_device_locations odl
             JOIN owner_devices od ON od.id = odl.device_id
             WHERE od.is_primary
@@ -675,7 +691,7 @@ def fetch_owner_device_location_history(
 ) -> list[OwnerLocation]:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy "
+            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status "
             "FROM owner_device_locations WHERE device_id = %s "
             "ORDER BY recorded_at DESC LIMIT %s",
             (device_id, limit),

@@ -37,6 +37,16 @@ from airtag_sentry.owner_tracking import fetch_owner_device_locations
 
 logger = logging.getLogger(__name__)
 
+# Top 2 bits of FindMy.py's LocationReport.status byte - same encoding as the
+# library's own scanner.BATTERY_LEVEL, which only OfflineFindingDevice (local
+# BLE scans) exposes as a property; LocationReport only gives the raw byte.
+_BATTERY_LEVELS = {0b00: "full", 0b01: "medium", 0b10: "low", 0b11: "very_low"}
+
+
+def _battery_level(status: int) -> str:
+    return _BATTERY_LEVELS[(status >> 6) & 0b11]
+
+
 _ALERT_TITLES = {
     "distance_threshold": "AirTagSentry: unerwartete Bewegung",
     "stillstand_movement": "AirTagSentry: Bewegung nach Stillstand",
@@ -120,6 +130,7 @@ def _poll_airtag(
             lon=lr.longitude,
             accuracy=lr.horizontal_accuracy,
             confidence=lr.confidence,
+            battery_level=_battery_level(lr.status),
         )
         for lr in location_reports
     ]

@@ -3,7 +3,7 @@ import type { OwnerDevice, OwnerLocation } from '../api'
 import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
 import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import { deviceLabel, formatRelative } from '../format'
+import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
 import { Row, Section } from './AirtagDetail'
 import {
@@ -81,9 +81,20 @@ export function DeviceDetail({
           {device.on_account === false ? (
             <p className="mt-1 text-sm text-[var(--destructive)]">Nicht mehr im iCloud-Account gefunden</p>
           ) : (
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {location ? `Zuletzt gesehen ${formatRelative(location.recorded_at)}` : 'Kein Standort verfügbar'}
-            </p>
+            <>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                {location ? `Zuletzt gesehen ${formatRelative(location.recorded_at)}` : 'Kein Standort verfügbar'}
+              </p>
+              {location?.battery_level != null && (
+                <p
+                  className={`mt-1 text-sm ${
+                    isLowBattery(location.battery_level) ? 'text-[var(--destructive)]' : 'text-[var(--text-secondary)]'
+                  }`}
+                >
+                  Batterie: {formatDeviceBattery(location.battery_level, location.battery_status)}
+                </p>
+              )}
+            </>
           )}
         </div>
 

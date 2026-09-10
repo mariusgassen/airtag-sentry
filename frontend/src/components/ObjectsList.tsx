@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
-import { capitalize, deviceLabel, formatRelative } from '../format'
+import { capitalize, deviceLabel, formatAirtagBattery, formatDeviceBattery, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
 import { ChevronRightIcon, PlusIcon, StarIcon } from './icons'
@@ -138,7 +138,12 @@ export function ObjectsList({
                           </span>
                         ) : (
                           <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
-                            {location ? capitalize(formatRelative(location.recorded_at)) : 'Kein Standort verfügbar'}
+                            {location
+                              ? capitalize(formatRelative(location.recorded_at)) +
+                                (location.battery_level != null
+                                  ? ` · ${formatDeviceBattery(location.battery_level, location.battery_status)}`
+                                  : '')
+                              : 'Kein Standort verfügbar'}
                           </span>
                         )}
                       </span>
@@ -165,7 +170,8 @@ export function ObjectsList({
             {airtags.map((a, i) => {
               const status = statuses[a.id]
               const subtitle = status?.last_report
-                ? capitalize(formatRelative(status.last_report.timestamp))
+                ? capitalize(formatRelative(status.last_report.timestamp)) +
+                  (status.last_report.battery_level ? ` · ${formatAirtagBattery(status.last_report.battery_level)}` : '')
                 : 'Kein Standort verfügbar'
               const selected = a.id === currentId
               return (
