@@ -73,12 +73,30 @@ only push for the backpack.
 periodic prune job (or a `DELETE ... WHERE timestamp < now() - interval`
 run alongside the scheduler).
 
-## 9. Battery-level surfacing
+## 9. Battery-level surfacing — in progress
 
 `FindMy.py`'s location report exposes a `status` byte for the accessory,
 which likely encodes battery state (needs confirming against the library/
-protocol). If so: surface it in the dashboard and optionally alert on low
-battery, so a dying AirTag doesn't just silently stop reporting.
+protocol), and `pyicloud`'s device data exposes owner-device battery
+directly. Per `CLAUDE.md`'s AirTag/owner-device parity constraint, this
+covers both: surface battery level in the dashboard for AirTags and owner
+devices alike (`AirtagDetail.tsx`/`DeviceDetail.tsx`, `ObjectsList.tsx`),
+and optionally alert on low battery, so a dying AirTag or an owner's phone
+running out of battery doesn't just silently stop reporting.
+
+## 14. Home Assistant integration
+
+Traccar-style: expose AirTag/owner-device state (position, battery once
+(9) lands, last-seen) to Home Assistant, so it can drive automations
+("turn on the porch light when the bike gets home") alongside this app's
+own alerting. Likely an MQTT discovery publisher (HA auto-creates
+`device_tracker`/`sensor` entities from retained MQTT messages) rather
+than a custom HA integration/HACS component — much less surface area to
+maintain, and this app already has a background scheduler
+(`tracker.py`/`scheduler.py`) that could publish on each poll. Needs an
+MQTT broker connection setting (host/port/credentials) added the same way
+as the existing Telegram/push notifier settings - dashboard UI, not CLI/
+config file, per `CLAUDE.md`'s UI-first constraint.
 
 ## 10. Move Apple login flows into the dashboard UI — done
 
