@@ -13,12 +13,15 @@ export interface Report {
   lon: number
   accuracy: number | null
   confidence: number | null
+  // "full" | "medium" | "low" | "very_low" - decoded from FindMy.py's status
+  // byte in tracker.py, see format.ts's AIRTAG_BATTERY_LABELS.
+  battery_level: string | null
 }
 
 export interface Status {
   airtag_id: string
   airtag_name: string
-  last_report: { timestamp: string; lat: number; lon: number } | null
+  last_report: { timestamp: string; lat: number; lon: number; battery_level: string | null } | null
   last_alert: { reason: string; timestamp: string } | null
   poll_interval_minutes: number
 }
@@ -64,6 +67,11 @@ export interface OwnerLocation {
   lat: number
   lon: number
   horizontal_accuracy: number | null
+  // 0.0-1.0 fraction from pyicloud's AppleDevice, or null (e.g. Macs don't
+  // report one). battery_status is Apple's raw "Charging"/"NotCharging"/
+  // "Unplugged" string - see format.ts's formatDeviceBattery.
+  battery_level: number | null
+  battery_status: string | null
 }
 
 export interface AppleTwoFactorMethod {

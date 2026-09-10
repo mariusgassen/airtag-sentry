@@ -73,12 +73,37 @@ only push for the backpack.
 periodic prune job (or a `DELETE ... WHERE timestamp < now() - interval`
 run alongside the scheduler).
 
-## 9. Battery-level surfacing
+## 9. Battery-level surfacing — done (surfacing only)
 
-`FindMy.py`'s location report exposes a `status` byte for the accessory,
-which likely encodes battery state (needs confirming against the library/
-protocol). If so: surface it in the dashboard and optionally alert on low
-battery, so a dying AirTag doesn't just silently stop reporting.
+Confirmed against both sources: `FindMy.py`'s `LocationReport.status` byte's
+top 2 bits decode to a qualitative reading (`full`/`medium`/`low`/`very_low`,
+same encoding as the library's own `scanner.BATTERY_LEVEL`), and `pyicloud`'s
+`AppleDevice` exposes an exact 0.0-1.0 `batteryLevel` plus a `batteryStatus`
+charging string directly. Per `CLAUDE.md`'s AirTag/owner-device parity
+constraint, shipped for both: new `location_reports.battery_level` /
+`owner_device_locations.battery_level`+`battery_status` columns, decoded in
+`tracker.py`/`owner_tracking.py`, surfaced in `AirtagDetail.tsx`/
+`DeviceDetail.tsx`'s header and `ObjectsList.tsx`'s row subtitle for both
+AirTags and owner devices alike.
+
+Not yet done, left as a fast-follow: map popups (`MapCard.tsx`/
+`DeviceMapCard.tsx`) and Telegram's `/where` don't show battery yet, and
+there's no low-battery alerting (a dying AirTag/phone silently going quiet
+is still just "no new reports", not a distinct alert reason).
+
+## 14. Home Assistant integration
+
+Traccar-style: expose AirTag/owner-device state (position, battery once
+(9) lands, last-seen) to Home Assistant, so it can drive automations
+("turn on the porch light when the bike gets home") alongside this app's
+own alerting. Likely an MQTT discovery publisher (HA auto-creates
+`device_tracker`/`sensor` entities from retained MQTT messages) rather
+than a custom HA integration/HACS component — much less surface area to
+maintain, and this app already has a background scheduler
+(`tracker.py`/`scheduler.py`) that could publish on each poll. Needs an
+MQTT broker connection setting (host/port/credentials) added the same way
+as the existing Telegram/push notifier settings - dashboard UI, not CLI/
+config file, per `CLAUDE.md`'s UI-first constraint.
 
 ## 10. Move Apple login flows into the dashboard UI — done
 

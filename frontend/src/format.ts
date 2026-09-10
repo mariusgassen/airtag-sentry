@@ -33,3 +33,29 @@ export function formatAlertReason(reason: string): string {
 export function deviceLabel(device: { name: string; display_name: string | null }): string {
   return device.display_name ?? device.name
 }
+
+/** Human-readable labels for Report.battery_level values from the backend
+ * (FindMy.py's status byte, decoded in tracker.py). */
+export const AIRTAG_BATTERY_LABELS: Record<string, string> = {
+  full: 'Voll',
+  medium: 'Mittel',
+  low: 'Niedrig',
+  very_low: 'Sehr niedrig',
+}
+
+export function formatAirtagBattery(level: string): string {
+  return AIRTAG_BATTERY_LABELS[level] ?? level
+}
+
+/** Whether a battery reading is low enough to call out visually - AirTags'
+ * qualitative "low"/"very_low" levels, or an owner device below 20%. */
+export function isLowBattery(level: string | number): boolean {
+  return typeof level === 'number' ? level < 0.2 : level === 'low' || level === 'very_low'
+}
+
+/** OwnerLocation.battery_level is a 0.0-1.0 fraction (pyicloud); battery_status
+ * is Apple's raw charging-state string, appended when it's actually charging. */
+export function formatDeviceBattery(level: number, status: string | null): string {
+  const percent = `${Math.round(level * 100)} %`
+  return status === 'Charging' ? `${percent} (lädt)` : percent
+}

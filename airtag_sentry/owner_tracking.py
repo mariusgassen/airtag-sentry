@@ -246,6 +246,11 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
                 "name": device.name,
                 "device_type": device.device_type,
                 "location": location,
+                # batteryLevel is a 0.0-1.0 fraction, batteryStatus a raw Apple
+                # string ("Charging"/"NotCharging"/"Unplugged") - both absent
+                # from .data on devices that don't report battery (e.g. Macs).
+                "battery_level": device.data.get("batteryLevel"),
+                "battery_status": device.data.get("batteryStatus"),
             }
         )
     api.devices.stop_event.set()
@@ -365,6 +370,8 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
                 lat=location["latitude"],
                 lon=location["longitude"],
                 horizontal_accuracy=location.get("horizontalAccuracy"),
+                battery_level=device["battery_level"],
+                battery_status=device["battery_status"],
             )
         )
     logger.info(
