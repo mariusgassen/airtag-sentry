@@ -326,7 +326,25 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
         seen_at=now,
     )
 
-    enabled_ids = {d.id for d in db_list_owner_devices(conn) if d.enabled}
+    # A device Apple stops listing here - removed from iCloud, or (see
+    # set_include_family) dropped because Family Sharing was just turned off -
+    # can never get a fresh location again. Leaving it "enabled" would let it
+    # linger in the dashboard's tracked-devices list forever with nothing but
+    # the on_account badge to explain why it never updates; disabling it
+    # mirrors the existing invariant that a disabled device never gets a
+    # fresh location (set_owner_device_enabled already clears is_primary too).
+    all_devices = db_list_owner_devices(conn)
+    snapshot_ids = {d["id"] for d in snapshot}
+    for device in all_devices:
+        if device.enabled and device.id not in snapshot_ids:
+            set_owner_device_enabled(conn, device.id, False)
+            logger.info(
+                "Owner device '%s' (%s) is no longer on the Apple account - disabling tracking.",
+                device.name,
+                device.id,
+            )
+
+    enabled_ids = {d.id for d in all_devices if d.enabled} & snapshot_ids
     if not enabled_ids:
         logger.info("No owner devices enabled for tracking - skipping location fetch.")
         return []

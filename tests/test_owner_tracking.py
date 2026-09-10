@@ -167,6 +167,39 @@ def test_fetch_owner_device_locations_persists_identity_for_every_device_not_jus
     assert sync_status_calls == [None]  # a successful sync clears any prior error
 
 
+def test_fetch_owner_device_locations_disables_a_device_no_longer_on_the_account(monkeypatch):
+    """Regression test: turning off Family Sharing (set_include_family) - or a
+    device simply being removed from iCloud - stops Apple from listing it in
+    future polls, but a previously-enabled device's `enabled` flag was never
+    cleared, so it kept showing up as a tracked device in the dashboard's
+    Objekte list forever, with nothing but an easy-to-miss on_account badge to
+    explain why it never updates. The poller must disable tracking for any
+    enabled device that drops out of the live listing."""
+    still_present = _FakeDevice("d1", "MacBook Air", "Mac", {"latitude": 1.0, "longitude": 2.0})
+    api = _FakeApi([still_present])
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: object())
+    monkeypatch.setattr(owner_tracking, "_connect", lambda cfg, conn: api)
+    monkeypatch.setattr(owner_tracking, "upsert_owner_devices", lambda conn, devices, seen_at: None)
+    monkeypatch.setattr(owner_tracking, "set_owner_apple_sync_status", lambda conn, synced_at, error: None)
+    monkeypatch.setattr(
+        owner_tracking,
+        "db_list_owner_devices",
+        lambda conn: [
+            OwnerDevice(id="d1", name="MacBook Air", device_type="Mac", enabled=True, is_primary=False),
+            OwnerDevice(id="d2", name="Kid's iPhone", device_type="iPhone", enabled=True, is_primary=True),
+        ],
+    )
+    disabled = []
+    monkeypatch.setattr(
+        owner_tracking, "set_owner_device_enabled", lambda conn, device_id, enabled: disabled.append((device_id, enabled))
+    )
+
+    locations = owner_tracking.fetch_owner_device_locations(cfg=None, conn=None)
+
+    assert disabled == [("d2", False)]
+    assert [loc.device_id for loc in locations] == ["d1"]
+
+
 def test_fetch_owner_device_locations_records_sync_error_and_reraises(monkeypatch):
     """Regression test: a live Apple call failure (lapsed pyicloud session,
     transient network error, ...) used to only ever be logged by tracker.py's
