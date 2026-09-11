@@ -24,6 +24,7 @@ dependencies = [
     "alembic>=1.13",
     "sqlalchemy>=2.0",
     "pyicloud>=1.0",
+    "paho-mqtt>=2.0",
     # pyicloud imports pyicloud.services.notes.rendering.exporter unconditionally
     # (via its own __init__ chain) even though only the Notes service uses it,
     # and that module does `from rich.console import Console` at load time -

@@ -359,6 +359,43 @@ export async function disableTelegramCommands(): Promise<void> {
   await apiFetch('/api/notifications/telegram/commands', { method: 'DELETE' })
 }
 
+export interface MqttStatus {
+  connected: boolean
+  host: string | null
+  port: number | null
+  username: string | null
+  use_tls: boolean
+}
+
+export async function getMqttStatus(): Promise<MqttStatus> {
+  return (await apiFetch('/api/notifications/mqtt')).json()
+}
+
+export async function setMqttSettings(
+  host: string,
+  port: number,
+  username: string,
+  password: string,
+  useTls: boolean,
+): Promise<MqttStatus> {
+  return (
+    await apiFetch('/api/notifications/mqtt', {
+      method: 'POST',
+      body: JSON.stringify({
+        host,
+        port,
+        username: username || null,
+        password: password || null,
+        use_tls: useTls,
+      }),
+    })
+  ).json()
+}
+
+export async function deleteMqttSettings(): Promise<void> {
+  await apiFetch('/api/notifications/mqtt', { method: 'DELETE' })
+}
+
 export async function getVapidPublicKey(): Promise<string | null> {
   const res = await fetch('/api/push/vapid-public-key')
   if (!res.ok) return null

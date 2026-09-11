@@ -1,5 +1,5 @@
 """Core poll: restore Apple session -> fetch location history -> dedupe insert ->
-movement check -> notify.
+movement check -> notify -> publish to Home Assistant.
 """
 
 from __future__ import annotations
@@ -28,11 +28,13 @@ from airtag_sentry.db import (
     insert_reports,
     latest_primary_owner_device_location,
     list_airtags,
+    list_owner_devices,
     record_alert,
     record_owner_device_location,
 )
 from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
 from airtag_sentry.notifiers import build_notifiers, notify_all
+from airtag_sentry.notifiers.homeassistant import HomeAssistantPublisher, build_ha_publisher
 from airtag_sentry.owner_tracking import fetch_owner_device_locations
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,7 @@ def _load_key(cfg: Config, conn, airtag_id: str):
     return KeyPair.from_b64(plaintext)
 
 
-def _update_owner_devices(cfg: Config, conn) -> None:
+def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublisher | None) -> None:
     """Best-effort refresh of every enabled owner device's location. Never allowed
     to break AirTag polling - a failure here just means this poll's away-correlation
     falls back to whatever was recorded last time (or skips it, if nothing ever was).
@@ -82,8 +84,23 @@ def _update_owner_devices(cfg: Config, conn) -> None:
     if not locations:
         logger.info("No owner device locations available this poll.")
         return
+    devices_by_id = {d.id: d for d in list_owner_devices(conn)} if ha_publisher is not None else {}
     for location in locations:
         record_owner_device_location(conn, location)
+        if ha_publisher is not None:
+            device = devices_by_id.get(location.device_id)
+            name = (device.display_name or device.name) if device else location.device_id
+            try:
+                ha_publisher.publish_owner_device(
+                    location.device_id,
+                    name,
+                    location.lat,
+                    location.lon,
+                    location.horizontal_accuracy,
+                    location.battery_level,
+                )
+            except Exception:
+                logger.exception("Failed to publish owner device '%s' to Home Assistant.", location.device_id)
 
 
 def poll_once(cfg: Config) -> None:
@@ -95,24 +112,35 @@ def poll_once(cfg: Config) -> None:
     with get_conn(cfg.database_url) as conn:
         settings = get_settings(conn)
         notifiers = build_notifiers(cfg, conn)
-        _update_owner_devices(cfg, conn)
+        ha_publisher = build_ha_publisher(cfg, conn)
+        try:
+            _update_owner_devices(cfg, conn, ha_publisher)
 
-        if not is_connected(cfg):
-            logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
-            return
+            if not is_connected(cfg):
+                logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
+                return
 
-        account = restore_account(cfg)
-        for airtag in list_airtags(conn):
-            try:
-                _poll_airtag(cfg, account, airtag, conn, notifiers, settings)
-            except Exception:
-                logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
-            finally:
-                account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
+            account = restore_account(cfg)
+            for airtag in list_airtags(conn):
+                try:
+                    _poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha_publisher)
+                except Exception:
+                    logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
+                finally:
+                    account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
+        finally:
+            if ha_publisher is not None:
+                ha_publisher.close()
 
 
 def _poll_airtag(
-    cfg: Config, account, airtag: AirtagRecord, conn, notifiers, settings: AppSettings
+    cfg: Config,
+    account,
+    airtag: AirtagRecord,
+    conn,
+    notifiers,
+    settings: AppSettings,
+    ha_publisher: HomeAssistantPublisher | None,
 ) -> None:
     key = _load_key(cfg, conn, airtag.id)
     location_reports = account.fetch_location_history(key)
@@ -143,6 +171,15 @@ def _poll_airtag(
         return
 
     logger.info("[%s] Inserted %d new report(s).", airtag.id, len(newly_inserted))
+
+    if ha_publisher is not None:
+        latest = max(reports, key=lambda r: r.timestamp)
+        try:
+            ha_publisher.publish_airtag(
+                airtag.id, airtag.name, latest.lat, latest.lon, latest.accuracy, latest.battery_level
+            )
+        except Exception:
+            logger.exception("Failed to publish airtag '%s' to Home Assistant.", airtag.id)
 
     if was_empty and not settings.movement_alert_on_backfill:
         logger.info(

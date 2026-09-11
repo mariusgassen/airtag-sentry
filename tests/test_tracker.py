@@ -39,6 +39,7 @@ def test_poll_once_still_updates_owner_devices_when_airtag_session_missing(monke
     monkeypatch.setattr(tracker, "get_conn", fake_get_conn)
     monkeypatch.setattr(tracker, "get_settings", lambda conn: object())
     monkeypatch.setattr(tracker, "build_notifiers", lambda cfg, conn: [])
+    monkeypatch.setattr(tracker, "build_ha_publisher", lambda cfg, conn: None)
     monkeypatch.setattr(tracker, "is_connected", lambda cfg: False)
 
     def fail_restore_account(cfg):
@@ -52,7 +53,9 @@ def test_poll_once_still_updates_owner_devices_when_airtag_session_missing(monke
     monkeypatch.setattr(tracker, "list_airtags", fail_list_airtags)
 
     calls = []
-    monkeypatch.setattr(tracker, "_update_owner_devices", lambda cfg, conn: calls.append((cfg, conn)))
+    monkeypatch.setattr(
+        tracker, "_update_owner_devices", lambda cfg, conn, ha_publisher: calls.append((cfg, conn))
+    )
 
     cfg = types.SimpleNamespace(database_url="unused")
     tracker.poll_once(cfg)
