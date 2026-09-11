@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import datetime as dt
+import hashlib
 import shutil
 import time
 from unittest.mock import AsyncMock, Mock
@@ -10,7 +11,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from airtag_sentry.config import load_config
-from airtag_sentry.db import OwnerAppleCredentials, OwnerDevice
+from airtag_sentry.db import (
+    AirtagRecord,
+    HaApiToken,
+    OwnerAppleCredentials,
+    OwnerDevice,
+    OwnerLocation,
+    Report,
+)
 from airtag_sentry.web import app as app_module
 
 
@@ -394,6 +402,114 @@ def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):
     resp = client.get("/api/owner-devices/history", params={"device_id": slashy_id, "limit": 50})
     assert resp.status_code == 200
     assert seen_history == {"device_id": slashy_id, "limit": 50}
+
+
+def test_ha_state_requires_bearer_token(client):
+    resp = client.get("/api/ha/state")
+    assert resp.status_code == 401
+
+
+def test_ha_state_rejects_wrong_token(client, monkeypatch):
+    correct_hash = hashlib.sha256(b"correct-token").hexdigest()
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(
+        app_module,
+        "get_ha_api_token",
+        lambda _conn: HaApiToken(token_hash=correct_hash, created_at=dt.datetime.now(dt.timezone.utc)),
+    )
+
+    resp = client.get("/api/ha/state", headers={"authorization": "Bearer wrong-token"})
+
+    assert resp.status_code == 401
+
+
+def test_ha_state_returns_airtags_and_owner_devices_for_correct_token(client, monkeypatch):
+    token_hash = hashlib.sha256(b"correct-token").hexdigest()
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(
+        app_module,
+        "get_ha_api_token",
+        lambda _conn: HaApiToken(token_hash=token_hash, created_at=dt.datetime.now(dt.timezone.utc)),
+    )
+    monkeypatch.setattr(app_module, "list_airtags", lambda _conn: [AirtagRecord(id="bike", name="Fahrrad")])
+    monkeypatch.setattr(
+        app_module,
+        "fetch_reports",
+        lambda _conn, airtag_id, limit: [
+            Report(
+                id=1,
+                airtag_id=airtag_id,
+                timestamp=dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc),
+                lat=52.5,
+                lon=13.4,
+                accuracy=5.0,
+                confidence=2,
+                battery_level="low",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "db_list_owner_devices",
+        lambda _conn: [
+            OwnerDevice(id="d1", name="iPhone", device_type="iPhone", enabled=True, is_primary=True)
+        ],
+    )
+    monkeypatch.setattr(
+        app_module,
+        "latest_owner_device_locations",
+        lambda _conn: [
+            OwnerLocation(
+                id=1,
+                device_id="d1",
+                recorded_at=dt.datetime(2026, 1, 1, 12, 5, tzinfo=dt.timezone.utc),
+                lat=52.6,
+                lon=13.5,
+                horizontal_accuracy=8.0,
+                battery_level=0.73,
+            )
+        ],
+    )
+
+    resp = client.get("/api/ha/state", headers={"authorization": "Bearer correct-token"})
+
+    assert resp.status_code == 200
+    objects = resp.json()["objects"]
+    airtag_obj = next(o for o in objects if o["id"] == "airtag_bike")
+    assert airtag_obj["type"] == "airtag"
+    assert airtag_obj["battery_level"] == "low"
+    assert airtag_obj["battery_percent"] is None
+
+    device_obj = next(o for o in objects if o["id"] == "device_d1")
+    assert device_obj["type"] == "owner_device"
+    assert device_obj["name"] == "iPhone"
+    assert device_obj["battery_percent"] == 73
+    assert device_obj["battery_level"] is None
+
+
+def test_ha_token_routes_require_a_session(client):
+    assert client.get("/api/ha/token/status").status_code == 401
+    assert client.post("/api/ha/token").status_code == 401
+    assert client.delete("/api/ha/token").status_code == 401
+
+
+def test_ha_token_generate_returns_plaintext_once_and_persists_only_a_hash(client, monkeypatch):
+    _login(client, monkeypatch)
+    stored = {}
+    monkeypatch.setattr(
+        app_module,
+        "get_conn",
+        lambda _url: contextlib.nullcontext(Mock()),
+    )
+    monkeypatch.setattr(
+        app_module, "set_ha_api_token_hash", lambda _conn, token_hash: stored.update(token_hash=token_hash)
+    )
+
+    resp = client.post("/api/ha/token")
+
+    assert resp.status_code == 200
+    token = resp.json()["token"]
+    assert stored["token_hash"] == hashlib.sha256(token.encode()).hexdigest()
 
 
 def test_favicon_is_servable_without_a_session(client):

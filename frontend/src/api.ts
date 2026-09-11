@@ -396,6 +396,23 @@ export async function deleteMqttSettings(): Promise<void> {
   await apiFetch('/api/notifications/mqtt', { method: 'DELETE' })
 }
 
+export interface HaTokenStatus {
+  configured: boolean
+  created_at: string | null
+}
+
+export async function getHaTokenStatus(): Promise<HaTokenStatus> {
+  return (await apiFetch('/api/ha/token/status')).json()
+}
+
+export async function generateHaToken(): Promise<{ token: string }> {
+  return (await apiFetch('/api/ha/token', { method: 'POST' })).json()
+}
+
+export async function revokeHaToken(): Promise<void> {
+  await apiFetch('/api/ha/token', { method: 'DELETE' })
+}
+
 export async function getVapidPublicKey(): Promise<string | null> {
   const res = await fetch('/api/push/vapid-public-key')
   if (!res.ok) return null

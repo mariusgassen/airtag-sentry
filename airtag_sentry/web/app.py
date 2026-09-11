@@ -13,6 +13,7 @@ in its threadpool automatically - no async DB driver needed at this scale.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import logging
 import re
@@ -42,11 +43,13 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    delete_ha_api_token,
     delete_mqtt_credentials,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
+    get_ha_api_token,
     get_mqtt_credentials,
     get_owner_apple_credentials,
     get_settings,
@@ -60,6 +63,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_key,
+    set_ha_api_token_hash,
     set_mqtt_credentials,
     set_telegram_bot_commands,
     set_telegram_credentials,
@@ -127,6 +131,7 @@ _PUBLIC_PATHS = {
     "/favicon.ico",
     "/health",
     "/api/telegram/webhook",
+    "/api/ha/state",
 }
 
 
@@ -150,6 +155,10 @@ def _is_public(path: str) -> bool:
     `/api/telegram/webhook` is the same again for Telegram's own servers -
     it authenticates itself via the X-Telegram-Bot-Api-Secret-Token header
     (see telegram_webhook()) instead of a session.
+
+    `/api/ha/state` is the same story once more, for Home Assistant's own
+    outbound poll (see ha_state()) - it can't do a browser OAuth flow, so it
+    authenticates itself via a static bearer token instead.
     """
     return path in _PUBLIC_PATHS or path.startswith("/icons/")
 
@@ -315,6 +324,10 @@ class MqttSettingsIn(BaseModel):
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
     return slug or "airtag"
+
+
+def _hash_ha_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def create_app(cfg: Config | None = None) -> FastAPI:
@@ -1083,6 +1096,92 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             delete_mqtt_credentials(conn)
         return {"ok": True}
+
+    @app.get("/api/ha/token/status")
+    def ha_token_status():
+        with get_conn(cfg.database_url) as conn:
+            token = get_ha_api_token(conn)
+        return {"configured": token is not None, "created_at": token.created_at.isoformat() if token else None}
+
+    @app.post("/api/ha/token")
+    def ha_token_generate():
+        """Generates (or replaces) the bearer token GET /api/ha/state accepts.
+        The plaintext is returned exactly once here and never stored or shown
+        again - only its hash is persisted (see db.HaApiToken)."""
+        token = secrets.token_urlsafe(32)
+        with get_conn(cfg.database_url) as conn:
+            set_ha_api_token_hash(conn, _hash_ha_token(token))
+        return {"token": token}
+
+    @app.delete("/api/ha/token")
+    def ha_token_revoke():
+        with get_conn(cfg.database_url) as conn:
+            delete_ha_api_token(conn)
+        return {"ok": True}
+
+    @app.get("/api/ha/state")
+    def ha_state(request: Request):
+        """Public (see _PUBLIC_PATHS) - for a cloud-hosted AirTag Sentry with a
+        local-only Home Assistant that has no inbound access of its own, HA has
+        to be the one reaching out (its `rest:` integration polling this URL)
+        rather than AirTag Sentry pushing into a broker it can't reach - see
+        notifiers/homeassistant.py's MQTT publisher for the same-network case.
+        Self-authenticates via a static bearer token instead of a session,
+        same pattern as telegram_webhook()."""
+        presented = request.headers.get("authorization", "")
+        if not presented.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        with get_conn(cfg.database_url) as conn:
+            stored = get_ha_api_token(conn)
+            if stored is None or not secrets.compare_digest(
+                _hash_ha_token(presented.removeprefix("Bearer ").strip()), stored.token_hash
+            ):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+
+            objects = []
+            for airtag in list_airtags(conn):
+                reports = fetch_reports(conn, airtag.id, limit=1)
+                if not reports:
+                    continue
+                report = reports[0]
+                objects.append(
+                    {
+                        "id": f"airtag_{airtag.id}",
+                        "type": "airtag",
+                        "name": airtag.name,
+                        "lat": report.lat,
+                        "lon": report.lon,
+                        "accuracy": report.accuracy,
+                        # AirTags only ever report a qualitative battery bucket
+                        # (full/medium/low/very_low) - see tracker._battery_level -
+                        # so battery_percent stays null here; owner devices are
+                        # the reverse, see below.
+                        "battery_level": report.battery_level,
+                        "battery_percent": None,
+                        "last_seen": report.timestamp.isoformat(),
+                    }
+                )
+
+            devices_by_id = {d.id: d for d in db_list_owner_devices(conn)}
+            for location in latest_owner_device_locations(conn):
+                device = devices_by_id.get(location.device_id)
+                name = (device.display_name or device.name) if device else location.device_id
+                objects.append(
+                    {
+                        "id": f"device_{location.device_id}",
+                        "type": "owner_device",
+                        "name": name,
+                        "lat": location.lat,
+                        "lon": location.lon,
+                        "accuracy": location.horizontal_accuracy,
+                        "battery_level": None,
+                        "battery_percent": (
+                            round(location.battery_level * 100) if location.battery_level is not None else None
+                        ),
+                        "last_seen": location.recorded_at.isoformat(),
+                    }
+                )
+        return {"objects": objects}
 
     @app.get("/api/push/vapid-public-key")
     def get_vapid_public_key():

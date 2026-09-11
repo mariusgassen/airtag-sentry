@@ -198,13 +198,44 @@ message the bot (or add it to a group) and use its chat ID.
 
 ### Home Assistant
 
-Every AirTag and owner device is published to an MQTT broker on each poll,
-using [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
+Two ways to feed Home Assistant, pick whichever direction actually works
+for your setup:
+
+**Same network as Home Assistant (MQTT push).** Every AirTag and owner
+device is published to an MQTT broker on each poll, using
+[MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
 so Home Assistant auto-creates a `device_tracker` (position) + battery
 `sensor` entity per object - no HACS component or custom integration to
-install. Connect a broker from the same Settings ⚙️ → **Benachrichtigungen**
-panel (host, port, optional username/password, optional TLS); the broker
-password is encrypted the same way as the Telegram bot token.
+install. Connect a broker from Settings ⚙️ → **Benachrichtigungen** (host,
+port, optional username/password, optional TLS); the broker password is
+encrypted the same way as the Telegram bot token.
+
+**AirTag Sentry is cloud-hosted, Home Assistant is local-only (REST pull).**
+MQTT push can't reach a broker sitting behind your home router with no
+inbound access - so instead Home Assistant reaches *out* to AirTag Sentry.
+Generate a token from the same Settings panel, then add a
+[`rest`](https://www.home-assistant.io/integrations/rest/) sensor to Home
+Assistant's `configuration.yaml`:
+
+```yaml
+rest:
+  - resource: https://your-airtag-sentry-host/api/ha/state
+    headers:
+      Authorization: !secret airtag_sentry_token  # "Bearer <token from the dashboard>"
+    scan_interval: 900  # match your polling interval
+    sensor:
+      - name: "Bike battery"
+        unique_id: airtag_sentry_bike_battery
+        value_template: >-
+          {{ (value_json.objects | selectattr('id', 'eq', 'airtag_bike') | first).battery_level }}
+```
+
+Each object in the response's `objects` array has `id`, `type`
+(`airtag`/`owner_device`), `name`, `lat`, `lon`, `accuracy`,
+`battery_level` (AirTags: qualitative full/medium/low/very_low),
+`battery_percent` (owner devices: 0-100) and `last_seen`. For a map pin
+rather than just sensors, add an automation that calls the
+`device_tracker.see` service with the same template data.
 
 Treat the VAPID keypair like the encryption key above — generate it once and
 back it up. Every device's push subscription is tied to the public key that
