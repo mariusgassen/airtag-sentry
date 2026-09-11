@@ -240,17 +240,28 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
                 bool(device.data.get("features", {}).get("LOC", False)),
                 "location" in device.data,
             )
+        # batteryLevel is a 0.0-1.0 fraction, batteryStatus a raw Apple string
+        # ("Charging"/"NotCharging"/"Unplugged") - both absent from .data on
+        # devices that don't report battery at all (e.g. Macs). But when Apple
+        # *does* advertise battery support, a round yet to include a real
+        # reading (e.g. this snapshot's own locate-focused refresh, or a
+        # session that hasn't fully checked in) comes back as batteryStatus
+        # "Unknown" paired with a *meaningless* batteryLevel of 0 rather than
+        # an absent key - confirmed against Home Assistant's icloud
+        # integration, which explicitly discards readings in that state for
+        # the same reason. Trusting battery_level at face value here made the
+        # dashboard show a permanent, wrong "0 %" instead of hiding it like a
+        # genuinely absent reading.
+        battery_status = device.data.get("batteryStatus")
+        battery_level = None if battery_status == "Unknown" else device.data.get("batteryLevel")
         snapshot.append(
             {
                 "id": device.id,
                 "name": device.name,
                 "device_type": device.device_type,
                 "location": location,
-                # batteryLevel is a 0.0-1.0 fraction, batteryStatus a raw Apple
-                # string ("Charging"/"NotCharging"/"Unplugged") - both absent
-                # from .data on devices that don't report battery (e.g. Macs).
-                "battery_level": device.data.get("batteryLevel"),
-                "battery_status": device.data.get("batteryStatus"),
+                "battery_level": battery_level,
+                "battery_status": battery_status,
             }
         )
     api.devices.stop_event.set()
