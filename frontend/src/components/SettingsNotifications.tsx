@@ -2,6 +2,7 @@ import { BellIcon } from './icons'
 import { Row, Section, Switch } from './AirtagDetail'
 import { TelegramPanel } from './TelegramPanel'
 import { MqttPanel } from './MqttPanel'
+import { HaApiTokenPanel } from './HaApiTokenPanel'
 
 interface Props {
   pushStatus: 'idle' | 'active' | 'error'
@@ -29,6 +30,7 @@ export function SettingsNotifications({ pushStatus, pushBusy, onEnablePush, onDi
       </Section>
       <TelegramPanel />
       <MqttPanel />
+      <HaApiTokenPanel />
     </div>
   )
 }

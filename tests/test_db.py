@@ -13,12 +13,14 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    delete_ha_api_token,
     delete_mqtt_credentials,
     delete_owner_apple_credentials,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     get_airtag_key,
     get_conn,
+    get_ha_api_token,
     get_mqtt_credentials,
     get_owner_apple_credentials,
     get_settings,
@@ -39,6 +41,7 @@ from airtag_sentry.db import (
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_ha_api_token_hash,
     set_mqtt_credentials,
     set_owner_include_family_devices,
     set_telegram_bot_commands,
@@ -63,7 +66,7 @@ def conn():
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
                     "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings, "
-                    "mqtt_settings "
+                    "mqtt_settings, ha_api_tokens "
                     "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
@@ -122,6 +125,7 @@ def test_schema_creates_tables(conn):
         "owner_apple_credentials",
         "telegram_settings",
         "mqtt_settings",
+        "ha_api_tokens",
         "alembic_version",
     } <= tables
 
@@ -624,6 +628,23 @@ def test_mqtt_credentials_set_get_delete_round_trip(conn):
 
     delete_mqtt_credentials(conn)
     assert get_mqtt_credentials(conn) is None
+
+
+def test_ha_api_token_set_get_delete_round_trip(conn):
+    assert get_ha_api_token(conn) is None
+
+    set_ha_api_token_hash(conn, "hash-1")
+    stored = get_ha_api_token(conn)
+    assert stored.token_hash == "hash-1"
+    assert stored.created_at is not None
+
+    # Regenerating replaces rather than duplicating (single-row table).
+    set_ha_api_token_hash(conn, "hash-2")
+    stored = get_ha_api_token(conn)
+    assert stored.token_hash == "hash-2"
+
+    delete_ha_api_token(conn)
+    assert get_ha_api_token(conn) is None
 
 
 def test_settings_table_stays_single_row(conn):

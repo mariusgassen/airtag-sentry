@@ -150,6 +150,15 @@ class MqttCredentials:
 
 
 @dataclasses.dataclass(frozen=True)
+class HaApiToken:
+    # Hashed (sha256), not encrypted - unlike the Telegram bot token or MQTT
+    # password, we never need the plaintext back, only to compare a presented
+    # bearer token against it (see web/app.py's GET /api/ha/state).
+    token_hash: str
+    created_at: dt.datetime
+
+
+@dataclasses.dataclass(frozen=True)
 class AppSettings:
     polling_interval_minutes: int
     movement_distance_threshold_meters: float
@@ -529,6 +538,34 @@ def get_mqtt_credentials(conn: psycopg.Connection) -> MqttCredentials | None:
 def delete_mqtt_credentials(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM mqtt_settings WHERE id = 1")
+    conn.commit()
+
+
+def set_ha_api_token_hash(conn: psycopg.Connection, token_hash: str) -> None:
+    """Replaces any existing token (single-row table) - generating a new one
+    invalidates the old one immediately."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ha_api_tokens (id, token_hash, created_at)
+            VALUES (1, %s, now())
+            ON CONFLICT (id) DO UPDATE SET token_hash = EXCLUDED.token_hash, created_at = now()
+            """,
+            (token_hash,),
+        )
+    conn.commit()
+
+
+def get_ha_api_token(conn: psycopg.Connection) -> HaApiToken | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT token_hash, created_at FROM ha_api_tokens WHERE id = 1")
+        row = cur.fetchone()
+        return HaApiToken(*row) if row else None
+
+
+def delete_ha_api_token(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM ha_api_tokens WHERE id = 1")
     conn.commit()
 
 
