@@ -289,13 +289,47 @@ def test_fetch_owner_device_locations_records_sync_error_and_reraises(monkeypatc
     assert recorded == ["Invalid email/password combination."]
 
 
-def test_set_include_family_delegates_to_db_layer(monkeypatch):
+def test_set_include_family_delegates_to_db_layer_and_resyncs_immediately(monkeypatch):
+    """Regression test: flipping the checkbox used to only take effect on the
+    next *scheduled* poll (could be minutes away), making it look like the
+    toggle did nothing. A successful flag change must trigger an immediate
+    fetch_owner_device_locations() re-sync instead."""
     calls = []
     monkeypatch.setattr(
         owner_tracking, "set_owner_include_family_devices", lambda conn, include: calls.append(include) or True
     )
-    assert owner_tracking.set_include_family(conn=None, include_family=True) is True
+    resync_calls = []
+    monkeypatch.setattr(
+        owner_tracking, "fetch_owner_device_locations", lambda cfg, conn: resync_calls.append((cfg, conn)) or []
+    )
+    assert owner_tracking.set_include_family(cfg="cfg", conn="conn", include_family=True) is True
     assert calls == [True]
+    assert resync_calls == [("cfg", "conn")]
+
+
+def test_set_include_family_skips_resync_when_not_connected(monkeypatch):
+    """The db layer returns False when owner tracking isn't connected at all -
+    there's nothing to re-sync in that case."""
+    monkeypatch.setattr(owner_tracking, "set_owner_include_family_devices", lambda conn, include: False)
+    resync_calls = []
+    monkeypatch.setattr(
+        owner_tracking, "fetch_owner_device_locations", lambda cfg, conn: resync_calls.append((cfg, conn)) or []
+    )
+    assert owner_tracking.set_include_family(cfg="cfg", conn="conn", include_family=True) is False
+    assert resync_calls == []
+
+
+def test_set_include_family_survives_a_resync_failure(monkeypatch):
+    """A failed live re-sync (lapsed session, transient network error) must not
+    make the flag change itself look like it failed - the regular poll will
+    still pick it up."""
+    monkeypatch.setattr(owner_tracking, "set_owner_include_family_devices", lambda conn, include: True)
+
+    def _raise(cfg, conn):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(owner_tracking, "fetch_owner_device_locations", _raise)
+    assert owner_tracking.set_include_family(cfg="cfg", conn="conn", include_family=True) is True
 
 
 class _FakeDeviceWithSound(_FakeDevice):

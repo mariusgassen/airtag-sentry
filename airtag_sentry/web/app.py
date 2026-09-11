@@ -939,9 +939,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         """Flips the Family Sharing filter on an already-connected account - see
         owner_tracking.set_include_family. Unlike the connect dialog's checkbox,
         this doesn't need a re-login: the flag is just re-read from Postgres on
-        the next poll."""
+        an immediately-triggered re-sync, so newly-excluded/included devices
+        show up right away instead of waiting for the next scheduled poll."""
         with get_conn(cfg.database_url) as conn:
-            if not owner_tracking.set_include_family(conn, body.include_family):
+            if not owner_tracking.set_include_family(cfg, conn, body.include_family):
                 raise HTTPException(status_code=404, detail="Owner tracking not connected.")
         return {"ok": True}
 
