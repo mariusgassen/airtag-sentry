@@ -95,19 +95,26 @@ Not yet done, left as a fast-follow: map popups (`MapCard.tsx`/
 alerting (a dying AirTag/phone silently going quiet is still just "no new
 reports", not a distinct alert reason).
 
-## 14. Home Assistant integration
+## 14. Home Assistant integration — done
 
-Traccar-style: expose AirTag/owner-device state (position, battery once
-(9) lands, last-seen) to Home Assistant, so it can drive automations
-("turn on the porch light when the bike gets home") alongside this app's
-own alerting. Likely an MQTT discovery publisher (HA auto-creates
-`device_tracker`/`sensor` entities from retained MQTT messages) rather
-than a custom HA integration/HACS component — much less surface area to
-maintain, and this app already has a background scheduler
-(`tracker.py`/`scheduler.py`) that could publish on each poll. Needs an
-MQTT broker connection setting (host/port/credentials) added the same way
-as the existing Telegram/push notifier settings - dashboard UI, not CLI/
-config file, per `CLAUDE.md`'s UI-first constraint.
+Traccar-style: expose AirTag/owner-device state (position, battery) to
+Home Assistant, so it can drive automations ("turn on the porch light when
+the bike gets home") alongside this app's own alerting. Shipped as an MQTT
+Discovery publisher (`notifiers/homeassistant.py`) rather than a custom HA
+integration/HACS component - HA auto-creates the `device_tracker`/`sensor`
+entities from retained MQTT messages, no HA-side code to maintain.
+`tracker.py`'s `poll_once` builds one short-lived MQTT connection per poll
+(mirroring `db.py`'s "one connection per call" style) and publishes every
+AirTag and owner device, per `CLAUDE.md`'s parity constraint. Broker
+host/port/credentials are a dashboard Settings ⚙️ → Notifications panel
+(`MqttPanel.tsx`, `/api/notifications/mqtt`), not CLI/config file, per
+`CLAUDE.md`'s UI-first constraint - same encrypted-at-rest treatment as
+the Telegram bot token.
+
+AirTag battery (qualitative full/medium/low/very_low) and owner-device
+battery (numeric 0-1 fraction) get different HA sensor shapes (text sensor
+vs. `device_class: battery`) since the underlying data really is shaped
+differently, not left as a follow-up gap.
 
 ## 10. Move Apple login flows into the dashboard UI — done
 

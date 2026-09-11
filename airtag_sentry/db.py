@@ -141,6 +141,15 @@ class OwnerLocation:
 
 
 @dataclasses.dataclass(frozen=True)
+class MqttCredentials:
+    host: str
+    port: int
+    username: str | None
+    password_encrypted: str | None
+    use_tls: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class AppSettings:
     polling_interval_minutes: int
     movement_distance_threshold_meters: float
@@ -479,6 +488,47 @@ def set_telegram_bot_commands(conn: psycopg.Connection, enabled: bool, webhook_s
             """,
             (enabled, webhook_secret),
         )
+    conn.commit()
+
+
+def set_mqtt_credentials(
+    conn: psycopg.Connection,
+    host: str,
+    port: int,
+    username: str | None,
+    password_encrypted: str | None,
+    use_tls: bool,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO mqtt_settings (id, host, port, username, password_encrypted, use_tls, updated_at)
+            VALUES (1, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (id) DO UPDATE
+                SET host = EXCLUDED.host,
+                    port = EXCLUDED.port,
+                    username = EXCLUDED.username,
+                    password_encrypted = EXCLUDED.password_encrypted,
+                    use_tls = EXCLUDED.use_tls,
+                    updated_at = now()
+            """,
+            (host, port, username, password_encrypted, use_tls),
+        )
+    conn.commit()
+
+
+def get_mqtt_credentials(conn: psycopg.Connection) -> MqttCredentials | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT host, port, username, password_encrypted, use_tls FROM mqtt_settings WHERE id = 1"
+        )
+        row = cur.fetchone()
+        return MqttCredentials(*row) if row else None
+
+
+def delete_mqtt_credentials(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM mqtt_settings WHERE id = 1")
     conn.commit()
 
 

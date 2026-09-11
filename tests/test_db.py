@@ -13,11 +13,13 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    delete_mqtt_credentials,
     delete_owner_apple_credentials,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     get_airtag_key,
     get_conn,
+    get_mqtt_credentials,
     get_owner_apple_credentials,
     get_settings,
     get_telegram_credentials,
@@ -37,6 +39,7 @@ from airtag_sentry.db import (
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_mqtt_credentials,
     set_owner_include_family_devices,
     set_telegram_bot_commands,
     set_telegram_credentials,
@@ -59,7 +62,8 @@ def conn():
             with connection.cursor() as cur:
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
-                    "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings "
+                    "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings, "
+                    "mqtt_settings "
                     "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
@@ -117,6 +121,7 @@ def test_schema_creates_tables(conn):
         "owner_device_locations",
         "owner_apple_credentials",
         "telegram_settings",
+        "mqtt_settings",
         "alembic_version",
     } <= tables
 
@@ -595,6 +600,30 @@ def test_telegram_bot_commands_set_round_trip(conn):
     stored = get_telegram_credentials(conn)
     assert stored.bot_commands_enabled is False
     assert stored.webhook_secret is None
+
+
+def test_mqtt_credentials_set_get_delete_round_trip(conn):
+    assert get_mqtt_credentials(conn) is None
+
+    set_mqtt_credentials(conn, "mqtt.local", 1883, "user", "enc-pw-1", False)
+    stored = get_mqtt_credentials(conn)
+    assert stored.host == "mqtt.local"
+    assert stored.port == 1883
+    assert stored.username == "user"
+    assert stored.password_encrypted == "enc-pw-1"
+    assert stored.use_tls is False
+
+    # Setting again replaces rather than duplicating (single-row table).
+    set_mqtt_credentials(conn, "mqtt.example.com", 8883, None, None, True)
+    stored = get_mqtt_credentials(conn)
+    assert stored.host == "mqtt.example.com"
+    assert stored.port == 8883
+    assert stored.username is None
+    assert stored.password_encrypted is None
+    assert stored.use_tls is True
+
+    delete_mqtt_credentials(conn)
+    assert get_mqtt_credentials(conn) is None
 
 
 def test_settings_table_stays_single_row(conn):

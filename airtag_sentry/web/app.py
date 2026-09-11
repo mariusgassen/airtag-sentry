@@ -42,10 +42,12 @@ from airtag_sentry.db import (
     create_airtag,
     delete_airtag,
     delete_airtag_key,
+    delete_mqtt_credentials,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
+    get_mqtt_credentials,
     get_owner_apple_credentials,
     get_settings,
     get_telegram_credentials,
@@ -58,6 +60,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_key,
+    set_mqtt_credentials,
     set_telegram_bot_commands,
     set_telegram_credentials,
     update_settings,
@@ -299,6 +302,14 @@ class OwnerFamilyIn(BaseModel):
 class TelegramCredentialsIn(BaseModel):
     bot_token: str
     chat_id: str
+
+
+class MqttSettingsIn(BaseModel):
+    host: str
+    port: int = 1883
+    username: str | None = None
+    password: str | None = None
+    use_tls: bool = False
 
 
 def _slugify(name: str) -> str:
@@ -1035,6 +1046,42 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 telegram_bot.handle_update(conn, bot_token, creds.chat_id, update)
             except Exception:
                 logger.exception("Telegram webhook handler failed.")
+        return {"ok": True}
+
+    @app.get("/api/notifications/mqtt")
+    def mqtt_status():
+        """Whether Home Assistant MQTT publishing is configured (see
+        notifiers/homeassistant.py) - entered via the dashboard's Settings
+        panel. The password itself is never returned."""
+        with get_conn(cfg.database_url) as conn:
+            creds = get_mqtt_credentials(conn)
+        return {
+            "connected": creds is not None,
+            "host": creds.host if creds else None,
+            "port": creds.port if creds else None,
+            "username": creds.username if creds else None,
+            "use_tls": creds.use_tls if creds else False,
+        }
+
+    @app.post("/api/notifications/mqtt")
+    def mqtt_connect(body: MqttSettingsIn):
+        host = body.host.strip()
+        if not host:
+            raise HTTPException(status_code=400, detail="Host darf nicht leer sein.")
+        username = body.username.strip() if body.username and body.username.strip() else None
+        password_encrypted = (
+            keystore.encrypt(cfg.key_encryption_key, body.password.strip())
+            if body.password and body.password.strip()
+            else None
+        )
+        with get_conn(cfg.database_url) as conn:
+            set_mqtt_credentials(conn, host, body.port, username, password_encrypted, body.use_tls)
+        return {"connected": True, "host": host, "port": body.port, "username": username, "use_tls": body.use_tls}
+
+    @app.delete("/api/notifications/mqtt")
+    def mqtt_disconnect():
+        with get_conn(cfg.database_url) as conn:
+            delete_mqtt_credentials(conn)
         return {"ok": True}
 
     @app.get("/api/push/vapid-public-key")

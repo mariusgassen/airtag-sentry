@@ -231,6 +231,22 @@ export function SpeakerIcon({ className }: IconProps) {
   )
 }
 
+export function HomeAssistantIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M4 11 12 4l8 7"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M6 9.5V19a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V9.5" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" />
+      <circle cx="12" cy="14.5" r="1.6" stroke="currentColor" strokeWidth={1.8} />
+    </svg>
+  )
+}
+
 /** The AirTag glyph: concentric rings, similar to Find My's item icon. */
 export function AirtagGlyph({ className }: IconProps) {
   return (

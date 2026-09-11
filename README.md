@@ -196,6 +196,16 @@ Telegram's bot token is encrypted and stored in Postgres (never in `.env`) -
 create a bot via [@BotFather](https://t.me/BotFather) to get a token, then
 message the bot (or add it to a group) and use its chat ID.
 
+### Home Assistant
+
+Every AirTag and owner device is published to an MQTT broker on each poll,
+using [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery)
+so Home Assistant auto-creates a `device_tracker` (position) + battery
+`sensor` entity per object - no HACS component or custom integration to
+install. Connect a broker from the same Settings ⚙️ → **Benachrichtigungen**
+panel (host, port, optional username/password, optional TLS); the broker
+password is encrypted the same way as the Telegram bot token.
+
 Treat the VAPID keypair like the encryption key above — generate it once and
 back it up. Every device's push subscription is tied to the public key that
 was active when it subscribed, so devices re-subscribe after a key change.
