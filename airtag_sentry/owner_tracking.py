@@ -57,6 +57,7 @@ from airtag_sentry.db import (
     OwnerDevice,
     OwnerLocation,
     delete_owner_apple_credentials,
+    delete_owner_device,
     get_owner_apple_credentials,
     list_owner_devices as db_list_owner_devices,
     rename_owner_device,
@@ -305,7 +306,9 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
     as this poll runs, without needing a live Apple call from the dashboard itself
     (see module docstring; tasks/todo.md) - then returns a fresh location for
     every *enabled* device, or [] if not connected or none of the enabled devices
-    returned a location this call.
+    returned a location this call. Also disables (or, if never enabled,
+    deletes) any previously-seen device that's dropped out of this listing -
+    see the cleanup step below.
 
     Also records this attempt's outcome on `owner_apple_credentials`
     (last_sync_at/last_sync_error - see db.set_owner_apple_sync_status), so a
@@ -333,18 +336,30 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
 
     # A device Apple stops listing here - removed from iCloud, or (see
     # set_include_family) dropped because Family Sharing was just turned off -
-    # can never get a fresh location again. Leaving it "enabled" would let it
-    # linger in the dashboard's tracked-devices list forever with nothing but
-    # the on_account badge to explain why it never updates; disabling it
-    # mirrors the existing invariant that a disabled device never gets a
-    # fresh location (set_owner_device_enabled already clears is_primary too).
+    # can never get a fresh location again. An *enabled* device is disabled
+    # instead of deleted, mirroring the existing invariant that a disabled
+    # device never gets a fresh location (set_owner_device_enabled already
+    # clears is_primary too) and preserving its history/on_account badge. A
+    # device that was never enabled has no history or customization worth
+    # keeping, so it's deleted outright - otherwise it would keep cluttering
+    # Settings -> Eigene Geräte forever from having been observed just once
+    # (e.g. a family member's device, seen only while Family Sharing was on).
     all_devices = db_list_owner_devices(conn)
     snapshot_ids = {d["id"] for d in snapshot}
     for device in all_devices:
-        if device.enabled and device.id not in snapshot_ids:
+        if device.id in snapshot_ids:
+            continue
+        if device.enabled:
             set_owner_device_enabled(conn, device.id, False)
             logger.info(
                 "Owner device '%s' (%s) is no longer on the Apple account - disabling tracking.",
+                device.name,
+                device.id,
+            )
+        else:
+            delete_owner_device(conn, device.id)
+            logger.info(
+                "Owner device '%s' (%s) is no longer on the Apple account and was never tracked - forgetting it.",
                 device.name,
                 device.id,
             )

@@ -613,6 +613,20 @@ def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:
         return [OwnerDevice(*row) for row in cur.fetchall()]
 
 
+def delete_owner_device(conn: psycopg.Connection, device_id: str) -> None:
+    """Forgets a device outright (cascades to its owner_device_locations, if any
+    - see the table's ON DELETE CASCADE). Only meant for a device that was never
+    enabled: see owner_tracking.fetch_owner_device_locations, which is the only
+    caller - a device merely observed once (e.g. a family member's, while
+    Family Sharing was on) and never opted into tracking has no history or
+    customization worth keeping once Apple stops listing it, unlike an enabled
+    device (which is disabled instead, to preserve its history/on_account
+    badge)."""
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM owner_devices WHERE id = %s", (device_id,))
+    conn.commit()
+
+
 def set_owner_device_enabled(conn: psycopg.Connection, device_id: str, enabled: bool) -> OwnerDevice | None:
     with conn.cursor() as cur:
         cur.execute(
