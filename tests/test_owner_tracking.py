@@ -127,6 +127,26 @@ def test_snapshot_devices_reads_battery_from_device_data():
     assert snapshot[0]["battery_status"] == "Charging"
 
 
+def test_snapshot_devices_discards_battery_level_when_apple_reports_it_unknown():
+    """Regression test for a real production failure: the dashboard showed
+    "0 %" for a device's battery permanently. Apple's FMIP response pairs a
+    round with no real battery reading yet with batteryStatus "Unknown" *and*
+    a meaningless batteryLevel of 0 (not an absent key) - confirmed against
+    Home Assistant's icloud integration, which discards readings in that
+    state for the same reason. Blindly trusting batteryLevel made every such
+    round look like a genuine, permanent 0% charge instead of "not known
+    yet"."""
+    device = _FakeDevice(
+        "d1", "iPhone", "iPhone", {"latitude": 1.0, "longitude": 2.0}, data={"batteryLevel": 0, "batteryStatus": "Unknown"}
+    )
+    api = _FakeApi([device])
+
+    snapshot = owner_tracking._snapshot_devices(api)
+
+    assert snapshot[0]["battery_level"] is None
+    assert snapshot[0]["battery_status"] == "Unknown"
+
+
 def test_snapshot_devices_forces_a_live_locate_before_reading_locations():
     """Regression test for a real production failure: every tracked device showed
     no location at all, even after the two bugs above were fixed. Confirmed
