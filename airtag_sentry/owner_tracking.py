@@ -172,13 +172,29 @@ def connection_status(conn) -> dict:
     }
 
 
-def set_include_family(conn, include_family: bool) -> bool:
+def set_include_family(cfg: Config, conn, include_family: bool) -> bool:
     """Flips the "shared with me" Family Sharing filter on an already-connected
     account. Unlike the connect dialog's checkbox, this needs no re-login: the
     flag is read fresh from Postgres on every _connect() call (a new
-    PyiCloudService is built per poll/request anyway), so it takes effect on
-    the very next poll. Returns False if owner tracking isn't connected."""
-    return set_owner_include_family_devices(conn, include_family)
+    PyiCloudService is built per poll/request anyway).
+
+    Triggers an immediate fetch_owner_device_locations() re-sync rather than
+    leaving the visible effect (a family member's devices disappearing from
+    the dashboard/Settings, or newly-included ones appearing) to whenever the
+    next scheduled poll happens to run - which could be minutes away, making
+    the checkbox look like it did nothing. A failure here is only logged: the
+    flag change itself already succeeded, and the regular poll will pick up
+    the rest. Returns False if owner tracking isn't connected."""
+    changed = set_owner_include_family_devices(conn, include_family)
+    if changed:
+        try:
+            fetch_owner_device_locations(cfg, conn)
+        except Exception:
+            logger.exception(
+                "Family Sharing filter changed, but the immediate re-sync to apply it failed - "
+                "it'll still take effect on the next scheduled poll."
+            )
+    return changed
 
 
 def disconnect(conn) -> None:
