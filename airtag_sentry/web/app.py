@@ -242,6 +242,7 @@ class SettingsIn(BaseModel):
     movement_alert_on_backfill: bool
     movement_away_distance_meters: float = Field(gt=0)
     owner_location_max_age_minutes: float = Field(gt=0)
+    history_cluster_radius_meters: float = Field(gt=0)
 
 
 class AppleLoginIn(BaseModel):

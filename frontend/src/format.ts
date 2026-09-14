@@ -16,6 +16,22 @@ export function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+/** "14:03–15:47" for a multi-point history cluster (see clustering.ts) that
+ * stayed within the same day, or "14.9.2026 23:50 – 15.9.2026 00:12" when a
+ * stay straddled midnight - callers pass the two timestamps in chronological
+ * order regardless of which array direction they came from (Report vs
+ * OwnerLocation, see CLAUDE.md). */
+export function formatClusterRange(earliestIso: string, latestIso: string): string {
+  const earliest = new Date(earliestIso)
+  const latest = new Date(latestIso)
+  const time = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (earliest.toDateString() === latest.toDateString()) {
+    return `${time(earliest)}–${time(latest)}`
+  }
+  const dateTime = (d: Date) => `${d.toLocaleDateString()} ${time(d)}`
+  return `${dateTime(earliest)} – ${dateTime(latest)}`
+}
+
 /** Human-readable labels for Alert.reason values from the backend
  * (airtag_sentry/movement.py / tracker.py). */
 export const ALERT_REASON_LABELS: Record<string, string> = {

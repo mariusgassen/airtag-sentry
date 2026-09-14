@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { Airtag, OwnerDevice, OwnerLocation, Report, Status } from './api'
+import type { AppSettings, Airtag, OwnerDevice, OwnerLocation, Report, Status } from './api'
 import {
   createAirtag,
   getAirtags,
@@ -9,8 +9,10 @@ import {
   getOwnerDeviceLocations,
   getOwnerDevices,
   getReports,
+  getSettings,
   getStatus,
 } from './api'
+import { clusterByProximity } from './clustering'
 import { deviceLabel } from './format'
 import { ObjectsList } from './components/ObjectsList'
 import { AirtagDetail } from './components/AirtagDetail'
@@ -73,6 +75,11 @@ export default function App() {
   const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
   const [ownerLocationHistories, setOwnerLocationHistories] = useState<Record<string, OwnerLocation[]>>({})
   const [ownerConnected, setOwnerConnected] = useState(false)
+  // Drives history-list/map clustering (see clustering.ts) - fetched here
+  // rather than only inside SettingsPanel so a saved
+  // history_cluster_radius_meters change reaches the map/list without a
+  // manual reload, same as any other background refresh (see AUTO_REFRESH_MS).
+  const [settings, setSettings] = useState<AppSettings | null>(null)
   // Every *enabled* (tracked) owner device - see ObjectsList.tsx, which is
   // the first place a tracked device becomes visible outside Settings.
   const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
@@ -131,6 +138,16 @@ export default function App() {
       .then((s) => setOwnerConnected(s.connected))
       .catch(() => setOwnerConnected(false))
   }, [])
+
+  const refreshSettings = useCallback(async () => {
+    await getSettings()
+      .then(setSettings)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshSettings()
+  }, [refreshSettings])
 
   // Devices, their live locations, and their histories all come from the
   // same enabled/disabled registry, so they're refreshed together - a
@@ -202,6 +219,7 @@ export default function App() {
       refreshOwnerConnected()
       refreshOwnerDevices()
       refreshReports()
+      refreshSettings()
     }
     const id = window.setInterval(tick, AUTO_REFRESH_MS)
     function onVisibilityChange() {
@@ -212,7 +230,7 @@ export default function App() {
       window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports])
+  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports, refreshSettings])
 
   const currentAirtag = airtags.find((a) => a.id === currentId) ?? null
   const selectedDevice = ownerDevices.find((d) => d.id === selectedDeviceId) ?? null
@@ -226,38 +244,50 @@ export default function App() {
     document.title = title
   }, [title])
 
+  // Radius for collapsing consecutive same-spot reports/locations into one
+  // "stay" (see clustering.ts) - 50m mirrors AppSettings' DB default, used
+  // only for the brief window before the first getSettings() resolves.
+  const clusterRadiusMeters = settings?.history_cluster_radius_meters ?? 50
+
   // Older/newer navigation, shared by the mobile title bar's stepper below
   // and the desktop sidebar's HistoryStepper (AirtagDetail.tsx/
   // DeviceDetail.tsx) - moved here from the map popup, see tasks/todo.md.
+  // Steps cluster-to-cluster (a whole "stay" at a time), matching the
+  // collapsed granularity of the history list/map - see clustering.ts.
   // AirTag reports arrive oldest-first, owner-device locations newest-first
   // (see CLAUDE.md), so "older"/"newer" step in opposite index directions
   // for each; mirrored from the same logic MapCard.tsx/DeviceMapCard.tsx use
   // to pick their displayed position.
   let stepOlder: (() => void) | null = null
   let stepNewer: (() => void) | null = null
-  // "Steps back from the latest fix" (1 = latest), counted the same way
+  // "Steps back from the latest stay" (1 = latest), counted the same way
   // regardless of which array direction the underlying data arrives in -
   // HistoryStepper just renders whatever count it's given, see the comment
   // there.
   let stepPosition: { current: number; total: number } | null = null
   if (detail === 'airtag' && currentAirtag) {
-    const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
-    const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
-    const older = displayedIndex > 0 ? reports[displayedIndex - 1] : null
-    const newer = displayedIndex < reports.length - 1 ? reports[displayedIndex + 1] : null
-    if (older) stepOlder = () => setSelectedReportId(older.id)
-    if (newer) stepNewer = () => setSelectedReportId(newer.id)
-    if (reports.length > 0) stepPosition = { current: reports.length - displayedIndex, total: reports.length }
+    const clusters = clusterByProximity(reports, (r) => [r.lat, r.lon], clusterRadiusMeters)
+    const selectedIndex =
+      selectedReportId != null ? clusters.findIndex((c) => c.points.some((p) => p.id === selectedReportId)) : -1
+    const displayedIndex = selectedIndex >= 0 ? selectedIndex : clusters.length - 1
+    const older = displayedIndex > 0 ? clusters[displayedIndex - 1] : null
+    const newer = displayedIndex < clusters.length - 1 ? clusters[displayedIndex + 1] : null
+    if (older) stepOlder = () => setSelectedReportId(older.anchor.id)
+    if (newer) stepNewer = () => setSelectedReportId(newer.anchor.id)
+    if (clusters.length > 0) stepPosition = { current: clusters.length - displayedIndex, total: clusters.length }
   } else if (detail === 'device' && selectedDevice) {
     const locations = ownerLocationHistories[selectedDevice.id] ?? []
+    const clusters = clusterByProximity(locations, (l) => [l.lat, l.lon], clusterRadiusMeters)
     const selectedIndex =
-      selectedDeviceLocationKey != null ? locations.findIndex((l) => l.recorded_at === selectedDeviceLocationKey) : -1
+      selectedDeviceLocationKey != null
+        ? clusters.findIndex((c) => c.points.some((p) => p.recorded_at === selectedDeviceLocationKey))
+        : -1
     const displayedIndex = selectedIndex >= 0 ? selectedIndex : 0
-    const older = displayedIndex < locations.length - 1 ? locations[displayedIndex + 1] : null
-    const newer = displayedIndex > 0 ? locations[displayedIndex - 1] : null
-    if (older) stepOlder = () => setSelectedDeviceLocationKey(older.recorded_at)
-    if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.recorded_at)
-    if (locations.length > 0) stepPosition = { current: displayedIndex + 1, total: locations.length }
+    const older = displayedIndex < clusters.length - 1 ? clusters[displayedIndex + 1] : null
+    const newer = displayedIndex > 0 ? clusters[displayedIndex - 1] : null
+    if (older) stepOlder = () => setSelectedDeviceLocationKey(older.anchor.recorded_at)
+    if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.anchor.recorded_at)
+    if (clusters.length > 0) stepPosition = { current: displayedIndex + 1, total: clusters.length }
   }
 
   function handleSelect(id: string) {
@@ -363,6 +393,7 @@ export default function App() {
           <MapCard
             reports={reports}
             airtag={currentAirtag}
+            clusterRadiusMeters={clusterRadiusMeters}
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
@@ -374,6 +405,7 @@ export default function App() {
           <DeviceMapCard
             device={selectedDevice}
             locations={ownerLocationHistories[selectedDevice.id] ?? []}
+            clusterRadiusMeters={clusterRadiusMeters}
             selectedLocationKey={selectedDeviceLocationKey}
             onSelectLocation={handleSelectDeviceLocation}
             onMapClick={() => setDetail(null)}
@@ -527,6 +559,7 @@ export default function App() {
                 airtag={currentAirtag}
                 status={statuses[currentAirtag.id] ?? null}
                 reports={reports}
+                historyClusterRadiusMeters={clusterRadiusMeters}
                 selectedReportId={selectedReportId}
                 onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
@@ -546,6 +579,7 @@ export default function App() {
                 device={selectedDevice}
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 history={ownerLocationHistories[selectedDevice.id] ?? null}
+                historyClusterRadiusMeters={clusterRadiusMeters}
                 selectedLocationKey={selectedDeviceLocationKey}
                 onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}

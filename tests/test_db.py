@@ -261,6 +261,7 @@ def test_get_settings_returns_seeded_defaults(conn):
         movement_alert_on_backfill=False,
         movement_away_distance_meters=150,
         owner_location_max_age_minutes=60,
+        history_cluster_radius_meters=50,
     )
 
 
@@ -275,6 +276,7 @@ def test_update_settings_round_trips(conn):
             movement_alert_on_backfill=True,
             movement_away_distance_meters=250,
             owner_location_max_age_minutes=30,
+            history_cluster_radius_meters=25,
         ),
     )
     assert updated.polling_interval_minutes == 30

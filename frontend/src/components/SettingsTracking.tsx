@@ -44,6 +44,7 @@ export type FieldKey =
   | 'movement_stillstand_movement_meters'
   | 'movement_away_distance_meters'
   | 'owner_location_max_age_minutes'
+  | 'history_cluster_radius_meters'
 
 interface Props {
   settings: AppSettings | null
@@ -122,6 +123,19 @@ export function SettingsTracking({ settings, errors, update }: Props) {
           value={settings.owner_location_max_age_minutes}
           error={errors.owner_location_max_age_minutes}
           onChange={(v) => update({ owner_location_max_age_minutes: v })}
+        />
+      </Section>
+
+      <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+        Verlaufsgruppierung
+      </p>
+      <Section>
+        <Field
+          label="Radius für „gleicher Ort“"
+          suffix="m"
+          value={settings.history_cluster_radius_meters}
+          error={errors.history_cluster_radius_meters}
+          onChange={(v) => update({ history_cluster_radius_meters: v })}
         />
       </Section>
     </div>

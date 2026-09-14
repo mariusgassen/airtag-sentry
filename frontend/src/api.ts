@@ -34,6 +34,7 @@ export interface AppSettings {
   movement_alert_on_backfill: boolean
   movement_away_distance_meters: number
   owner_location_max_age_minutes: number
+  history_cluster_radius_meters: number
 }
 
 export interface OwnerDevice {

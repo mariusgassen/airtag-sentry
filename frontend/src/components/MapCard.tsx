@@ -5,7 +5,8 @@ import { DomEvent } from 'leaflet'
 import { CircleMarker, MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
-import { capitalize, formatRelative } from '../format'
+import { clusterByProximity } from '../clustering'
+import { capitalize, formatClusterRange, formatRelative } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { OWNER_TRAIL_COLOR, PIN_POPUP_OFFSET, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
@@ -312,6 +313,7 @@ export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) 
 export function MapCard({
   reports,
   airtag,
+  clusterRadiusMeters,
   ownerLocations = [],
   ownerLocationHistories = {},
   onSelectDevice,
@@ -321,6 +323,9 @@ export function MapCard({
 }: {
   reports: Report[]
   airtag: Airtag
+  // "Same spot" radius for collapsing consecutive reports into one stay - see
+  // clustering.ts and AppSettings.history_cluster_radius_meters.
+  clusterRadiusMeters: number
   // Current position of every *enabled* owner device (see OwnerDevicesPanel.tsx).
   ownerLocations?: OwnerLocation[]
   // History of every *enabled* device, keyed by device_id - each drawn as its
@@ -347,20 +352,42 @@ export function MapCard({
   // overriding PanToSelection's explicit centering on every older/newer
   // step or history-list pick.
   const positions = useMemo<[number, number][]>(() => reports.map((r) => [r.lat, r.lon]), [reports])
+  // Collapses consecutive same-spot reports into "stays" - see clustering.ts.
+  // The trail (Polyline above) still draws every raw report; only the
+  // per-point dots/popup below collapse.
+  const clusters = useMemo(
+    () => clusterByProximity(reports, (r) => [r.lat, r.lon], clusterRadiusMeters),
+    [reports, clusterRadiusMeters],
+  )
+  const clusterByReportId = useMemo(() => {
+    const map = new Map<number, (typeof clusters)[number]>()
+    for (const c of clusters) for (const p of c.points) map.set(p.id, c)
+    return map
+  }, [clusters])
   const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
   const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
   // Undefined when there are no reports at all - only read once positions
   // is confirmed non-empty below, but the hook call itself (Rules of Hooks)
   // has to run unconditionally either way.
   const displayed = reports[displayedIndex] as Report | undefined
+  // Whichever stay `displayed` belongs to (even when it isn't that stay's own
+  // anchor, e.g. the "no explicit selection -> latest report" fallback above
+  // can land on a later point in a still-ongoing stay) - drives the marker's
+  // actual position (the anchor's, so it doesn't jitter within the stay's
+  // radius) and the popup's single-timestamp-vs-range content below.
+  const displayedCluster = useMemo(
+    () => (displayed ? clusterByReportId.get(displayed.id) : undefined),
+    [clusterByReportId, displayed],
+  )
+  const pinReport = useMemo(() => displayedCluster?.anchor ?? displayed, [displayedCluster, displayed])
   // Memoized: identical lat/lon must keep the same array reference across
   // renders, since it's also the standalone Popup's `position` prop below -
   // react-leaflet fully unbinds/rebinds that popup whenever the reference
   // changes (see the Popup's own comment), so a fresh array every render
   // would reopen it constantly instead of only on a real position change.
   const displayedPosition = useMemo<[number, number]>(
-    () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
-    [displayed?.lat, displayed?.lon],
+    () => [pinReport?.lat ?? 0, pinReport?.lon ?? 0],
+    [pinReport?.lat, pinReport?.lon],
   )
   // The pin's own animated glide toward displayedPosition (see
   // useAnimatedLatLng) - PanToSelection below still targets the raw,
@@ -377,6 +404,9 @@ export function MapCard({
   // so the route it's drawn once selected reads as visually "its own" rather
   // than a generic accent blue (see mapIcons.ts's deviceColor).
   const trailColor = deviceColor(airtag)
+  // pinReport is only possibly undefined pre-guard (see its own comment
+  // above) - `displayed` is guaranteed defined here, so this always resolves.
+  const resolvedPinReport = pinReport ?? displayed
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -386,8 +416,8 @@ export function MapCard({
       />
       <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
       <HistoryPoints
-        points={reports}
-        displayedIndex={displayedIndex}
+        points={clusters.map((c) => c.anchor)}
+        displayedIndex={displayedCluster ? clusters.indexOf(displayedCluster) : -1}
         color={trailColor}
         getKey={(r) => r.id}
         onSelect={onSelectReport ? (r) => onSelectReport(r.id) : undefined}
@@ -409,9 +439,11 @@ export function MapCard({
             {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
           </p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-            {new Date(displayed.timestamp).toLocaleString()}
+            {displayedCluster && displayedCluster.points.length > 1
+              ? `${formatClusterRange(displayedCluster.points[0].timestamp, displayedCluster.points[displayedCluster.points.length - 1].timestamp)} · ${displayedCluster.points.length}×`
+              : new Date(resolvedPinReport.timestamp).toLocaleString()}
           </InfoRow>
-          <AddressLine lat={displayed.lat} lon={displayed.lon} />
+          <AddressLine lat={resolvedPinReport.lat} lon={resolvedPinReport.lon} />
           <a
             href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
             target="_blank"

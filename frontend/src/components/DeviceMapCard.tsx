@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { MapContainer, TileLayer, Polyline } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
-import { deviceLabel } from '../format'
+import { clusterByProximity } from '../clustering'
+import { deviceLabel, formatClusterRange } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { airtagPinIcon, deviceColor } from '../mapIcons'
 import { mapsUrl } from '../maps'
@@ -29,12 +30,16 @@ import { ClockIcon, LocationArrowIcon } from './icons'
 export function DeviceMapCard({
   device,
   locations,
+  clusterRadiusMeters,
   selectedLocationKey = null,
   onSelectLocation,
   onMapClick,
 }: {
   device: OwnerDevice
   locations: OwnerLocation[]
+  // "Same spot" radius for collapsing consecutive locations into one stay -
+  // see clustering.ts and AppSettings.history_cluster_radius_meters.
+  clusterRadiusMeters: number
   // The location shown as the device's marker/popup - null falls back to
   // the latest one. `recorded_at` is the identity key: owner-device
   // locations have no id in the API response, and DeviceHistoryList already
@@ -55,6 +60,19 @@ export function DeviceMapCard({
   // render, overriding PanToSelection's explicit centering on every
   // older/newer step or history-list pick.
   const positions = useMemo<[number, number][]>(() => locations.map((l) => [l.lat, l.lon]), [locations])
+  // Collapses consecutive same-spot locations into "stays" - see
+  // clustering.ts. Mirrors MapCard.tsx's identical clusters/clusterByReportId
+  // pair (see CLAUDE.md's AirTag/device parity constraint), keyed by
+  // recorded_at since OwnerLocation has no id.
+  const clusters = useMemo(
+    () => clusterByProximity(locations, (l) => [l.lat, l.lon], clusterRadiusMeters),
+    [locations, clusterRadiusMeters],
+  )
+  const clusterByRecordedAt = useMemo(() => {
+    const map = new Map<string, (typeof clusters)[number]>()
+    for (const c of clusters) for (const p of c.points) map.set(p.recorded_at, c)
+    return map
+  }, [clusters])
 
   // /api/owner-devices/history is newest-first (see
   // fetch_owner_device_location_history), unlike AirTag reports - index 0 is
@@ -66,10 +84,16 @@ export function DeviceMapCard({
   // is confirmed non-empty below, but the hook call itself (Rules of Hooks)
   // has to run unconditionally either way.
   const displayed = locations[displayedIndex] as OwnerLocation | undefined
+  // See MapCard.tsx's identical comment on its own displayedCluster/pinReport.
+  const displayedCluster = useMemo(
+    () => (displayed ? clusterByRecordedAt.get(displayed.recorded_at) : undefined),
+    [clusterByRecordedAt, displayed],
+  )
+  const pinLocation = useMemo(() => displayedCluster?.anchor ?? displayed, [displayedCluster, displayed])
   // Memoized: see MapCard.tsx's identical comment on its own displayedPosition.
   const displayedPosition = useMemo<[number, number]>(
-    () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
-    [displayed?.lat, displayed?.lon],
+    () => [pinLocation?.lat ?? 0, pinLocation?.lon ?? 0],
+    [pinLocation?.lat, pinLocation?.lon],
   )
   // See MapCard.tsx's identical comment on its own animatedPosition/
   // useAnimatedLatLng - PanToSelection below still targets the raw
@@ -83,6 +107,8 @@ export function DeviceMapCard({
   // This device's own chosen (or hash-derived) color - matches MapCard.tsx's
   // identical trailColor for an AirTag, see the comment there.
   const trailColor = deviceColor(device)
+  // See MapCard.tsx's identical comment on its own resolvedPinReport.
+  const resolvedPinLocation = pinLocation ?? displayed
 
   return (
     <MapContainer center={displayedPosition} zoom={15} className="h-full w-full">
@@ -94,8 +120,8 @@ export function DeviceMapCard({
         <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
       )}
       <HistoryPoints
-        points={locations}
-        displayedIndex={displayedIndex}
+        points={clusters.map((c) => c.anchor)}
+        displayedIndex={displayedCluster ? clusters.indexOf(displayedCluster) : -1}
         color={trailColor}
         getKey={(l) => l.recorded_at}
         onSelect={onSelectLocation ? (l) => onSelectLocation(l.recorded_at) : undefined}
@@ -106,9 +132,11 @@ export function DeviceMapCard({
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-            {new Date(displayed.recorded_at).toLocaleString()}
+            {displayedCluster && displayedCluster.points.length > 1
+              ? `${formatClusterRange(displayedCluster.points[displayedCluster.points.length - 1].recorded_at, displayedCluster.points[0].recorded_at)} · ${displayedCluster.points.length}×`
+              : new Date(resolvedPinLocation.recorded_at).toLocaleString()}
           </InfoRow>
-          <AddressLine lat={displayed.lat} lon={displayed.lon} />
+          <AddressLine lat={resolvedPinLocation.lat} lon={resolvedPinLocation.lon} />
           <a
             href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
             target="_blank"

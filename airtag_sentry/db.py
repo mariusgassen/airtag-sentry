@@ -167,6 +167,7 @@ class AppSettings:
     movement_alert_on_backfill: bool
     movement_away_distance_meters: float
     owner_location_max_age_minutes: float
+    history_cluster_radius_meters: float
 
 
 @contextmanager
@@ -577,6 +578,7 @@ _SETTINGS_COLUMNS = (
     "movement_alert_on_backfill",
     "movement_away_distance_meters",
     "owner_location_max_age_minutes",
+    "history_cluster_radius_meters",
 )
 
 
@@ -599,6 +601,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 movement_alert_on_backfill = %s,
                 movement_away_distance_meters = %s,
                 owner_location_max_age_minutes = %s,
+                history_cluster_radius_meters = %s,
                 updated_at = now()
             WHERE id = 1
             """,
@@ -610,6 +613,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.movement_alert_on_backfill,
                 settings.movement_away_distance_meters,
                 settings.owner_location_max_age_minutes,
+                settings.history_cluster_radius_meters,
             ),
         )
     conn.commit()

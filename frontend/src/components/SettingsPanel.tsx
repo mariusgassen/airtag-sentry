@@ -51,6 +51,7 @@ function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
     'movement_stillstand_movement_meters',
     'movement_away_distance_meters',
     'owner_location_max_age_minutes',
+    'history_cluster_radius_meters',
   ]
   for (const key of numericKeys) {
     const v = settings[key]

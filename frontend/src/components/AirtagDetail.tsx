@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, Report, Status } from '../api'
 import {
@@ -10,8 +10,16 @@ import {
   setAirtagKeyJson,
 } from '../api'
 import { airtagColor, PALETTE } from '../airtagColor'
+import { clusterByProximity } from '../clustering'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import { capitalize, formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
+import {
+  capitalize,
+  formatAirtagBattery,
+  formatAlertReason,
+  formatClusterRange,
+  formatRelative,
+  isLowBattery,
+} from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import {
   AirtagGlyph,
@@ -29,6 +37,10 @@ interface Props {
   airtag: Airtag
   status: Status | null
   reports: Report[]
+  // "Same spot" radius for collapsing consecutive reports into one stay in
+  // the history list below - see clustering.ts and
+  // AppSettings.history_cluster_radius_meters.
+  historyClusterRadiusMeters: number
   selectedReportId: number | null
   onSelectReport: (id: number) => void
   onBack: () => void
@@ -162,6 +174,7 @@ export function AirtagDetail({
   airtag,
   status,
   reports,
+  historyClusterRadiusMeters,
   selectedReportId,
   onSelectReport,
   onBack,
@@ -292,7 +305,12 @@ export function AirtagDetail({
               bordered={false}
             />
             {historyOpen && (
-              <HistoryList reports={reports} selectedReportId={selectedReportId} onSelectReport={onSelectReport} />
+              <HistoryList
+                reports={reports}
+                clusterRadiusMeters={historyClusterRadiusMeters}
+                selectedReportId={selectedReportId}
+                onSelectReport={onSelectReport}
+              />
             )}
           </Section>
 
@@ -540,19 +558,27 @@ function KeyForm({ airtag, onDone }: { airtag: Airtag; onDone: () => void | Prom
 
 function HistoryList({
   reports,
+  clusterRadiusMeters,
   selectedReportId,
   onSelectReport,
 }: {
   reports: Report[]
+  clusterRadiusMeters: number
   selectedReportId: number | null
   onSelectReport: (id: number) => void
 }) {
-  // Newest first - reports arrive oldest-first from the backend (chronological,
-  // for trail drawing), so reverse purely for display here.
-  const rows = [...reports].reverse()
-  // Keyed by report id so the row for whatever's currently selected can be
-  // scrolled into view below even when the selection changed via the map or
-  // the stepper, not just a click inside this list.
+  // Collapses consecutive same-spot reports into one "stay" row - see
+  // clustering.ts. Newest first for display - reports (and so clusters)
+  // arrive oldest-first from the backend (chronological, for trail drawing).
+  const rows = useMemo(() => {
+    const clusters = clusterByProximity(reports, (r) => [r.lat, r.lon], clusterRadiusMeters)
+    return [...clusters].reverse()
+  }, [reports, clusterRadiusMeters])
+  // Keyed by anchor report id (every row - single-point or a multi-point
+  // stay - selects via its anchor's id, see clustering.ts) so the row for
+  // whatever's currently selected can be scrolled into view below even when
+  // the selection changed via the map or the stepper, not just a click
+  // inside this list.
   const rowRefs = useRef(new Map<number, HTMLButtonElement>())
   useEffect(() => {
     if (selectedReportId == null) return
@@ -568,26 +594,41 @@ function HistoryList({
   }
   return (
     <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
-      {rows.map((r, i) => (
-        <button
-          type="button"
-          key={r.id}
-          ref={(el) => {
-            if (el) rowRefs.current.set(r.id, el)
-            else rowRefs.current.delete(r.id)
-          }}
-          onClick={() => onSelectReport(r.id)}
-          title={new Date(r.timestamp).toLocaleString()}
-          className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
-            r.id === selectedReportId ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
-          }`}
-        >
-          <span>{capitalize(formatRelative(r.timestamp))}</span>
-          <span className="text-[var(--text-secondary)]">
-            {r.lat.toFixed(4)}, {r.lon.toFixed(4)}
-          </span>
-        </button>
-      ))}
+      {rows.map((c, i) => {
+        const isStay = c.points.length > 1
+        // reports (and so c.points) are oldest-first, so the earliest point
+        // in a stay is the first one encountered, the latest the last.
+        const earliest = c.points[0]
+        const latest = c.points[c.points.length - 1]
+        const isSelected = c.points.some((p) => p.id === selectedReportId)
+        return (
+          <button
+            type="button"
+            key={c.anchor.id}
+            ref={(el) => {
+              if (el) rowRefs.current.set(c.anchor.id, el)
+              else rowRefs.current.delete(c.anchor.id)
+            }}
+            onClick={() => onSelectReport(c.anchor.id)}
+            title={
+              isStay
+                ? `${new Date(earliest.timestamp).toLocaleString()} – ${new Date(latest.timestamp).toLocaleString()}`
+                : new Date(c.anchor.timestamp).toLocaleString()
+            }
+            className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
+              isSelected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
+            }`}
+          >
+            <span>
+              {isStay ? formatClusterRange(earliest.timestamp, latest.timestamp) : capitalize(formatRelative(c.anchor.timestamp))}
+            </span>
+            <span className="text-[var(--text-secondary)]">
+              {isStay && `${c.points.length}× · `}
+              {c.anchor.lat.toFixed(4)}, {c.anchor.lon.toFixed(4)}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
