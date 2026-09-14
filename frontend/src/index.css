@@ -184,14 +184,14 @@ body {
 }
 
 /* Per-AirTag map pin: a colored badge (matching the list/detail avatar's
-   color, see airtagColor.ts) with a small tail so it points at the exact
-   coordinate, classic map-pin silhouette. Color comes from an inline style
-   per marker instance (mapIcons.ts), not a class, since it varies per tag. */
+   color, see airtagColor.ts), centered directly on its coordinate - no
+   tail/pointer, per direct feedback that it didn't help on the map. Color
+   comes from an inline style per marker instance (mapIcons.ts), not a
+   class, since it varies per tag. */
 .airtag-pin {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+  justify-content: center;
 }
 .airtag-pin__badge {
   box-sizing: border-box;
@@ -199,15 +199,12 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  /* Two-tone ring - white inner, soft dark outer - so the badge stays
+     legible against both light and dark map tiles, not just one. */
   border: 2.5px solid white;
-}
-.airtag-pin__tail {
-  width: 0;
-  height: 0;
-  margin-top: -2px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 7px solid;
+  box-shadow:
+    0 0 0 1.5px rgba(0, 0, 0, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
 /* iOS-style translucent "material" for floating chrome (tab bar, sheet grab
