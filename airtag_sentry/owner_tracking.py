@@ -83,7 +83,13 @@ def _build_api(apple_id: str, password: str, session_dir: str, include_family: b
     from pyicloud.exceptions import PyiCloudFailedLoginException
 
     try:
-        return PyiCloudService(apple_id, password, cookie_directory=session_dir, with_family=include_family)
+        return PyiCloudService(
+            apple_id,
+            password,
+            cookie_directory=session_dir,
+            with_family=include_family,
+            accept_terms=True,
+        )
     except PyiCloudFailedLoginException as exc:
         # Apple's own error here ("-20101: Invalid email/password combination") is
         # the same generic message for a genuinely wrong password AND for the most
