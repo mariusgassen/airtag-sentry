@@ -40,6 +40,42 @@ function ThemeField() {
   )
 }
 
+const PALETTE_OPTIONS: { value: AppSettings['color_palette']; label: string }[] = [
+  { value: 'pastel', label: 'Pastell' },
+  { value: 'vivid', label: 'Kräftig' },
+]
+
+/** Badge/pin color palette - a server-side setting (unlike ThemeField's
+ * light/dark, which is a client-only preference) since it affects every
+ * AirTag/device's color, shared with anyone else viewing the same dashboard. */
+function PaletteField({
+  value,
+  onChange,
+}: {
+  value: AppSettings['color_palette']
+  onChange: (next: AppSettings['color_palette']) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <span className="flex-1 text-[0.95rem]">Farbpalette</span>
+      <div className="inline-flex shrink-0 rounded-lg bg-[var(--surface-2)] p-0.5">
+        {PALETTE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={`rounded-md px-2.5 py-1 text-[0.78rem] ${
+              value === opt.value ? 'bg-[var(--surface)]' : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 const FIELD_ERROR = 'Muss größer als 0 sein.'
 
 function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
@@ -208,6 +244,12 @@ export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePus
           </p>
           <Section>
             <ThemeField />
+            {settings && (
+              <PaletteField
+                value={settings.color_palette}
+                onChange={(color_palette) => update({ color_palette }, { immediate: true })}
+              />
+            )}
           </Section>
 
           <Section>

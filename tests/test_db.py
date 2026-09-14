@@ -80,7 +80,9 @@ def conn():
                         movement_stillstand_movement_meters = 15,
                         movement_alert_on_backfill = false,
                         movement_away_distance_meters = 150,
-                        owner_location_max_age_minutes = 60
+                        owner_location_max_age_minutes = 60,
+                        history_cluster_radius_meters = 50,
+                        color_palette = 'pastel'
                     WHERE id = 1
                     """
                 )
@@ -262,6 +264,7 @@ def test_get_settings_returns_seeded_defaults(conn):
         movement_away_distance_meters=150,
         owner_location_max_age_minutes=60,
         history_cluster_radius_meters=50,
+        color_palette="pastel",
     )
 
 
@@ -277,6 +280,7 @@ def test_update_settings_round_trips(conn):
             movement_away_distance_meters=250,
             owner_location_max_age_minutes=30,
             history_cluster_radius_meters=25,
+            color_palette="vivid",
         ),
     )
     assert updated.polling_interval_minutes == 30
