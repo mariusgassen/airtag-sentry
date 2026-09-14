@@ -166,6 +166,15 @@ class HaApiToken:
 
 
 @dataclasses.dataclass(frozen=True)
+class NamedPlace:
+    id: int
+    name: str
+    lat: float
+    lon: float
+    radius_meters: float
+
+
+@dataclasses.dataclass(frozen=True)
 class AppSettings:
     polling_interval_minutes: int
     movement_distance_threshold_meters: float
@@ -865,3 +874,43 @@ def fetch_owner_device_location_history(
             (device_id, limit),
         )
         return [OwnerLocation(*row) for row in cur.fetchall()]
+
+
+def list_named_places(conn: psycopg.Connection) -> list[NamedPlace]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, name, lat, lon, radius_meters FROM named_places ORDER BY name")
+        return [NamedPlace(*row) for row in cur.fetchall()]
+
+
+def create_named_place(
+    conn: psycopg.Connection, name: str, lat: float, lon: float, radius_meters: float
+) -> NamedPlace:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO named_places (name, lat, lon, radius_meters) VALUES (%s, %s, %s, %s) "
+            "RETURNING id, name, lat, lon, radius_meters",
+            (name, lat, lon, radius_meters),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return NamedPlace(*row)
+
+
+def update_named_place(
+    conn: psycopg.Connection, place_id: int, name: str, lat: float, lon: float, radius_meters: float
+) -> NamedPlace | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE named_places SET name = %s, lat = %s, lon = %s, radius_meters = %s WHERE id = %s "
+            "RETURNING id, name, lat, lon, radius_meters",
+            (name, lat, lon, radius_meters, place_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return NamedPlace(*row) if row else None
+
+
+def delete_named_place(conn: psycopg.Connection, place_id: int) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM named_places WHERE id = %s", (place_id,))
+    conn.commit()

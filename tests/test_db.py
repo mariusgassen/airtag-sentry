@@ -6,15 +6,18 @@ import pytest
 
 from airtag_sentry.db import (
     AppSettings,
+    NamedPlace,
     OwnerDevice,
     OwnerLocation,
     Report,
     StoredKey,
     create_airtag,
+    create_named_place,
     delete_airtag,
     delete_airtag_key,
     delete_ha_api_token,
     delete_mqtt_credentials,
+    delete_named_place,
     delete_owner_apple_credentials,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
@@ -29,6 +32,7 @@ from airtag_sentry.db import (
     latest_owner_device_locations,
     list_airtags,
     list_keyed_airtag_ids,
+    list_named_places,
     list_owner_devices,
     primary_owner_device_location_near,
     record_owner_device_location,
@@ -46,6 +50,7 @@ from airtag_sentry.db import (
     set_owner_include_family_devices,
     set_telegram_bot_commands,
     set_telegram_credentials,
+    update_named_place,
     update_settings,
     upsert_owner_devices,
 )
@@ -66,7 +71,7 @@ def conn():
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
                     "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings, "
-                    "mqtt_settings, ha_api_tokens "
+                    "mqtt_settings, ha_api_tokens, named_places "
                     "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
@@ -719,3 +724,22 @@ def test_settings_table_stays_single_row(conn):
         cur.execute("SELECT count(*) FROM settings")
         (count,) = cur.fetchone()
     assert count == 1
+
+
+def test_named_places_crud_round_trip(conn):
+    assert list_named_places(conn) == []
+
+    home = create_named_place(conn, "Zuhause", 49.8728, 8.6512, 75.0)
+    assert home.name == "Zuhause"
+    assert list_named_places(conn) == [home]
+
+    updated = update_named_place(conn, home.id, "Home", 49.87, 8.65, 100.0)
+    assert updated == NamedPlace(id=home.id, name="Home", lat=49.87, lon=8.65, radius_meters=100.0)
+    assert list_named_places(conn) == [updated]
+
+    delete_named_place(conn, home.id)
+    assert list_named_places(conn) == []
+
+
+def test_update_named_place_returns_none_for_unknown_id(conn):
+    assert update_named_place(conn, 999999, "X", 0, 0, 1) is None
