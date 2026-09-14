@@ -560,6 +560,7 @@ export default function App() {
                 pushBusy={push.busy}
                 onEnablePush={push.enable}
                 onDisablePush={push.disable}
+                onSettingsChanged={setSettings}
               />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail

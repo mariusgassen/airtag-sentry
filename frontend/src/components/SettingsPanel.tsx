@@ -118,9 +118,10 @@ interface Props {
   pushBusy: boolean
   onEnablePush: () => void
   onDisablePush: () => void
+  onSettingsChanged: (settings: AppSettings) => void
 }
 
-export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePush }: Props) {
+export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePush, onSettingsChanged }: Props) {
   const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({})
@@ -142,6 +143,7 @@ export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePus
     try {
       const saved = await updateSettings(next)
       setSettings(saved)
+      onSettingsChanged(saved)
       setSaveStatus('saved')
       window.setTimeout(() => setSaveStatus((s) => (s === 'saved' ? 'idle' : s)), 1500)
     } catch {
