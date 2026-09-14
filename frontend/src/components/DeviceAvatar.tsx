@@ -1,4 +1,4 @@
-import { glyphColor } from '../airtagColor'
+import { airtagColor, glyphColor } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, defaultDeviceIcon } from '../deviceIconRegistry'
 import type { DeviceIconName } from '../deviceIcons'
 import { PersonIcon } from './icons'
@@ -10,7 +10,7 @@ const SIZES = {
 } satisfies Record<number, { badge: string; icon: string }>
 
 interface Props {
-  device: { icon: string | null; color: string | null; device_type: string; name: string }
+  device: { id: string; icon: string | null; color: string | null; device_type: string; name: string }
   size: keyof typeof SIZES
   className?: string
 }
@@ -22,13 +22,13 @@ interface Props {
  * even that has no good match. */
 export function DeviceAvatar({ device, size, className }: Props) {
   const { badge, icon } = SIZES[size]
-  const color = device.color ?? 'var(--accent)'
+  const color = device.color ?? airtagColor(device.id)
   const iconName: DeviceIconName | null = (device.icon as DeviceIconName | null) ?? defaultDeviceIcon(device.device_type, device.name)
   const Glyph = iconName ? DEVICE_ICON_COMPONENTS[iconName] : PersonIcon
   return (
     <span
       className={`flex shrink-0 items-center justify-center rounded-full ${badge} ${className ?? ''}`}
-      style={{ backgroundColor: color, color: device.color ? glyphColor() : '#ffffff' }}
+      style={{ backgroundColor: color, color: glyphColor() }}
     >
       <Glyph className={icon} />
     </span>

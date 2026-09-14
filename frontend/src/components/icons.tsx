@@ -121,8 +121,8 @@ export function LocationArrowIcon({ className }: IconProps) {
 export function KeyIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <circle cx="8" cy="15" r="4" stroke="currentColor" strokeWidth={2} />
-      <path d="M11 12l9-9m0 0v4m0-4h-4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="6.5" cy="12" r="3.6" stroke="currentColor" strokeWidth={2} />
+      <path d="M10.1 12H20M16 12v3M19 12v2" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

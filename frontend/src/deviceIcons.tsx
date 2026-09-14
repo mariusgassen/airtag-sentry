@@ -33,10 +33,10 @@ export type DeviceIconName =
 export function BikeIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <circle cx="6" cy="17" r="3.2" stroke="currentColor" strokeWidth={1.8} />
-      <circle cx="18" cy="17" r="3.2" stroke="currentColor" strokeWidth={1.8} />
+      <circle cx="6.25" cy="17" r="3.15" stroke="currentColor" strokeWidth={1.8} />
+      <circle cx="17.75" cy="17" r="3.15" stroke="currentColor" strokeWidth={1.8} />
       <path
-        d="M6 17l4.5-9h3.5l4 9M8.5 8h3M11 10.5l3.5 6.5"
+        d="M6.25 17h7.5l-4.25-7.5h3.65l4.6 7.5M9.5 9.5 8 7h3M13.15 9.5l1.8-3h3.35"
         stroke="currentColor"
         strokeWidth={1.8}
         strokeLinecap="round"
@@ -61,14 +61,15 @@ export function CarIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <path
-        d="M4 16v-3.5l1.7-4.2A2 2 0 0 1 7.6 7h8.8a2 2 0 0 1 1.9 1.3L20 12.5V16"
+        d="M3.5 16.5v-3.8c0-.6.2-1.1.65-1.5l1.45-1.25 1.55-3.25A2.2 2.2 0 0 1 9.1 5.5h5.8a2.2 2.2 0 0 1 1.95 1.2l1.55 3.25 1.45 1.25c.45.4.65.9.65 1.5v3.8"
         stroke="currentColor"
         strokeWidth={1.8}
+        strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <path d="M4 16h16M4 12.5h16" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
-      <circle cx="7.5" cy="16" r="1.6" fill="currentColor" />
-      <circle cx="16.5" cy="16" r="1.6" fill="currentColor" />
+      <path d="M5.6 10h12.8M3.5 16.5h17" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+      <circle cx="7.5" cy="16.5" r="2.1" fill="currentColor" />
+      <circle cx="16.5" cy="16.5" r="2.1" fill="currentColor" />
     </svg>
   )
 }
@@ -86,9 +87,10 @@ export function WalletIcon({ className }: IconProps) {
 export function SuitcaseIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="3.5" y="8" width="17" height="12" rx="2" stroke="currentColor" strokeWidth={1.8} />
-      <path d="M9 8V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
-      <path d="M3.5 13h17" stroke="currentColor" strokeWidth={1.8} />
+      <rect x="5" y="7.5" width="14" height="11.5" rx="2" stroke="currentColor" strokeWidth={1.8} />
+      <path d="M9 7.5V6a1.2 1.2 0 0 1 1.2-1.2h3.6A1.2 1.2 0 0 1 15 6v1.5M5 12.5h14" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+      <circle cx="8" cy="20.1" r="1" fill="currentColor" />
+      <circle cx="16" cy="20.1" r="1" fill="currentColor" />
     </svg>
   )
 }
@@ -99,7 +101,7 @@ export function LaptopIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <rect x="4.5" y="5" width="15" height="9.5" rx="1.3" stroke="currentColor" strokeWidth={1.8} />
-      <rect x="10.2" y="4.2" width="3.6" height="2" rx="1" fill="currentColor" />
+      <rect x="9" y="4.1" width="6" height="2.5" rx="1.1" fill="currentColor" />
       <path
         d="M1.8 19.4h20.4l-2-3.6a1 1 0 0 0-.9-.5H4.7a1 1 0 0 0-.9.5L1.8 19.4Z"
         fill="currentColor"
@@ -191,11 +193,14 @@ export function WatchIcon({ className }: IconProps) {
 }
 
 export function MacIcon({ className }: IconProps) {
-  // A low, wide box - Mac Studio/mini/Pro, which have no built-in display
-  // and are flatter than tall. See ImacIcon below for the monitor shape.
+  // A low, wide Mac Studio/mini/Pro box. Its small front ports and status
+  // LED keep it from reading as a blank generic rectangle.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="4" y="7" width="16" height="10" rx="2.5" fill="currentColor" />
+      <rect x="3.5" y="7" width="17" height="10" rx="2.5" stroke="currentColor" strokeWidth={1.8} />
+      <rect x="7" y="10.3" width="3.3" height="3.2" rx="0.65" fill="currentColor" />
+      <rect x="11.8" y="10.4" width="1.6" height="3" rx="0.45" fill="currentColor" />
+      <circle cx="16.8" cy="11.9" r="0.85" fill="currentColor" />
     </svg>
   )
 }
@@ -204,41 +209,40 @@ export function ImacIcon({ className }: IconProps) {
   // Monitor-on-a-stand - iMac, or any Mac with a built-in display.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="3.5" y="4" width="17" height="12" rx="1.8" fill="currentColor" />
+      <rect x="3.5" y="4" width="17" height="12" rx="1.8" stroke="currentColor" strokeWidth={1.8} />
+      <rect x="5.3" y="5.8" width="13.4" height="8.2" rx="0.7" fill="currentColor" fillOpacity={0.18} />
       <path d="M12 16v3.4M8.3 20.4h7.4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
     </svg>
   )
 }
 
-/** One AirPod bud - a round head with a short, straight (vertical, not
- * tilted) stem, drawn as a round-capped line (stem) with the head circle
- * painted on top so the stem's start-cap is hidden underneath it (no
- * visible seam). Shared by AirpodsRightIcon/AirpodsLeftIcon/AirpodsIcon
- * below so the three stay geometrically consistent. */
-function AirpodBud({ headCx, headCy, headR, stemY2, stemW }: {
+/** One AirPod bud. The stem stays upright; only the round pod head is offset
+ * slightly left/right, which distinguishes the two sides without moving the
+ * complete glyph away from the badge's center. */
+function AirpodBud({ headCx, stemCx = headCx, headCy, headR, stemY2, stemW }: {
   headCx: number
+  stemCx?: number
   headCy: number
   headR: number
   stemY2: number
   stemW: number
 }) {
-  const y1 = headCy + headR * 0.75
+  const y1 = headCy + headR * 0.65
+  const joinY = headCy + headR * 0.95
   return (
     <>
-      <line x1={headCx} y1={y1} x2={headCx} y2={stemY2} stroke="currentColor" strokeWidth={stemW} strokeLinecap="round" />
+      <path d={`M${headCx} ${y1}L${stemCx} ${joinY}V${stemY2}`} stroke="currentColor" strokeWidth={stemW} strokeLinecap="round" strokeLinejoin="round" />
       <circle cx={headCx} cy={headCy} r={headR} fill="currentColor" />
     </>
   )
 }
 
-// A straight stem has no left/right handedness to mirror, so the shape is
-// identical - AirpodsLeftIcon/AirpodsRightIcon instead position the same
-// bud off-center, left vs. right, so the two are visibly different (not
-// pixel-identical) rather than relying only on the picker's text label.
+// Both single-pod glyphs keep their stem on the viewBox centerline. Their
+// head is the only mirrored element, so neither icon is shifted as a whole.
 export function AirpodsRightIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <AirpodBud headCx={15} headCy={7} headR={3.6} stemY2={16} stemW={3} />
+      <AirpodBud headCx={12.8} stemCx={12} headCy={7} headR={3.5} stemY2={16} stemW={3} />
     </svg>
   )
 }
@@ -246,23 +250,21 @@ export function AirpodsRightIcon({ className }: IconProps) {
 export function AirpodsLeftIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <AirpodBud headCx={9} headCy={7} headR={3.6} stemY2={16} stemW={3} />
+      <AirpodBud headCx={11.2} stemCx={12} headCy={7} headR={3.5} stemY2={16} stemW={3} />
     </svg>
   )
 }
 
 export function AirpodsIcon({ className }: IconProps) {
-  // The pair: two identical copies of the same bud shape, spread further
-  // apart (translate ±6, not ±5) so they read as two distinct pods rather
-  // than merging into one shape at badge size, and both straight/vertical
-  // so the stems are trivially parallel.
+  // The paired glyph mirrors the slight head angle while keeping each stem
+  // vertical, so it remains balanced around the badge center.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <g transform="translate(-6 0)">
-        <AirpodBud headCx={12} headCy={7.5} headR={3.2} stemY2={15.5} stemW={2.7} />
+      <g transform="translate(-5.5 0)">
+        <AirpodBud headCx={11.3} stemCx={12} headCy={7.5} headR={3.1} stemY2={15.5} stemW={2.7} />
       </g>
-      <g transform="translate(6 0)">
-        <AirpodBud headCx={12} headCy={7.5} headR={3.2} stemY2={15.5} stemW={2.7} />
+      <g transform="translate(5.5 0)">
+        <AirpodBud headCx={12.7} stemCx={12} headCy={7.5} headR={3.1} stemY2={15.5} stemW={2.7} />
       </g>
     </svg>
   )
