@@ -236,7 +236,7 @@ function AirpodBud({ headCx, headCy, headR, stemY2, stemW }: {
 export function AirpodsRightIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <AirpodBud headCx={12} headCy={6.5} headR={3.8} stemY2={19} stemW={3.2} />
+      <AirpodBud headCx={12} headCy={7} headR={3.8} stemY2={16} stemW={3.2} />
     </svg>
   )
 }
@@ -244,21 +244,23 @@ export function AirpodsRightIcon({ className }: IconProps) {
 export function AirpodsLeftIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <AirpodBud headCx={12} headCy={6.5} headR={3.8} stemY2={19} stemW={3.2} />
+      <AirpodBud headCx={12} headCy={7} headR={3.8} stemY2={16} stemW={3.2} />
     </svg>
   )
 }
 
 export function AirpodsIcon({ className }: IconProps) {
-  // The pair: two identical copies of the same bud shape, translated apart -
-  // both straight/vertical, so the stems are trivially parallel.
+  // The pair: two identical copies of the same bud shape, spread further
+  // apart (translate ±6, not ±5) so they read as two distinct pods rather
+  // than merging into one shape at badge size, and both straight/vertical
+  // so the stems are trivially parallel.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <g transform="translate(-5 0)">
-        <AirpodBud headCx={12} headCy={6.8} headR={3.3} stemY2={17} stemW={2.8} />
+      <g transform="translate(-6 0)">
+        <AirpodBud headCx={12} headCy={7.5} headR={3.2} stemY2={15.5} stemW={2.7} />
       </g>
-      <g transform="translate(5 0)">
-        <AirpodBud headCx={12} headCy={6.8} headR={3.3} stemY2={17} stemW={2.8} />
+      <g transform="translate(6 0)">
+        <AirpodBud headCx={12} headCy={7.5} headR={3.2} stemY2={15.5} stemW={2.7} />
       </g>
     </svg>
   )
@@ -266,14 +268,14 @@ export function AirpodsIcon({ className }: IconProps) {
 
 export function AirpodsCaseIcon({ className }: IconProps) {
   // Stroke-outline "container" style, matching wallet/suitcase/backpack
-  // above rather than the buds' solid fill. A short lid near the top (not
-  // a full pill body) plus the LED sitting below it, not on it, is what
-  // reads as a hinged case rather than a computer mouse.
+  // above rather than the buds' solid fill. Broader than tall (matches the
+  // real case's proportions - it opens along its long top edge), with the
+  // LED below the seam rather than on it.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="6.5" y="3.5" width="11" height="16.5" rx="3" stroke="currentColor" strokeWidth={1.8} />
-      <path d="M6.5 7.2h11" stroke="currentColor" strokeWidth={1.5} />
-      <circle cx="12" cy="14.5" r="0.7" fill="currentColor" />
+      <rect x="4" y="6.5" width="16" height="11" rx="3.2" stroke="currentColor" strokeWidth={1.8} />
+      <path d="M4 10h16" stroke="currentColor" strokeWidth={1.5} />
+      <circle cx="12" cy="14" r="0.7" fill="currentColor" />
     </svg>
   )
 }

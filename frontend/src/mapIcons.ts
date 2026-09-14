@@ -22,12 +22,12 @@ function bud(headCx: number, headCy: number, headR: number, stemY2: number, stem
   return `<line x1="${headCx}" y1="${y1}" x2="${headCx}" y2="${stemY2}" stroke="currentColor" stroke-width="${stemW}" stroke-linecap="round"/>
     <circle cx="${headCx}" cy="${headCy}" r="${headR}" fill="currentColor"/>`
 }
-const AIRPODS_PAIR_INNER = `<g transform="translate(-5 0)">${bud(12, 6.8, 3.3, 17, 2.8)}</g>
-  <g transform="translate(5 0)">${bud(12, 6.8, 3.3, 17, 2.8)}</g>`
+const AIRPODS_PAIR_INNER = `<g transform="translate(-6 0)">${bud(12, 7.5, 3.2, 15.5, 2.7)}</g>
+  <g transform="translate(6 0)">${bud(12, 7.5, 3.2, 15.5, 2.7)}</g>`
 // A straight stem has no left/right handedness to mirror - both icons use
 // the same shape, told apart by their picker label instead of silhouette.
-const AIRPODS_RIGHT_INNER = bud(12, 6.5, 3.8, 19, 3.2)
-const AIRPODS_LEFT_INNER = bud(12, 6.5, 3.8, 19, 3.2)
+const AIRPODS_RIGHT_INNER = bud(12, 7, 3.8, 16, 3.2)
+const AIRPODS_LEFT_INNER = bud(12, 7, 3.8, 16, 3.2)
 
 // 1:1 raw-SVG mirrors of deviceIcons.tsx's React components, currentColor
 // instead of a fixed color, for the same "divIcon is plain HTML" reason as
@@ -115,9 +115,9 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
   'airpods-right': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_RIGHT_INNER}</svg>`,
   'airpods-left': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_LEFT_INNER}</svg>`,
   'airpods-case': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-    <rect x="6.5" y="3.5" width="11" height="16.5" rx="3" stroke="currentColor" stroke-width="1.8"/>
-    <path d="M6.5 7.2h11" stroke="currentColor" stroke-width="1.5"/>
-    <circle cx="12" cy="14.5" r="0.7" fill="currentColor"/>
+    <rect x="4" y="6.5" width="16" height="11" rx="3.2" stroke="currentColor" stroke-width="1.8"/>
+    <path d="M4 10h16" stroke="currentColor" stroke-width="1.5"/>
+    <circle cx="12" cy="14" r="0.7" fill="currentColor"/>
   </svg>`,
 }
 
