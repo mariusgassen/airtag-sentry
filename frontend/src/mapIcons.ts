@@ -24,10 +24,11 @@ function bud(headCx: number, headCy: number, headR: number, stemY2: number, stem
 }
 const AIRPODS_PAIR_INNER = `<g transform="translate(-6 0)">${bud(12, 7.5, 3.2, 15.5, 2.7)}</g>
   <g transform="translate(6 0)">${bud(12, 7.5, 3.2, 15.5, 2.7)}</g>`
-// A straight stem has no left/right handedness to mirror - both icons use
-// the same shape, told apart by their picker label instead of silhouette.
-const AIRPODS_RIGHT_INNER = bud(12, 7, 3.8, 16, 3.2)
-const AIRPODS_LEFT_INNER = bud(12, 7, 3.8, 16, 3.2)
+// A straight stem has no left/right handedness to mirror - the same bud is
+// instead positioned off-center, left vs. right, so the two read as
+// visibly different rather than pixel-identical.
+const AIRPODS_RIGHT_INNER = bud(15, 7, 3.6, 16, 3)
+const AIRPODS_LEFT_INNER = bud(9, 7, 3.6, 16, 3)
 
 // 1:1 raw-SVG mirrors of deviceIcons.tsx's React components, currentColor
 // instead of a fixed color, for the same "divIcon is plain HTML" reason as
@@ -66,7 +67,7 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
   </svg>`,
   laptop: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
     <rect x="4.5" y="5" width="15" height="9.5" rx="1.3" stroke="currentColor" stroke-width="1.8"/>
-    <rect x="10.8" y="4.4" width="2.4" height="1.3" rx="0.6" fill="currentColor"/>
+    <rect x="10.2" y="4.2" width="3.6" height="2" rx="1" fill="currentColor"/>
     <path d="M1.8 19.4h20.4l-2-3.6a1 1 0 0 0-.9-.5H4.7a1 1 0 0 0-.9.5L1.8 19.4Z" fill="currentColor"/>
   </svg>`,
   camera: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
@@ -102,10 +103,10 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
     <rect x="7.5" y="7" width="9" height="12" rx="3" fill="currentColor"/>
     <rect x="9" y="3" width="6" height="3" rx="1.2" fill="currentColor"/>
     <rect x="9" y="18" width="6" height="3" rx="1.2" fill="currentColor"/>
-    <rect x="16.3" y="11.5" width="1.6" height="3" rx="0.7" fill="currentColor"/>
+    <rect x="16.3" y="11" width="1.6" height="3" rx="0.7" fill="currentColor"/>
   </svg>`,
   mac: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-    <rect x="5" y="5" width="14" height="14" rx="3.2" fill="currentColor"/>
+    <rect x="4" y="7" width="16" height="10" rx="2.5" fill="currentColor"/>
   </svg>`,
   imac: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
     <rect x="3.5" y="4" width="17" height="12" rx="1.8" fill="currentColor"/>

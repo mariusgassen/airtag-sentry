@@ -99,7 +99,7 @@ export function LaptopIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <rect x="4.5" y="5" width="15" height="9.5" rx="1.3" stroke="currentColor" strokeWidth={1.8} />
-      <rect x="10.8" y="4.4" width="2.4" height="1.3" rx="0.6" fill="currentColor" />
+      <rect x="10.2" y="4.2" width="3.6" height="2" rx="1" fill="currentColor" />
       <path
         d="M1.8 19.4h20.4l-2-3.6a1 1 0 0 0-.9-.5H4.7a1 1 0 0 0-.9.5L1.8 19.4Z"
         fill="currentColor"
@@ -178,23 +178,24 @@ export function IphoneIcon({ className }: IconProps) {
 }
 
 export function WatchIcon({ className }: IconProps) {
-  // Crown centered on the case (not high up near the top lug) and narrower.
+  // Crown just above the case's vertical center (not dead-centered, not up
+  // by the lug) and narrow.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <rect x="7.5" y="7" width="9" height="12" rx="3" fill="currentColor" />
       <rect x="9" y="3" width="6" height="3" rx="1.2" fill="currentColor" />
       <rect x="9" y="18" width="6" height="3" rx="1.2" fill="currentColor" />
-      <rect x="16.3" y="11.5" width="1.6" height="3" rx="0.7" fill="currentColor" />
+      <rect x="16.3" y="11" width="1.6" height="3" rx="0.7" fill="currentColor" />
     </svg>
   )
 }
 
 export function MacIcon({ className }: IconProps) {
-  // A compact box - Mac Studio/mini/Pro, which have no built-in display.
-  // See ImacIcon below for the monitor-shaped alternative.
+  // A low, wide box - Mac Studio/mini/Pro, which have no built-in display
+  // and are flatter than tall. See ImacIcon below for the monitor shape.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="5" y="5" width="14" height="14" rx="3.2" fill="currentColor" />
+      <rect x="4" y="7" width="16" height="10" rx="2.5" fill="currentColor" />
     </svg>
   )
 }
@@ -230,13 +231,14 @@ function AirpodBud({ headCx, headCy, headR, stemY2, stemW }: {
   )
 }
 
-// A straight stem has no left/right handedness to mirror, so
-// AirpodsLeftIcon/AirpodsRightIcon render the same shape - the picker tells
-// them apart by label ("AirPod links"/"AirPod rechts"), not silhouette.
+// A straight stem has no left/right handedness to mirror, so the shape is
+// identical - AirpodsLeftIcon/AirpodsRightIcon instead position the same
+// bud off-center, left vs. right, so the two are visibly different (not
+// pixel-identical) rather than relying only on the picker's text label.
 export function AirpodsRightIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <AirpodBud headCx={12} headCy={7} headR={3.8} stemY2={16} stemW={3.2} />
+      <AirpodBud headCx={15} headCy={7} headR={3.6} stemY2={16} stemW={3} />
     </svg>
   )
 }
@@ -244,7 +246,7 @@ export function AirpodsRightIcon({ className }: IconProps) {
 export function AirpodsLeftIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <AirpodBud headCx={12} headCy={7} headR={3.8} stemY2={16} stemW={3.2} />
+      <AirpodBud headCx={9} headCy={7} headR={3.6} stemY2={16} stemW={3} />
     </svg>
   )
 }
