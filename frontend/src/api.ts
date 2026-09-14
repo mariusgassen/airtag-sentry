@@ -35,7 +35,7 @@ export interface AppSettings {
   movement_away_distance_meters: number
   owner_location_max_age_minutes: number
   history_cluster_radius_meters: number
-  color_palette: 'vivid' | 'pastel'
+  color_palette: 'vivid' | 'pastel' | 'pastel_white'
 }
 
 export interface OwnerDevice {

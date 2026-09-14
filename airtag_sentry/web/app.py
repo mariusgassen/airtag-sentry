@@ -100,7 +100,7 @@ AIRTAG_ICON_CHOICES = {
     "mac",
 }
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-_COLOR_PALETTE_CHOICES = {"vivid", "pastel"}
+_COLOR_PALETTE_CHOICES = {"vivid", "pastel", "pastel_white"}
 
 
 class _CacheControlledStaticFiles(StaticFiles):

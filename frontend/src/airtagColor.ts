@@ -1,4 +1,4 @@
-export type ColorPaletteName = 'vivid' | 'pastel'
+export type ColorPaletteName = 'vivid' | 'pastel' | 'pastel_white'
 
 // Apple-system-style accent colors, used to give each AirTag/device a stable
 // visual identity shared between its list/detail avatar and its map pin.
@@ -13,9 +13,8 @@ const VIVID_COLORS = [
   '#5e5ce6', // indigo
 ]
 
-// Same 8 hues, softened - the "settings.color_palette = pastel" default.
-// Paired with a dark glyph (GLYPH_COLORS below) rather than white: a white
-// glyph loses too much contrast against backgrounds this light.
+// Same 8 hues, softened - shared by 'pastel' (dark glyph, the default) and
+// 'pastel_white' (white glyph) below; only the paired glyph color differs.
 const PASTEL_COLORS = [
   '#8fbff5',
   '#f7c48c',
@@ -30,6 +29,7 @@ const PASTEL_COLORS = [
 const GLYPH_COLORS: Record<ColorPaletteName, string> = {
   vivid: '#ffffff',
   pastel: '#2b2a33',
+  pastel_white: '#ffffff',
 }
 
 // The active palette's colors - exported as a live `let` (not a function)
@@ -51,6 +51,12 @@ export function setColorPalette(name: ColorPaletteName): void {
   PALETTE = name === 'vivid' ? VIVID_COLORS : PASTEL_COLORS
   activeGlyphColor = GLYPH_COLORS[name]
 }
+
+export const COLOR_PALETTE_OPTIONS: { value: ColorPaletteName; label: string }[] = [
+  { value: 'pastel', label: 'Pastell' },
+  { value: 'pastel_white', label: 'Pastell (hell)' },
+  { value: 'vivid', label: 'Kräftig' },
+]
 
 let activeGlyphColor = GLYPH_COLORS.pastel
 

@@ -13,20 +13,21 @@ const GLYPH_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
   <circle cx="12" cy="12" r="2" fill="currentColor"/>
 </svg>`
 
-// One AirPod bud - a round head with a long angled stem, drawn as a
-// round-capped line (stem) with the head circle painted on top so the
-// stem's start-cap is hidden underneath it (no visible seam). Mirrors
-// deviceIcons.tsx's AirpodBud; keep both in sync.
-function bud(headCx: number, headCy: number, headR: number, stemX2: number, stemY2: number, stemW: number): string {
-  const x1 = headCx + headR * 0.35
+// One AirPod bud - a round head with a short, straight (vertical, not
+// tilted) stem, drawn as a round-capped line (stem) with the head circle
+// painted on top so the stem's start-cap is hidden underneath it (no
+// visible seam). Mirrors deviceIcons.tsx's AirpodBud; keep both in sync.
+function bud(headCx: number, headCy: number, headR: number, stemY2: number, stemW: number): string {
   const y1 = headCy + headR * 0.75
-  return `<line x1="${x1}" y1="${y1}" x2="${stemX2}" y2="${stemY2}" stroke="currentColor" stroke-width="${stemW}" stroke-linecap="round"/>
+  return `<line x1="${headCx}" y1="${y1}" x2="${headCx}" y2="${stemY2}" stroke="currentColor" stroke-width="${stemW}" stroke-linecap="round"/>
     <circle cx="${headCx}" cy="${headCy}" r="${headR}" fill="currentColor"/>`
 }
-const AIRPODS_PAIR_INNER = `<g transform="translate(-5 0)">${bud(12, 6.2, 3.2, 15.1, 20, 2.9)}</g>
-  <g transform="translate(5 0)">${bud(12, 6.2, 3.2, 15.1, 20, 2.9)}</g>`
-const AIRPODS_RIGHT_INNER = bud(11, 5.6, 3.9, 14.9, 21, 3.4)
-const AIRPODS_LEFT_INNER = `<g transform="translate(24 0) scale(-1 1)">${AIRPODS_RIGHT_INNER}</g>`
+const AIRPODS_PAIR_INNER = `<g transform="translate(-5 0)">${bud(12, 6.8, 3.3, 17, 2.8)}</g>
+  <g transform="translate(5 0)">${bud(12, 6.8, 3.3, 17, 2.8)}</g>`
+// A straight stem has no left/right handedness to mirror - both icons use
+// the same shape, told apart by their picker label instead of silhouette.
+const AIRPODS_RIGHT_INNER = bud(12, 6.5, 3.8, 19, 3.2)
+const AIRPODS_LEFT_INNER = bud(12, 6.5, 3.8, 19, 3.2)
 
 // 1:1 raw-SVG mirrors of deviceIcons.tsx's React components, currentColor
 // instead of a fixed color, for the same "divIcon is plain HTML" reason as
@@ -64,8 +65,9 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
     <path d="M3.5 13h17" stroke="currentColor" stroke-width="1.8"/>
   </svg>`,
   laptop: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-    <rect x="4.5" y="5" width="15" height="9.5" rx="1.3" stroke="currentColor" stroke-width="2"/>
-    <path d="M2.2 19.2h19.6l-1.8-3.3a1 1 0 0 0-.9-.5H4.9a1 1 0 0 0-.9.5L2.2 19.2Z" fill="currentColor"/>
+    <rect x="4.5" y="5" width="15" height="9.5" rx="1.3" stroke="currentColor" stroke-width="1.8"/>
+    <rect x="10.8" y="4.4" width="2.4" height="1.3" rx="0.6" fill="currentColor"/>
+    <path d="M1.8 19.4h20.4l-2-3.6a1 1 0 0 0-.9-.5H4.7a1 1 0 0 0-.9.5L1.8 19.4Z" fill="currentColor"/>
   </svg>`,
   camera: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
     <rect x="3" y="7" width="18" height="12" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
@@ -93,26 +95,25 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
     <path d="M12 13v7.5" stroke="currentColor" stroke-width="1.7"/>
   </svg>`,
   iphone: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-    <rect x="6.5" y="2.5" width="11" height="19" rx="2.6" stroke="currentColor" stroke-width="2.3"/>
-    <rect x="10.4" y="4.6" width="3.2" height="1" rx="0.5" fill="currentColor"/>
+    <rect x="6.5" y="2.2" width="11" height="19.6" rx="3.2" stroke="currentColor" stroke-width="2.1"/>
+    <rect x="9.7" y="4.3" width="4.6" height="1.6" rx="0.8" fill="currentColor"/>
   </svg>`,
   watch: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
     <rect x="7.5" y="7" width="9" height="12" rx="3" fill="currentColor"/>
     <rect x="9" y="3" width="6" height="3" rx="1.2" fill="currentColor"/>
     <rect x="9" y="18" width="6" height="3" rx="1.2" fill="currentColor"/>
-    <rect x="16.3" y="10.3" width="2.2" height="3.4" rx="0.8" fill="currentColor"/>
+    <rect x="16.3" y="11.5" width="1.6" height="3" rx="0.7" fill="currentColor"/>
   </svg>`,
   mac: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-    <rect x="3.5" y="4" width="17" height="12" rx="1.8" fill="currentColor"/>
-    <path d="M12 16v3.4M8.3 20.4h7.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    <rect x="5" y="5" width="14" height="14" rx="3.2" fill="currentColor"/>
   </svg>`,
   airpods: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_PAIR_INNER}</svg>`,
   'airpods-right': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_RIGHT_INNER}</svg>`,
   'airpods-left': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_LEFT_INNER}</svg>`,
   'airpods-case': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
-    <rect x="6" y="3.5" width="12" height="17" rx="5.5" stroke="currentColor" stroke-width="1.8"/>
-    <path d="M6.3 8.2h11.4" stroke="currentColor" stroke-width="1.5"/>
-    <circle cx="12" cy="5.9" r="0.75" fill="currentColor"/>
+    <rect x="6.5" y="3.5" width="11" height="16.5" rx="3" stroke="currentColor" stroke-width="1.8"/>
+    <path d="M6.5 7.2h11" stroke="currentColor" stroke-width="1.5"/>
+    <circle cx="12" cy="14.5" r="0.7" fill="currentColor"/>
   </svg>`,
 }
 

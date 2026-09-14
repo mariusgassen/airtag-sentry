@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { AppSettings } from '../api'
 import { getSettings, updateSettings } from '../api'
+import { COLOR_PALETTE_OPTIONS } from '../airtagColor'
 import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
 import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, LogoutIcon, PersonIcon } from './icons'
@@ -40,11 +41,6 @@ function ThemeField() {
   )
 }
 
-const PALETTE_OPTIONS: { value: AppSettings['color_palette']; label: string }[] = [
-  { value: 'pastel', label: 'Pastell' },
-  { value: 'vivid', label: 'Kräftig' },
-]
-
 /** Badge/pin color palette - a server-side setting (unlike ThemeField's
  * light/dark, which is a client-only preference) since it affects every
  * AirTag/device's color, shared with anyone else viewing the same dashboard. */
@@ -59,7 +55,7 @@ function PaletteField({
     <div className="flex items-center justify-between gap-3 px-4 py-3">
       <span className="flex-1 text-[0.95rem]">Farbpalette</span>
       <div className="inline-flex shrink-0 rounded-lg bg-[var(--surface-2)] p-0.5">
-        {PALETTE_OPTIONS.map((opt) => (
+        {COLOR_PALETTE_OPTIONS.map((opt) => (
           <button
             key={opt.value}
             type="button"
