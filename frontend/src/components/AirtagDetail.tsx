@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, Report, Status } from '../api'
 import {
@@ -11,7 +11,7 @@ import {
 } from '../api'
 import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import { formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
+import { capitalize, formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import {
   AirtagGlyph,
@@ -36,6 +36,7 @@ interface Props {
   onDeleted: () => void | Promise<void>
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
+  stepPosition?: { current: number; total: number } | null
 }
 
 export function Section({ children }: { children: ReactNode }) {
@@ -48,16 +49,24 @@ export function Section({ children }: { children: ReactNode }) {
 // the sidebar header instead, since the mobile-only top title bar doesn't
 // exist in the desktop layout at all. Shared by AirtagDetail and
 // DeviceDetail per CLAUDE.md's AirTag/device parity constraint.
+//
+// stepPosition is always "steps back from the latest fix" (1 = latest),
+// counted the same way for both callers even though the underlying arrays
+// order oldest/newest oppositely (reports oldest-first, owner locations
+// newest-first, see CLAUDE.md) - App.tsx does that translation, this just
+// renders whatever count it's given.
 export function HistoryStepper({
   stepOlder,
   stepNewer,
+  stepPosition,
 }: {
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
+  stepPosition?: { current: number; total: number } | null
 }) {
   if (!stepOlder && !stepNewer) return null
   return (
-    <div className="hidden items-center gap-0.5 rounded-full bg-[var(--surface-2)] p-0.5 md:flex">
+    <div className="hidden items-center gap-1 rounded-full bg-[var(--surface-2)] p-0.5 md:flex">
       <button
         type="button"
         onClick={() => stepOlder?.()}
@@ -68,6 +77,11 @@ export function HistoryStepper({
       >
         <ChevronDownIcon className="h-4 w-4" />
       </button>
+      {stepPosition && (
+        <span className="min-w-[3.5rem] text-center text-[0.72rem] tabular-nums text-[var(--text-secondary)]">
+          {stepPosition.current} / {stepPosition.total}
+        </span>
+      )}
       <button
         type="button"
         onClick={() => stepNewer?.()}
@@ -155,11 +169,17 @@ export function AirtagDetail({
   onDeleted,
   stepOlder,
   stepNewer,
+  stepPosition,
 }: Props) {
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  // Open by default (not collapsed like the other sections) - history is
+  // the reason most detail-view visits happen at all, so it shouldn't cost
+  // an extra tap every time; each visit is a fresh mount (App.tsx swaps
+  // detail views rather than keeping them alive), so this can't "stay
+  // collapsed from last time" the way it might if state persisted.
+  const [historyOpen, setHistoryOpen] = useState(true)
 
   async function handleDelete() {
     if (
@@ -183,7 +203,7 @@ export function AirtagDetail({
           <ChevronLeftIcon className="h-5 w-5" />
           AirTags
         </button>
-        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} />
+        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} stepPosition={stepPosition} />
       </div>
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
@@ -530,6 +550,15 @@ function HistoryList({
   // Newest first - reports arrive oldest-first from the backend (chronological,
   // for trail drawing), so reverse purely for display here.
   const rows = [...reports].reverse()
+  // Keyed by report id so the row for whatever's currently selected can be
+  // scrolled into view below even when the selection changed via the map or
+  // the stepper, not just a click inside this list.
+  const rowRefs = useRef(new Map<number, HTMLButtonElement>())
+  useEffect(() => {
+    if (selectedReportId == null) return
+    rowRefs.current.get(selectedReportId)?.scrollIntoView({ block: 'nearest' })
+  }, [selectedReportId])
+
   if (rows.length === 0) {
     return (
       <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
@@ -538,17 +567,22 @@ function HistoryList({
     )
   }
   return (
-    <div className="max-h-64 overflow-y-auto border-t border-[var(--divider)]">
+    <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
       {rows.map((r, i) => (
         <button
           type="button"
           key={r.id}
+          ref={(el) => {
+            if (el) rowRefs.current.set(r.id, el)
+            else rowRefs.current.delete(r.id)
+          }}
           onClick={() => onSelectReport(r.id)}
+          title={new Date(r.timestamp).toLocaleString()}
           className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
             r.id === selectedReportId ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
           }`}
         >
-          <span>{new Date(r.timestamp).toLocaleString()}</span>
+          <span>{capitalize(formatRelative(r.timestamp))}</span>
           <span className="text-[var(--text-secondary)]">
             {r.lat.toFixed(4)}, {r.lon.toFixed(4)}
           </span>

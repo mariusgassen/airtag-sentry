@@ -235,6 +235,11 @@ export default function App() {
   // to pick their displayed position.
   let stepOlder: (() => void) | null = null
   let stepNewer: (() => void) | null = null
+  // "Steps back from the latest fix" (1 = latest), counted the same way
+  // regardless of which array direction the underlying data arrives in -
+  // HistoryStepper just renders whatever count it's given, see the comment
+  // there.
+  let stepPosition: { current: number; total: number } | null = null
   if (detail === 'airtag' && currentAirtag) {
     const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
     const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
@@ -242,6 +247,7 @@ export default function App() {
     const newer = displayedIndex < reports.length - 1 ? reports[displayedIndex + 1] : null
     if (older) stepOlder = () => setSelectedReportId(older.id)
     if (newer) stepNewer = () => setSelectedReportId(newer.id)
+    if (reports.length > 0) stepPosition = { current: reports.length - displayedIndex, total: reports.length }
   } else if (detail === 'device' && selectedDevice) {
     const locations = ownerLocationHistories[selectedDevice.id] ?? []
     const selectedIndex =
@@ -251,6 +257,7 @@ export default function App() {
     const newer = displayedIndex > 0 ? locations[displayedIndex - 1] : null
     if (older) stepOlder = () => setSelectedDeviceLocationKey(older.recorded_at)
     if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.recorded_at)
+    if (locations.length > 0) stepPosition = { current: displayedIndex + 1, total: locations.length }
   }
 
   function handleSelect(id: string) {
@@ -525,6 +532,7 @@ export default function App() {
                 onBack={() => setDetail(null)}
                 stepOlder={stepOlder}
                 stepNewer={stepNewer}
+                stepPosition={stepPosition}
                 onChanged={async () => {
                   await refreshAirtags()
                 }}
@@ -543,6 +551,7 @@ export default function App() {
                 onBack={() => setDetail(null)}
                 stepOlder={stepOlder}
                 stepNewer={stepNewer}
+                stepPosition={stepPosition}
                 onChanged={refreshOwnerDevices}
               />
             ) : (

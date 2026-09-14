@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
 import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
+import { capitalize, deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
 import { HistoryStepper, Row, Section } from './AirtagDetail'
 import {
@@ -28,6 +28,7 @@ interface Props {
   onChanged: () => void | Promise<void>
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
+  stepPosition?: { current: number; total: number } | null
 }
 
 /** Device counterpart to AirtagDetail. Tracking/primary status are still
@@ -45,10 +46,12 @@ export function DeviceDetail({
   onChanged,
   stepOlder,
   stepNewer,
+  stepPosition,
 }: Props) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
-  const [historyOpen, setHistoryOpen] = useState(false)
+  // Open by default - see AirtagDetail.tsx's identical comment.
+  const [historyOpen, setHistoryOpen] = useState(true)
   const [soundState, setSoundState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [soundError, setSoundError] = useState<string | null>(null)
 
@@ -75,7 +78,7 @@ export function DeviceDetail({
           <ChevronLeftIcon className="h-5 w-5" />
           Objekte
         </button>
-        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} />
+        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} stepPosition={stepPosition} />
       </div>
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
@@ -328,21 +331,48 @@ function DeviceHistoryList({
       </div>
     )
   }
+  return <DeviceHistoryRows history={history} selectedLocationKey={selectedLocationKey} onSelectLocation={onSelectLocation} />
+}
+
+function DeviceHistoryRows({
+  history,
+  selectedLocationKey,
+  onSelectLocation,
+}: {
+  history: OwnerLocation[]
+  selectedLocationKey: string | null
+  onSelectLocation: (recordedAt: string) => void
+}) {
+  // Keyed by recorded_at (owner locations have no id) so the row for
+  // whatever's currently selected can be scrolled into view below even when
+  // the selection changed via the map or the stepper, not just a click
+  // inside this list - see AirtagDetail.tsx's HistoryList, identical idea.
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>())
+  useEffect(() => {
+    if (selectedLocationKey == null) return
+    rowRefs.current.get(selectedLocationKey)?.scrollIntoView({ block: 'nearest' })
+  }, [selectedLocationKey])
+
   // /api/owner-devices/history is already newest-first (unlike AirTag
   // reports, which arrive oldest-first and get reversed for display in
   // AirtagDetail's HistoryList) - no reversal needed here.
   return (
-    <div className="max-h-64 overflow-y-auto border-t border-[var(--divider)]">
+    <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
       {history.map((loc, i) => (
         <button
           type="button"
           key={loc.recorded_at}
+          ref={(el) => {
+            if (el) rowRefs.current.set(loc.recorded_at, el)
+            else rowRefs.current.delete(loc.recorded_at)
+          }}
           onClick={() => onSelectLocation(loc.recorded_at)}
+          title={new Date(loc.recorded_at).toLocaleString()}
           className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
             loc.recorded_at === selectedLocationKey ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
           }`}
         >
-          <span>{new Date(loc.recorded_at).toLocaleString()}</span>
+          <span>{capitalize(formatRelative(loc.recorded_at))}</span>
           <span className="text-[var(--text-secondary)]">
             {loc.lat.toFixed(4)}, {loc.lon.toFixed(4)}
           </span>

@@ -6,6 +6,7 @@ import { CircleMarker, MapContainer, TileLayer, Polyline, Marker, Popup, useMap,
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatRelative } from '../format'
+import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { OWNER_TRAIL_COLOR, PIN_POPUP_OFFSET, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
@@ -361,6 +362,11 @@ export function MapCard({
     () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
     [displayed?.lat, displayed?.lon],
   )
+  // The pin's own animated glide toward displayedPosition (see
+  // useAnimatedLatLng) - PanToSelection below still targets the raw,
+  // un-animated displayedPosition directly, so the camera's own (already
+  // animated) pan isn't fighting a second, independent easing on top of it.
+  const animatedPosition = useAnimatedLatLng(displayedPosition)
 
   if (positions.length === 0 || !displayed) {
     return <NoReportsView onMapClick={onMapClick} />
@@ -397,7 +403,7 @@ export function MapCard({
           />
         )
       })}
-      <SelectedPin position={displayedPosition} icon={airtagPinIcon(airtag)}>
+      <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)}>
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">
             {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}

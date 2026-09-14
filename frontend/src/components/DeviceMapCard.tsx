@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { MapContainer, TileLayer, Polyline } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { deviceLabel } from '../format'
+import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { airtagPinIcon, deviceColor } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import {
@@ -70,6 +71,10 @@ export function DeviceMapCard({
     () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
     [displayed?.lat, displayed?.lon],
   )
+  // See MapCard.tsx's identical comment on its own animatedPosition/
+  // useAnimatedLatLng - PanToSelection below still targets the raw
+  // displayedPosition.
+  const animatedPosition = useAnimatedLatLng(displayedPosition)
 
   if (positions.length === 0 || !displayed) {
     return <NoReportsView onMapClick={onMapClick} />
@@ -97,7 +102,7 @@ export function DeviceMapCard({
       />
       {/* Marker + popup mirrors MapCard.tsx's SelectedPin exactly, see the
           comment there for why it isn't a plain bound Marker/Popup pair. */}
-      <SelectedPin position={displayedPosition} icon={airtagPinIcon(device)}>
+      <SelectedPin position={animatedPosition} icon={airtagPinIcon(device)}>
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
