@@ -5,7 +5,7 @@ import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
-import { Row, Section } from './AirtagDetail'
+import { HistoryStepper, Row, Section } from './AirtagDetail'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -26,6 +26,8 @@ interface Props {
   onSelectLocation: (recordedAt: string) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
+  stepOlder?: (() => void) | null
+  stepNewer?: (() => void) | null
 }
 
 /** Device counterpart to AirtagDetail. Tracking/primary status are still
@@ -41,6 +43,8 @@ export function DeviceDetail({
   onSelectLocation,
   onBack,
   onChanged,
+  stepOlder,
+  stepNewer,
 }: Props) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
@@ -62,14 +66,17 @@ export function DeviceDetail({
 
   return (
     <div className="flex h-full flex-col">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex shrink-0 items-center gap-0.5 px-3 pb-1 pt-[0.6rem] text-[0.95rem] text-[var(--accent)]"
-      >
-        <ChevronLeftIcon className="h-5 w-5" />
-        Objekte
-      </button>
+      <div className="flex shrink-0 items-center justify-between px-3 pb-1 pt-[0.6rem]">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-0.5 text-[0.95rem] text-[var(--accent)]"
+        >
+          <ChevronLeftIcon className="h-5 w-5" />
+          Objekte
+        </button>
+        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} />
+      </div>
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         <div className="mb-6 flex flex-col items-center px-4 text-center">

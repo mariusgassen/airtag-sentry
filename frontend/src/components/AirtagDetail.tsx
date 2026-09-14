@@ -13,7 +13,17 @@ import { airtagColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { AirtagGlyph, ChevronLeftIcon, ChevronRightIcon, KeyIcon, PaletteIcon, PencilIcon, TrashIcon } from './icons'
+import {
+  AirtagGlyph,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  KeyIcon,
+  PaletteIcon,
+  PencilIcon,
+  TrashIcon,
+} from './icons'
 
 interface Props {
   airtag: Airtag
@@ -24,10 +34,52 @@ interface Props {
   onBack: () => void
   onChanged: () => void | Promise<void>
   onDeleted: () => void | Promise<void>
+  stepOlder?: (() => void) | null
+  stepNewer?: (() => void) | null
 }
 
 export function Section({ children }: { children: ReactNode }) {
   return <div className="mb-6 overflow-hidden rounded-2xl bg-[var(--surface)]">{children}</div>
+}
+
+// Desktop counterpart to App.tsx's mobile title-bar stepper (that one's
+// md:hidden - this is its mirror, hidden on mobile since the title bar
+// already covers it there). Same older/newer callbacks, just rendered in
+// the sidebar header instead, since the mobile-only top title bar doesn't
+// exist in the desktop layout at all. Shared by AirtagDetail and
+// DeviceDetail per CLAUDE.md's AirTag/device parity constraint.
+export function HistoryStepper({
+  stepOlder,
+  stepNewer,
+}: {
+  stepOlder?: (() => void) | null
+  stepNewer?: (() => void) | null
+}) {
+  if (!stepOlder && !stepNewer) return null
+  return (
+    <div className="hidden items-center gap-0.5 rounded-full bg-[var(--surface-2)] p-0.5 md:flex">
+      <button
+        type="button"
+        onClick={() => stepOlder?.()}
+        disabled={!stepOlder}
+        aria-label="Älterer Standort"
+        title="Älterer Standort"
+        className="rounded-full px-2.5 py-1 text-[var(--text)] disabled:opacity-30"
+      >
+        <ChevronDownIcon className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => stepNewer?.()}
+        disabled={!stepNewer}
+        aria-label="Neuerer Standort"
+        title="Neuerer Standort"
+        className="rounded-full px-2.5 py-1 text-[var(--text)] disabled:opacity-30"
+      >
+        <ChevronUpIcon className="h-4 w-4" />
+      </button>
+    </div>
+  )
 }
 
 export function Switch({
@@ -101,6 +153,8 @@ export function AirtagDetail({
   onBack,
   onChanged,
   onDeleted,
+  stepOlder,
+  stepNewer,
 }: Props) {
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
@@ -120,14 +174,17 @@ export function AirtagDetail({
 
   return (
     <div className="flex h-full flex-col">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex shrink-0 items-center gap-0.5 px-3 pb-1 pt-[0.6rem] text-[0.95rem] text-[var(--accent)]"
-      >
-        <ChevronLeftIcon className="h-5 w-5" />
-        AirTags
-      </button>
+      <div className="flex shrink-0 items-center justify-between px-3 pb-1 pt-[0.6rem]">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-0.5 text-[0.95rem] text-[var(--accent)]"
+        >
+          <ChevronLeftIcon className="h-5 w-5" />
+          AirTags
+        </button>
+        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} />
+      </div>
 
       <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         <div className="mb-6 flex flex-col items-center px-4 text-center">

@@ -226,12 +226,13 @@ export default function App() {
     document.title = title
   }, [title])
 
-  // Older/newer navigation for the mobile title bar's stepper (moved there
-  // from the map popup - see tasks/todo.md). AirTag reports arrive
-  // oldest-first, owner-device locations newest-first (see CLAUDE.md), so
-  // "older"/"newer" step in opposite index directions for each; mirrored
-  // from the same logic MapCard.tsx/DeviceMapCard.tsx use to pick their
-  // displayed position.
+  // Older/newer navigation, shared by the mobile title bar's stepper below
+  // and the desktop sidebar's HistoryStepper (AirtagDetail.tsx/
+  // DeviceDetail.tsx) - moved here from the map popup, see tasks/todo.md.
+  // AirTag reports arrive oldest-first, owner-device locations newest-first
+  // (see CLAUDE.md), so "older"/"newer" step in opposite index directions
+  // for each; mirrored from the same logic MapCard.tsx/DeviceMapCard.tsx use
+  // to pick their displayed position.
   let stepOlder: (() => void) | null = null
   let stepNewer: (() => void) | null = null
   if (detail === 'airtag' && currentAirtag) {
@@ -506,7 +507,7 @@ export default function App() {
               without this a sliver of whatever's underneath - most visibly
               the detail views' "< AirTags"/"< Objekte" back button - peeked
               out below the handle instead of the map being fully clear. */}
-          <div className={`min-h-0 flex-1 ${sheetState === 'minimized' ? 'invisible' : ''}`}>
+          <div className={`min-h-0 flex-1 ${sheetState === 'minimized' ? 'max-md:invisible' : ''}`}>
             {activeTab === 'settings' ? (
               <SettingsPanel
                 pushStatus={push.status}
@@ -522,6 +523,8 @@ export default function App() {
                 selectedReportId={selectedReportId}
                 onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
+                stepOlder={stepOlder}
+                stepNewer={stepNewer}
                 onChanged={async () => {
                   await refreshAirtags()
                 }}
@@ -538,6 +541,8 @@ export default function App() {
                 selectedLocationKey={selectedDeviceLocationKey}
                 onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}
+                stepOlder={stepOlder}
+                stepNewer={stepNewer}
                 onChanged={refreshOwnerDevices}
               />
             ) : (
