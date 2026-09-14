@@ -1,4 +1,4 @@
-import { airtagColor } from '../airtagColor'
+import { airtagColor, glyphColor } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS } from '../deviceIconRegistry'
 import type { DeviceIconName } from '../deviceIcons'
 import { AirtagGlyph } from './icons'
@@ -27,8 +27,8 @@ export function AirtagAvatar({ airtag, size, className }: Props) {
   const Glyph = (airtag.icon && DEVICE_ICON_COMPONENTS[airtag.icon as DeviceIconName]) || AirtagGlyph
   return (
     <span
-      className={`flex shrink-0 items-center justify-center rounded-full text-white ${badge} ${className ?? ''}`}
-      style={{ backgroundColor: color }}
+      className={`flex shrink-0 items-center justify-center rounded-full ${badge} ${className ?? ''}`}
+      style={{ backgroundColor: color, color: glyphColor() }}
     >
       <Glyph className={icon} />
     </span>

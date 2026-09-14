@@ -23,6 +23,12 @@ export type DeviceIconName =
   | 'box'
   | 'iphone'
   | 'airpods'
+  | 'airpods-left'
+  | 'airpods-right'
+  | 'airpods-case'
+  | 'watch'
+  | 'mac'
+  | 'imac'
 
 export function BikeIcon({ className }: IconProps) {
   return (
@@ -88,10 +94,16 @@ export function SuitcaseIcon({ className }: IconProps) {
 }
 
 export function LaptopIcon({ className }: IconProps) {
+  // A camera notch straddling the screen's top edge is what reads as
+  // "MacBook" rather than a generic laptop.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="4" y="5" width="16" height="10" rx="1.5" stroke="currentColor" strokeWidth={1.8} />
-      <path d="M2.5 19h19l-1.5-3H4L2.5 19Z" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" />
+      <rect x="4.5" y="5" width="15" height="9.5" rx="1.3" stroke="currentColor" strokeWidth={1.8} />
+      <rect x="10.2" y="4.2" width="3.6" height="2" rx="1" fill="currentColor" />
+      <path
+        d="M1.8 19.4h20.4l-2-3.6a1 1 0 0 0-.9-.5H4.7a1 1 0 0 0-.9.5L1.8 19.4Z"
+        fill="currentColor"
+      />
     </svg>
   )
 }
@@ -123,9 +135,9 @@ export function PetIcon({ className }: IconProps) {
 export function HeadphonesIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <path d="M4 14v-2a8 8 0 0 1 16 0v2" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
-      <rect x="3" y="13" width="4" height="7" rx="1.5" stroke="currentColor" strokeWidth={1.8} />
-      <rect x="17" y="13" width="4" height="7" rx="1.5" stroke="currentColor" strokeWidth={1.8} />
+      <path d="M4 14v-2.5a8 8 0 0 1 16 0V14" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" />
+      <rect x="2.7" y="12.5" width="4.6" height="7.5" rx="2.1" fill="currentColor" />
+      <rect x="16.7" y="12.5" width="4.6" height="7.5" rx="2.1" fill="currentColor" />
     </svg>
   )
 }
@@ -155,22 +167,117 @@ export function BoxIcon({ className }: IconProps) {
 }
 
 export function IphoneIcon({ className }: IconProps) {
+  // A bigger, clearly-shaped Dynamic Island pill (not a thin line) is what
+  // reads as "iPhone" rather than a generic rounded rectangle.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="6.5" y="2.5" width="11" height="19" rx="2.3" stroke="currentColor" strokeWidth={1.8} />
-      <path d="M10.5 5h3" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
-      <circle cx="12" cy="18.2" r="0.9" fill="currentColor" />
+      <rect x="6.5" y="2.2" width="11" height="19.6" rx="3.2" stroke="currentColor" strokeWidth={2.1} />
+      <rect x="9.7" y="4.3" width="4.6" height="1.6" rx="0.8" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function WatchIcon({ className }: IconProps) {
+  // Crown just above the case's vertical center (not dead-centered, not up
+  // by the lug) and narrow.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="7.5" y="7" width="9" height="12" rx="3" fill="currentColor" />
+      <rect x="9" y="3" width="6" height="3" rx="1.2" fill="currentColor" />
+      <rect x="9" y="18" width="6" height="3" rx="1.2" fill="currentColor" />
+      <rect x="16.3" y="11" width="1.6" height="3" rx="0.7" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function MacIcon({ className }: IconProps) {
+  // A low, wide box - Mac Studio/mini/Pro, which have no built-in display
+  // and are flatter than tall. See ImacIcon below for the monitor shape.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="4" y="7" width="16" height="10" rx="2.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function ImacIcon({ className }: IconProps) {
+  // Monitor-on-a-stand - iMac, or any Mac with a built-in display.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="3.5" y="4" width="17" height="12" rx="1.8" fill="currentColor" />
+      <path d="M12 16v3.4M8.3 20.4h7.4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/** One AirPod bud - a round head with a short, straight (vertical, not
+ * tilted) stem, drawn as a round-capped line (stem) with the head circle
+ * painted on top so the stem's start-cap is hidden underneath it (no
+ * visible seam). Shared by AirpodsRightIcon/AirpodsLeftIcon/AirpodsIcon
+ * below so the three stay geometrically consistent. */
+function AirpodBud({ headCx, headCy, headR, stemY2, stemW }: {
+  headCx: number
+  headCy: number
+  headR: number
+  stemY2: number
+  stemW: number
+}) {
+  const y1 = headCy + headR * 0.75
+  return (
+    <>
+      <line x1={headCx} y1={y1} x2={headCx} y2={stemY2} stroke="currentColor" strokeWidth={stemW} strokeLinecap="round" />
+      <circle cx={headCx} cy={headCy} r={headR} fill="currentColor" />
+    </>
+  )
+}
+
+// A straight stem has no left/right handedness to mirror, so the shape is
+// identical - AirpodsLeftIcon/AirpodsRightIcon instead position the same
+// bud off-center, left vs. right, so the two are visibly different (not
+// pixel-identical) rather than relying only on the picker's text label.
+export function AirpodsRightIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <AirpodBud headCx={15} headCy={7} headR={3.6} stemY2={16} stemW={3} />
+    </svg>
+  )
+}
+
+export function AirpodsLeftIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <AirpodBud headCx={9} headCy={7} headR={3.6} stemY2={16} stemW={3} />
     </svg>
   )
 }
 
 export function AirpodsIcon({ className }: IconProps) {
+  // The pair: two identical copies of the same bud shape, spread further
+  // apart (translate ±6, not ±5) so they read as two distinct pods rather
+  // than merging into one shape at badge size, and both straight/vertical
+  // so the stems are trivially parallel.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
-      <rect x="6.3" y="4.5" width="4.2" height="6.4" rx="2.1" stroke="currentColor" strokeWidth={1.7} />
-      <path d="M8.4 10.7 6 18.5" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" />
-      <rect x="13.5" y="4.5" width="4.2" height="6.4" rx="2.1" stroke="currentColor" strokeWidth={1.7} />
-      <path d="M15.6 10.7 18 18.5" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" />
+      <g transform="translate(-6 0)">
+        <AirpodBud headCx={12} headCy={7.5} headR={3.2} stemY2={15.5} stemW={2.7} />
+      </g>
+      <g transform="translate(6 0)">
+        <AirpodBud headCx={12} headCy={7.5} headR={3.2} stemY2={15.5} stemW={2.7} />
+      </g>
+    </svg>
+  )
+}
+
+export function AirpodsCaseIcon({ className }: IconProps) {
+  // Stroke-outline "container" style, matching wallet/suitcase/backpack
+  // above rather than the buds' solid fill. Broader than tall (matches the
+  // real case's proportions - it opens along its long top edge), with the
+  // LED below the seam rather than on it.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="4" y="6.5" width="16" height="11" rx="3.2" stroke="currentColor" strokeWidth={1.8} />
+      <path d="M4 10h16" stroke="currentColor" strokeWidth={1.5} />
+      <circle cx="12" cy="14" r="0.7" fill="currentColor" />
     </svg>
   )
 }

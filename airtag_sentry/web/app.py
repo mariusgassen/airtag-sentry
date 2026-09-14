@@ -93,8 +93,15 @@ AIRTAG_ICON_CHOICES = {
     "box",
     "iphone",
     "airpods",
+    "airpods-left",
+    "airpods-right",
+    "airpods-case",
+    "watch",
+    "mac",
+    "imac",
 }
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+_COLOR_PALETTE_CHOICES = {"vivid", "pastel", "pastel_white"}
 
 
 class _CacheControlledStaticFiles(StaticFiles):
@@ -243,6 +250,7 @@ class SettingsIn(BaseModel):
     movement_away_distance_meters: float = Field(gt=0)
     owner_location_max_age_minutes: float = Field(gt=0)
     history_cluster_radius_meters: float = Field(gt=0)
+    color_palette: str
 
 
 class AppleLoginIn(BaseModel):
@@ -718,6 +726,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.put("/api/settings")
     def update_settings_route(body: SettingsIn):
+        if body.color_palette not in _COLOR_PALETTE_CHOICES:
+            raise HTTPException(status_code=400, detail=f"Invalid color_palette: {body.color_palette!r}")
         with get_conn(cfg.database_url) as conn:
             settings = update_settings(conn, AppSettings(**body.model_dump()))
         return dataclasses.asdict(settings)

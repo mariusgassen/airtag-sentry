@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { AppSettings, Airtag, OwnerDevice, OwnerLocation, Report, Status } from './api'
+import { setColorPalette } from './airtagColor'
 import {
   createAirtag,
   getAirtags,
@@ -80,6 +81,12 @@ export default function App() {
   // history_cluster_radius_meters change reaches the map/list without a
   // manual reload, same as any other background refresh (see AUTO_REFRESH_MS).
   const [settings, setSettings] = useState<AppSettings | null>(null)
+  // Applied synchronously during render (not a useEffect) so every badge/pin
+  // below - all read the live PALETTE export, see airtagColor.ts - already
+  // sees the current palette by the time they render, without threading a
+  // `palette` prop through the whole tree just to reach a handful of leaf
+  // color lookups.
+  if (settings) setColorPalette(settings.color_palette)
   // Every *enabled* (tracked) owner device - see ObjectsList.tsx, which is
   // the first place a tracked device becomes visible outside Settings.
   const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
