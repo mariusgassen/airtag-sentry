@@ -13,6 +13,7 @@ import {
   CameraIcon,
   CarIcon,
   HeadphonesIcon,
+  ImacIcon,
   IphoneIcon,
   LaptopIcon,
   MacIcon,
@@ -42,6 +43,7 @@ export const DEVICE_ICON_NAMES: DeviceIconName[] = [
   'airpods-case',
   'watch',
   'mac',
+  'imac',
 ]
 
 export const DEVICE_ICON_COMPONENTS: Record<DeviceIconName, ComponentType<{ className?: string }>> = {
@@ -64,6 +66,7 @@ export const DEVICE_ICON_COMPONENTS: Record<DeviceIconName, ComponentType<{ clas
   'airpods-case': AirpodsCaseIcon,
   watch: WatchIcon,
   mac: MacIcon,
+  imac: ImacIcon,
 }
 
 export const DEVICE_ICON_LABELS: Record<DeviceIconName, string> = {
@@ -85,16 +88,18 @@ export const DEVICE_ICON_LABELS: Record<DeviceIconName, string> = {
   'airpods-right': 'AirPod rechts',
   'airpods-case': 'AirPods-Hülle',
   watch: 'Apple Watch',
-  mac: 'Mac',
+  mac: 'Mac (kompakt)',
+  imac: 'iMac',
 }
 
 /** Default icon for an owner device that has no manually-picked one, derived
  * from pyicloud's `device_type` (currently "iPhone" / "iPad" / "Mac" /
  * "Watch" - see owner_tracking.py). "Mac" alone doesn't say laptop vs.
- * desktop, so a MacBook is told apart by name; every other Mac (Mac Studio,
- * iMac, Mac mini, Mac Pro, ...) gets the desktop glyph. Returns null for a
- * type with no good match (e.g. iPad) so callers fall back to the existing
- * generic-person look instead of a wrong-looking guess. */
+ * desktop vs. all-in-one, so it's told apart by name: MacBook -> laptop,
+ * iMac -> imac (monitor-shaped), everything else (Mac Studio, mini, Pro -
+ * no built-in display) -> mac (box-shaped). Returns null for a type with no
+ * good match (e.g. iPad) so callers fall back to the existing generic-person
+ * look instead of a wrong-looking guess. */
 export function defaultDeviceIcon(deviceType: string, name: string): DeviceIconName | null {
   switch (deviceType) {
     case 'iPhone':
@@ -102,7 +107,9 @@ export function defaultDeviceIcon(deviceType: string, name: string): DeviceIconN
     case 'Watch':
       return 'watch'
     case 'Mac':
-      return /macbook/i.test(name) ? 'laptop' : 'mac'
+      if (/macbook/i.test(name)) return 'laptop'
+      if (/imac/i.test(name)) return 'imac'
+      return 'mac'
     default:
       return null
   }

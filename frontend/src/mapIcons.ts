@@ -107,6 +107,10 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
   mac: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
     <rect x="5" y="5" width="14" height="14" rx="3.2" fill="currentColor"/>
   </svg>`,
+  imac: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+    <rect x="3.5" y="4" width="17" height="12" rx="1.8" fill="currentColor"/>
+    <path d="M12 16v3.4M8.3 20.4h7.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>`,
   airpods: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_PAIR_INNER}</svg>`,
   'airpods-right': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_RIGHT_INNER}</svg>`,
   'airpods-left': `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">${AIRPODS_LEFT_INNER}</svg>`,

@@ -28,6 +28,7 @@ export type DeviceIconName =
   | 'airpods-case'
   | 'watch'
   | 'mac'
+  | 'imac'
 
 export function BikeIcon({ className }: IconProps) {
   return (
@@ -189,12 +190,21 @@ export function WatchIcon({ className }: IconProps) {
 }
 
 export function MacIcon({ className }: IconProps) {
-  // A compact box rather than a monitor-on-a-stand: Mac Studio/mini/Pro have
-  // no built-in display, so a screen shape would misrepresent them - this
-  // works as a generic "Mac desktop" glyph for any of the three.
+  // A compact box - Mac Studio/mini/Pro, which have no built-in display.
+  // See ImacIcon below for the monitor-shaped alternative.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <rect x="5" y="5" width="14" height="14" rx="3.2" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function ImacIcon({ className }: IconProps) {
+  // Monitor-on-a-stand - iMac, or any Mac with a built-in display.
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="3.5" y="4" width="17" height="12" rx="1.8" fill="currentColor" />
+      <path d="M12 16v3.4M8.3 20.4h7.4" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
     </svg>
   )
 }
