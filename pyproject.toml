@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Self-hosted location history and movement alerts for a single AirTag."
 requires-python = ">=3.11"
 dependencies = [
-    "findmy>=0.9.6",
+    # >=0.10.2: fixes a critical GSA (re)authentication issue caused by
+    # changes on Apple's side (client was misidentifying itself, triggering
+    # 503s from Apple) - affects every AirTag/owner-device login.
+    "findmy>=0.10.2",
     "psycopg[binary]>=3.1",
     "apscheduler>=3.10",
     "fastapi>=0.115",
