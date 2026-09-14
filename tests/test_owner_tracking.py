@@ -19,7 +19,7 @@ def test_build_api_wraps_failed_login_with_app_specific_password_hint(monkeypatc
     from pyicloud.exceptions import PyiCloudFailedLoginException
 
     class _FailingPyiCloudService:
-        def __init__(self, apple_id, password, cookie_directory=None, with_family=False):
+        def __init__(self, apple_id, password, cookie_directory=None, with_family=False, accept_terms=False):
             raise PyiCloudFailedLoginException("Invalid email/password combination.")
 
     monkeypatch.setattr("pyicloud.PyiCloudService", _FailingPyiCloudService)
