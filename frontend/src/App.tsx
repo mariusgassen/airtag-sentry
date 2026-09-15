@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import type { AppSettings, Airtag, OwnerDevice, OwnerLocation, Report, Status } from './api'
+import type {
+  AppSettings,
+  Airtag,
+  LocationHistory,
+  LocationStay,
+  OwnerDevice,
+  OwnerLocation,
+  Place,
+  Report,
+  ReportStay,
+  Status,
+} from './api'
 import { setColorPalette } from './airtagColor'
 import {
   createAirtag,
@@ -9,13 +20,13 @@ import {
   getOwnerDeviceHistory,
   getOwnerDeviceLocations,
   getOwnerDevices,
+  getPlaces,
   getReports,
   getSettings,
   getStatus,
   ping,
   pollNow,
 } from './api'
-import { clusterByProximity } from './clustering'
 import { deviceLabel } from './format'
 import { ObjectsList } from './components/ObjectsList'
 import { AirtagDetail } from './components/AirtagDetail'
@@ -71,12 +82,15 @@ export default function App() {
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
+  const [reportStays, setReportStays] = useState<ReportStay[]>([])
   // Current position of every *enabled* owner device (Settings -> Eigene
   // Geräte) - shown as markers on the map, each with its own trail below.
   // The *primary* one among them additionally drives away-correlation
   // display (the "Du" row / evaluate_away on the backend).
   const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
   const [ownerLocationHistories, setOwnerLocationHistories] = useState<Record<string, OwnerLocation[]>>({})
+  // Keyed by device_id, mirroring ownerLocationHistories.
+  const [ownerLocationStays, setOwnerLocationStays] = useState<Record<string, LocationStay[]>>({})
   const [ownerConnected, setOwnerConnected] = useState(false)
   // True once a background refresh (see AUTO_REFRESH_MS's effect below) has
   // failed to reach the server at all - drives the offline banner. Distinct
@@ -86,9 +100,8 @@ export default function App() {
   // instead of hanging forever.
   const [offline, setOffline] = useState(false)
   const [manualRefreshing, setManualRefreshing] = useState(false)
-  // Drives history-list/map clustering (see clustering.ts) - fetched here
-  // rather than only inside SettingsPanel so a saved
-  // history_cluster_radius_meters change reaches the map/list without a
+  // Only used to read back color_palette - fetched here (not just inside
+  // SettingsPanel) so a saved palette change applies app-wide without a
   // manual reload, same as any other background refresh (see AUTO_REFRESH_MS).
   const [settings, setSettings] = useState<AppSettings | null>(null)
   // Applied synchronously during render (not a useEffect) so every badge/pin
@@ -97,6 +110,10 @@ export default function App() {
   // `palette` prop through the whole tree just to reach a handful of leaf
   // color lookups.
   if (settings) setColorPalette(settings.color_palette)
+  // Named geofences (Settings -> Orte) - fetched here (not just inside
+  // wherever they're managed) since they label stays on the map/history list
+  // app-wide, same reasoning as ownerLocations above.
+  const [places, setPlaces] = useState<Place[]>([])
   // Every *enabled* (tracked) owner device - see ObjectsList.tsx, which is
   // the first place a tracked device becomes visible outside Settings.
   const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
@@ -185,16 +202,18 @@ export default function App() {
     setOwnerDevices(enabled)
     if (enabled.length === 0) {
       setOwnerLocationHistories({})
+      setOwnerLocationStays({})
       return
     }
     const entries = await Promise.all(
       enabled.map((d) =>
         getOwnerDeviceHistory(d.id)
-          .then((rows) => [d.id, rows] as const)
-          .catch(() => [d.id, []] as const),
+          .then((h) => [d.id, h] as [string, LocationHistory])
+          .catch(() => [d.id, { raw: [], stays: [] }] as [string, LocationHistory]),
       ),
     )
-    setOwnerLocationHistories(Object.fromEntries(entries))
+    setOwnerLocationHistories(Object.fromEntries(entries.map(([id, h]) => [id, h.raw])))
+    setOwnerLocationStays(Object.fromEntries(entries.map(([id, h]) => [id, h.stays])))
   }, [])
 
   useEffect(() => {
@@ -214,10 +233,14 @@ export default function App() {
     const id = currentId
     if (!id) {
       setReports([])
+      setReportStays([])
       return
     }
-    const r = await getReports(id)
-    if (currentIdRef.current === id) setReports(r)
+    const { raw, stays } = await getReports(id)
+    if (currentIdRef.current === id) {
+      setReports(raw)
+      setReportStays(stays)
+    }
   }, [currentId])
 
   useEffect(() => {
@@ -225,10 +248,20 @@ export default function App() {
     refreshReports()
   }, [currentId, refreshReports])
 
+  const refreshPlaces = useCallback(async () => {
+    await getPlaces()
+      .then(setPlaces)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshPlaces()
+  }, [refreshPlaces])
+
   // Re-fetches every endpoint the app depends on, and reports back whether
   // the server was actually reachable - refreshAirtags/refreshReports below
   // let a network failure propagate (no internal .catch), while the other
-  // three swallow theirs (they've always tolerated e.g. owner tracking not
+  // four swallow theirs (they've always tolerated e.g. owner tracking not
   // being connected), so Promise.allSettled is what turns "at least one of
   // these truly failed to reach the server" into a single signal.
   const fullRefresh = useCallback(async () => {
@@ -238,11 +271,12 @@ export default function App() {
       refreshOwnerDevices(),
       refreshReports(),
       refreshSettings(),
+      refreshPlaces(),
     ])
     const reachable = results.every((r) => r.status === 'fulfilled')
     setOffline(!reachable)
     return reachable
-  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports, refreshSettings])
+  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports, refreshSettings, refreshPlaces])
 
   // Background auto-refresh: re-fetch everything periodically, plus
   // immediately whenever the tab/app regains visibility (switching back
@@ -304,20 +338,15 @@ export default function App() {
     document.title = title
   }, [title])
 
-  // Radius for collapsing consecutive same-spot reports/locations into one
-  // "stay" (see clustering.ts) - 50m mirrors AppSettings' DB default, used
-  // only for the brief window before the first getSettings() resolves.
-  const clusterRadiusMeters = settings?.history_cluster_radius_meters ?? 50
-
   // Older/newer navigation, shared by the mobile title bar's stepper below
   // and the desktop sidebar's HistoryStepper (AirtagDetail.tsx/
   // DeviceDetail.tsx) - moved here from the map popup, see tasks/todo.md.
-  // Steps cluster-to-cluster (a whole "stay" at a time), matching the
-  // collapsed granularity of the history list/map - see clustering.ts.
-  // AirTag reports arrive oldest-first, owner-device locations newest-first
-  // (see CLAUDE.md), so "older"/"newer" step in opposite index directions
-  // for each; mirrored from the same logic MapCard.tsx/DeviceMapCard.tsx use
-  // to pick their displayed position.
+  // Steps stay-to-stay - reportStays/ownerLocationStays are already computed
+  // server-side (see stays.py), so this is a plain array walk, no clustering
+  // here anymore. AirTag stays arrive oldest-first, owner-device stays
+  // newest-first (see CLAUDE.md), so "older"/"newer" step in opposite index
+  // directions for each; mirrored from the same logic MapCard.tsx/
+  // DeviceMapCard.tsx use to pick their displayed stay.
   let stepOlder: (() => void) | null = null
   let stepNewer: (() => void) | null = null
   // "Steps back from the latest stay" (1 = latest), counted the same way
@@ -326,28 +355,28 @@ export default function App() {
   // there.
   let stepPosition: { current: number; total: number } | null = null
   if (detail === 'airtag' && currentAirtag) {
-    const clusters = clusterByProximity(reports, (r) => [r.lat, r.lon], clusterRadiusMeters)
     const selectedIndex =
-      selectedReportId != null ? clusters.findIndex((c) => c.points.some((p) => p.id === selectedReportId)) : -1
-    const displayedIndex = selectedIndex >= 0 ? selectedIndex : clusters.length - 1
-    const older = displayedIndex > 0 ? clusters[displayedIndex - 1] : null
-    const newer = displayedIndex < clusters.length - 1 ? clusters[displayedIndex + 1] : null
-    if (older) stepOlder = () => setSelectedReportId(older.anchor.id)
-    if (newer) stepNewer = () => setSelectedReportId(newer.anchor.id)
-    if (clusters.length > 0) stepPosition = { current: clusters.length - displayedIndex, total: clusters.length }
+      selectedReportId != null ? reportStays.findIndex((s) => s.anchor_id === selectedReportId) : -1
+    const displayedIndex = selectedIndex >= 0 ? selectedIndex : reportStays.length - 1
+    const older = displayedIndex > 0 ? reportStays[displayedIndex - 1] : null
+    const newer = displayedIndex < reportStays.length - 1 ? reportStays[displayedIndex + 1] : null
+    if (older) stepOlder = () => setSelectedReportId(older.anchor_id)
+    if (newer) stepNewer = () => setSelectedReportId(newer.anchor_id)
+    if (reportStays.length > 0) {
+      stepPosition = { current: reportStays.length - displayedIndex, total: reportStays.length }
+    }
   } else if (detail === 'device' && selectedDevice) {
-    const locations = ownerLocationHistories[selectedDevice.id] ?? []
-    const clusters = clusterByProximity(locations, (l) => [l.lat, l.lon], clusterRadiusMeters)
+    const stays = ownerLocationStays[selectedDevice.id] ?? []
     const selectedIndex =
       selectedDeviceLocationKey != null
-        ? clusters.findIndex((c) => c.points.some((p) => p.recorded_at === selectedDeviceLocationKey))
+        ? stays.findIndex((s) => s.anchor_recorded_at === selectedDeviceLocationKey)
         : -1
     const displayedIndex = selectedIndex >= 0 ? selectedIndex : 0
-    const older = displayedIndex < clusters.length - 1 ? clusters[displayedIndex + 1] : null
-    const newer = displayedIndex > 0 ? clusters[displayedIndex - 1] : null
-    if (older) stepOlder = () => setSelectedDeviceLocationKey(older.anchor.recorded_at)
-    if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.anchor.recorded_at)
-    if (clusters.length > 0) stepPosition = { current: displayedIndex + 1, total: clusters.length }
+    const older = displayedIndex < stays.length - 1 ? stays[displayedIndex + 1] : null
+    const newer = displayedIndex > 0 ? stays[displayedIndex - 1] : null
+    if (older) stepOlder = () => setSelectedDeviceLocationKey(older.anchor_recorded_at)
+    if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.anchor_recorded_at)
+    if (stays.length > 0) stepPosition = { current: displayedIndex + 1, total: stays.length }
   }
 
   function handleSelect(id: string) {
@@ -453,7 +482,8 @@ export default function App() {
           <MapCard
             reports={reports}
             airtag={currentAirtag}
-            clusterRadiusMeters={clusterRadiusMeters}
+            stays={reportStays}
+            places={places}
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
@@ -465,7 +495,8 @@ export default function App() {
           <DeviceMapCard
             device={selectedDevice}
             locations={ownerLocationHistories[selectedDevice.id] ?? []}
-            clusterRadiusMeters={clusterRadiusMeters}
+            stays={ownerLocationStays[selectedDevice.id] ?? []}
+            places={places}
             selectedLocationKey={selectedDeviceLocationKey}
             onSelectLocation={handleSelectDeviceLocation}
             onMapClick={() => setDetail(null)}
@@ -650,8 +681,7 @@ export default function App() {
               <AirtagDetail
                 airtag={currentAirtag}
                 status={statuses[currentAirtag.id] ?? null}
-                reports={reports}
-                historyClusterRadiusMeters={clusterRadiusMeters}
+                stays={reportStays}
                 selectedReportId={selectedReportId}
                 onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
@@ -670,8 +700,7 @@ export default function App() {
               <DeviceDetail
                 device={selectedDevice}
                 location={deviceLocationsById[selectedDevice.id] ?? null}
-                history={ownerLocationHistories[selectedDevice.id] ?? null}
-                historyClusterRadiusMeters={clusterRadiusMeters}
+                stays={ownerLocationStays[selectedDevice.id] ?? null}
                 selectedLocationKey={selectedDeviceLocationKey}
                 onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}
