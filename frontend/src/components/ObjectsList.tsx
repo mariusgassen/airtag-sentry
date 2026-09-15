@@ -129,7 +129,9 @@ export function ObjectsList({
                 Keine Geräte verfolgt. In den Einstellungen unter „Eigene Geräte“ auswählen.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl bg-[var(--surface)]">
+              <div
+                className={`overflow-hidden rounded-2xl bg-[var(--surface)] ${refreshing ? 'animate-pulse' : ''}`}
+              >
                 {sortedDevices.map((d, i) => {
                   const location = deviceLocations[d.id]
                   const selected = d.id === selectedDeviceId
@@ -182,7 +184,7 @@ export function ObjectsList({
             Tippe auf <PlusIcon className="inline h-3.5 w-3.5 align-[-1px]" />, um eines hinzuzufügen.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl bg-[var(--surface)]">
+          <div className={`overflow-hidden rounded-2xl bg-[var(--surface)] ${refreshing ? 'animate-pulse' : ''}`}>
             {airtags.map((a, i) => {
               const status = statuses[a.id]
               const subtitle = status?.last_report
