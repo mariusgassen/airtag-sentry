@@ -2622,7 +2622,7 @@ git commit -m "HistoryList/DeviceHistoryList: render server-computed stays with 
 - Modify: `frontend/package.json`
 
 **Interfaces:**
-- Consumes: `Place`, `createPlace`, `updatePlace`, `deletePlace` from `api.ts`; `useCurrentPosition` from `MapCard.tsx` (exported in Task 11).
+- Consumes: `Place`, `createPlace`, `updatePlace`, `deletePlace` from `api.ts`; `useCurrentPosition` from `../hooks/useCurrentPosition` (moved there from `MapCard.tsx` in a post-Task-12 fix - see the ledger - to resolve an oxlint `only-export-components` regression).
 - Produces: `SettingsPlaces` component; `SettingsPanel` gains `places`/`onPlacesChanged` props.
 
 - [ ] **Step 1: Add the `leaflet-geoman-free` dependency**
@@ -2714,7 +2714,7 @@ import { createPlace, deletePlace, updatePlace } from '../api'
 import { Row, Section } from './AirtagDetail'
 import { EditableCircle } from './EditableCircle'
 import { ChevronRightIcon, MapPinIcon, PlusIcon, TrashIcon } from './icons'
-import { useCurrentPosition } from './MapCard'
+import { useCurrentPosition } from '../hooks/useCurrentPosition'
 
 const DEFAULT_RADIUS_METERS = 100
 // Only used if browser geolocation is unavailable when adding a brand-new
