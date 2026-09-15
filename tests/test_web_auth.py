@@ -256,6 +256,37 @@ def test_health_reports_503_when_database_is_unreachable(cfg):
     assert resp.status_code == 503
 
 
+def test_poll_now_route_requires_a_session(client):
+    resp = client.post("/api/poll-now")
+    assert resp.status_code == 401
+
+
+def test_poll_now_route_triggers_an_immediate_poll(client, monkeypatch):
+    _login(client, monkeypatch)
+    calls = []
+    monkeypatch.setattr(app_module.tracker, "poll_once", lambda cfg: calls.append(cfg) or True)
+
+    resp = client.post("/api/poll-now")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    assert len(calls) == 1
+
+
+def test_poll_now_route_surfaces_a_poll_failure(client, monkeypatch):
+    _login(client, monkeypatch)
+
+    def _boom(_cfg):
+        raise RuntimeError("Apple session expired")
+
+    monkeypatch.setattr(app_module.tracker, "poll_once", _boom)
+
+    resp = client.post("/api/poll-now")
+
+    assert resp.status_code == 502
+    assert "Apple session expired" in resp.json()["detail"]
+
+
 def test_fingerprinted_asset_is_cached_immutably(client, monkeypatch):
     # Vite fingerprints everything under /assets/ with a content hash, so a
     # given filename's content never changes - safe to cache forever.

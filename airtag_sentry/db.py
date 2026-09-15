@@ -737,6 +737,27 @@ def set_owner_device_appearance(
 
 
 def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocation) -> OwnerLocation:
+    """battery_level is None whenever this particular snapshot didn't carry a
+    real reading (see owner_tracking._snapshot_devices - either the device
+    never reports battery at all, or Apple's batteryStatus came back
+    "Unknown" for this round). A device's battery doesn't reset to "unknown"
+    just because one poll's fix didn't include a fresh reading, so carry the
+    most recent known battery_level/battery_status forward onto this new
+    location instead of blanking out the dashboard's battery display until
+    the next successful reading."""
+    battery_level = location.battery_level
+    battery_status = location.battery_status
+    if battery_level is None:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT battery_level, battery_status FROM owner_device_locations "
+                "WHERE device_id = %s ORDER BY recorded_at DESC LIMIT 1",
+                (location.device_id,),
+            )
+            prev = cur.fetchone()
+        if prev is not None:
+            battery_level, battery_status = prev
+
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -751,8 +772,8 @@ def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocati
                 location.lat,
                 location.lon,
                 location.horizontal_accuracy,
-                location.battery_level,
-                location.battery_status,
+                battery_level,
+                battery_status,
             ),
         )
         row = cur.fetchone()

@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from airtag_sentry import auth, keystore, owner_tracking, telegram_bot
+from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
 from airtag_sentry.geocode import reverse_geocode
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
@@ -717,6 +717,22 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "last_alert": ({"reason": alert[0], "timestamp": alert[1].isoformat()} if alert else None),
             "poll_interval_minutes": poll_interval_minutes,
         }
+
+    @app.post("/api/poll-now")
+    def poll_now_route():
+        """Manual "refresh now" - runs a full poll (AirTags + owner devices)
+        immediately instead of waiting for the next scheduled interval (see
+        scheduler.py). Reuses tracker.poll_once() as-is, so it's identical to
+        a scheduled poll (same alerts/notifications/HA publishing) and shares
+        its lock against the background scheduler's own run - a scheduled
+        poll already in progress just means this call no-ops, since that
+        poll's data will be equally fresh by the time the caller re-fetches it."""
+        try:
+            tracker.poll_once(cfg)
+        except Exception as exc:
+            logger.exception("Manual poll failed.")
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"ok": True}
 
     @app.get("/api/settings")
     def get_settings_route():

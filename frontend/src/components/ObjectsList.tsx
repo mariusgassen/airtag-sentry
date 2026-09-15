@@ -4,7 +4,7 @@ import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
 import { capitalize, deviceLabel, formatAirtagBattery, formatDeviceBattery, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
-import { ChevronRightIcon, PlusIcon, StarIcon } from './icons'
+import { ChevronRightIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -24,6 +24,10 @@ interface Props {
   deviceLocations: Record<string, OwnerLocation>
   selectedDeviceId: string | null
   onSelectDevice: (id: string) => void
+  // Manual "refresh now" (POST /api/poll-now) - triggers an immediate poll
+  // instead of waiting for the scheduled interval, see App.tsx.
+  onRefresh: () => void
+  refreshing: boolean
 }
 
 /** Grouped "Objekte" list: every AirTag plus every tracked owner device
@@ -43,6 +47,8 @@ export function ObjectsList({
   deviceLocations,
   selectedDeviceId,
   onSelectDevice,
+  onRefresh,
+  refreshing,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
@@ -71,6 +77,16 @@ export function ObjectsList({
       <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Objekte</h1>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label="Jetzt aktualisieren"
+            title="Jetzt aktualisieren"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--accent)] hover:bg-[var(--surface)] disabled:opacity-60"
+          >
+            <RefreshIcon className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
           <button
             type="button"
             onClick={() => setAdding((v) => !v)}
