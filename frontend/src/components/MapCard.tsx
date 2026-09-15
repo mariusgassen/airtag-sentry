@@ -370,10 +370,21 @@ export function MapCard({
   onSelectReport?: (id: number) => void
   onMapClick?: () => void
 }) {
+  // Memoized: reports itself is a stable reference across pure-selection
+  // re-renders (App.tsx only replaces it on an actual re-fetch), but
+  // `.map()` always returns a fresh array - without this, FitBounds below
+  // (keyed on this same array) re-fits the *whole* trail on every render,
+  // overriding PanToSelection's explicit centering on every older/newer
+  // step or history-list pick.
   const positions = useMemo<[number, number][]>(() => reports.map((r) => [r.lat, r.lon]), [reports])
   const selectedIndex = selectedReportId != null ? stays.findIndex((s) => s.anchor_id === selectedReportId) : -1
   const displayedIndex = selectedIndex >= 0 ? selectedIndex : stays.length - 1
   const displayed = stays[displayedIndex] as ReportStay | undefined
+  // Memoized: identical lat/lon must keep the same array reference across
+  // renders, since it's also the standalone Popup's `position` prop below -
+  // react-leaflet fully unbinds/rebinds that popup whenever the reference
+  // changes (see the Popup's own comment), so a fresh array every render
+  // would reopen it constantly instead of only on a real position change.
   const displayedPosition = useMemo<[number, number]>(
     () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
     [displayed?.lat, displayed?.lon],
@@ -475,6 +486,13 @@ export function MapCard({
           </Popup>
         </Marker>
       ))}
+      {/* FitBounds first, PanToSelection second: FitBounds only re-fires on
+          a genuine data change (positions is memoized above) and sets a
+          zoom level that fits the whole trail, but PanToSelection - now
+          unconditional, not just for an explicit history selection - has
+          the final say on centering, so whichever pin is currently
+          highlighted (the latest one by default, same as any explicit
+          selection) is always what the view actually centers on. */}
       <FitBounds positions={positions} />
       <PanToSelection position={displayedPosition} />
       <InvalidateSizeOnResize />

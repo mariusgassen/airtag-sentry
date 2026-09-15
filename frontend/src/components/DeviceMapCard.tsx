@@ -44,6 +44,7 @@ export function DeviceMapCard({
   onSelectLocation?: (recordedAt: string) => void
   onMapClick?: () => void
 }) {
+  // Memoized - see MapCard.tsx's identical comment on its own `positions`.
   const positions = useMemo<[number, number][]>(() => locations.map((l) => [l.lat, l.lon]), [locations])
 
   const selectedIndex =
@@ -102,6 +103,7 @@ export function DeviceMapCard({
           </a>
         </div>
       </SelectedPin>
+      {/* FitBounds then PanToSelection - see MapCard.tsx's identical comment. */}
       <FitBounds positions={positions} />
       <PanToSelection position={displayedPosition} />
       <InvalidateSizeOnResize />
