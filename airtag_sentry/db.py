@@ -798,9 +798,17 @@ def latest_owner_device_locations(conn: psycopg.Connection) -> list[OwnerLocatio
         return [OwnerLocation(*row) for row in cur.fetchall()]
 
 
-def latest_primary_owner_device_location(conn: psycopg.Connection) -> OwnerLocation | None:
-    """The primary device's latest reading, used for away-correlation and the
-    map trail - None if no device is marked primary or it has no location yet."""
+def primary_owner_device_location_near(conn: psycopg.Connection, timestamp: dt.datetime) -> OwnerLocation | None:
+    """The primary device's reading closest in time to `timestamp`, used for
+    away-correlation - None if no device is marked primary or it has no
+    location yet.
+
+    Nearest-in-time rather than "most recent ever": AirTag reports are
+    crowd-sourced (FindMy.py) and can arrive with real delay, so the owner
+    reading that matters is the one from around when the report's own
+    timestamp says the tag was there - not whatever the owner's latest
+    location happens to be by the time the report is processed.
+    """
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -809,8 +817,9 @@ def latest_primary_owner_device_location(conn: psycopg.Connection) -> OwnerLocat
             FROM owner_device_locations odl
             JOIN owner_devices od ON od.id = odl.device_id
             WHERE od.is_primary
-            ORDER BY odl.recorded_at DESC LIMIT 1
-            """
+            ORDER BY ABS(EXTRACT(EPOCH FROM (odl.recorded_at - %s))) ASC LIMIT 1
+            """,
+            (timestamp,),
         )
         row = cur.fetchone()
         return OwnerLocation(*row) if row else None

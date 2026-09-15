@@ -27,10 +27,10 @@ from airtag_sentry.db import (
     get_telegram_credentials,
     insert_reports,
     latest_owner_device_locations,
-    latest_primary_owner_device_location,
     list_airtags,
     list_keyed_airtag_ids,
     list_owner_devices,
+    primary_owner_device_location_near,
     record_owner_device_location,
     rename_airtag,
     rename_owner_device,
@@ -496,7 +496,7 @@ def test_latest_owner_device_locations_only_includes_enabled_devices(conn):
     assert latest_owner_device_locations(conn) == [second]
 
 
-def test_latest_primary_owner_device_location_ignores_non_primary_devices(conn):
+def test_primary_owner_device_location_near_ignores_non_primary_devices(conn):
     upsert_owner_devices(
         conn,
         [
@@ -507,18 +507,33 @@ def test_latest_primary_owner_device_location_ignores_non_primary_devices(conn):
     )
     set_owner_device_enabled(conn, "mac-1", True)
     set_owner_device_enabled(conn, "iphone-1", True)
-    assert latest_primary_owner_device_location(conn) is None
+    target = dt.datetime.fromisoformat("2026-01-01T10:20").replace(tzinfo=dt.timezone.utc)
+    assert primary_owner_device_location_near(conn, target) is None
 
     record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
     # Not primary - must never be picked, even though it's enabled and has a location.
-    assert latest_primary_owner_device_location(conn) is None
+    assert primary_owner_device_location_near(conn, target) is None
 
     set_owner_device_primary(conn, "iphone-1")
     record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:15", 52.51, 13.41))
-    assert latest_primary_owner_device_location(conn) is None  # mac-1 still isn't primary
+    assert primary_owner_device_location_near(conn, target) is None  # mac-1 still isn't primary
 
     primary_loc = record_owner_device_location(conn, _owner_location("iphone-1", "2026-01-01T10:20", 52.6, 13.5))
-    assert latest_primary_owner_device_location(conn) == primary_loc
+    assert primary_owner_device_location_near(conn, target) == primary_loc
+
+
+def test_primary_owner_device_location_near_picks_closest_in_time_not_latest(conn):
+    """Regression test: AirTag reports can arrive with real delay, so the
+    relevant owner reading for away-correlation is the one closest in time to
+    the report, not simply the primary device's latest-ever reading."""
+    upsert_owner_devices(conn, [{"id": "iphone-1", "name": "iPhone", "device_type": "iPhone"}], seen_at=_SEEN_AT)
+    set_owner_device_primary(conn, "iphone-1")
+
+    earlier = record_owner_device_location(conn, _owner_location("iphone-1", "2026-01-01T09:25", 52.5, 13.4))
+    record_owner_device_location(conn, _owner_location("iphone-1", "2026-01-01T14:00", 52.6, 13.5))
+
+    report_time = dt.datetime.fromisoformat("2026-01-01T09:30").replace(tzinfo=dt.timezone.utc)
+    assert primary_owner_device_location_near(conn, report_time) == earlier
 
 
 def test_fetch_owner_device_location_history_returns_newest_first_and_respects_limit(conn):
