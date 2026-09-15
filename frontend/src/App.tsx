@@ -12,6 +12,8 @@ import {
   getReports,
   getSettings,
   getStatus,
+  ping,
+  pollNow,
 } from './api'
 import { clusterByProximity } from './clustering'
 import { deviceLabel } from './format'
@@ -76,6 +78,14 @@ export default function App() {
   const [ownerLocations, setOwnerLocations] = useState<OwnerLocation[]>([])
   const [ownerLocationHistories, setOwnerLocationHistories] = useState<Record<string, OwnerLocation[]>>({})
   const [ownerConnected, setOwnerConnected] = useState(false)
+  // True once a background refresh (see AUTO_REFRESH_MS's effect below) has
+  // failed to reach the server at all - drives the offline banner. Distinct
+  // from any single endpoint returning an error (a normal ApiError): this is
+  // specifically "the request never got a response," which apiFetch's own
+  // per-call timeout (api.ts) guarantees resolves within a bounded time
+  // instead of hanging forever.
+  const [offline, setOffline] = useState(false)
+  const [manualRefreshing, setManualRefreshing] = useState(false)
   // Drives history-list/map clustering (see clustering.ts) - fetched here
   // rather than only inside SettingsPanel so a saved
   // history_cluster_radius_meters change reaches the map/list without a
@@ -215,18 +225,46 @@ export default function App() {
     refreshReports()
   }, [currentId, refreshReports])
 
+  // Re-fetches every endpoint the app depends on, and reports back whether
+  // the server was actually reachable - refreshAirtags/refreshReports below
+  // let a network failure propagate (no internal .catch), while the other
+  // three swallow theirs (they've always tolerated e.g. owner tracking not
+  // being connected), so Promise.allSettled is what turns "at least one of
+  // these truly failed to reach the server" into a single signal.
+  const fullRefresh = useCallback(async () => {
+    const results = await Promise.allSettled([
+      refreshAirtags(),
+      refreshOwnerConnected(),
+      refreshOwnerDevices(),
+      refreshReports(),
+      refreshSettings(),
+    ])
+    const reachable = results.every((r) => r.status === 'fulfilled')
+    setOffline(!reachable)
+    return reachable
+  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports, refreshSettings])
+
   // Background auto-refresh: re-fetch everything periodically, plus
   // immediately whenever the tab/app regains visibility (switching back
   // from another app, unlocking the screen, ...) so newly-polled locations
   // and settings changes made elsewhere always show up without a manual
-  // reload - see AUTO_REFRESH_MS.
+  // reload - see AUTO_REFRESH_MS. While the last attempt found the server
+  // unreachable, each tick only pings /health instead of re-running every
+  // endpoint (no point hammering a server that isn't answering) - the first
+  // successful ping triggers one real fullRefresh() to catch back up, and
+  // ticks after that go back to normal.
   useEffect(() => {
-    function tick() {
-      refreshAirtags()
-      refreshOwnerConnected()
-      refreshOwnerDevices()
-      refreshReports()
-      refreshSettings()
+    async function tick() {
+      if (offline) {
+        try {
+          await ping()
+        } catch {
+          return
+        }
+        await fullRefresh()
+        return
+      }
+      await fullRefresh()
     }
     const id = window.setInterval(tick, AUTO_REFRESH_MS)
     function onVisibilityChange() {
@@ -237,7 +275,22 @@ export default function App() {
       window.clearInterval(id)
       document.removeEventListener('visibilitychange', onVisibilityChange)
     }
-  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports, refreshSettings])
+  }, [offline, fullRefresh])
+
+  const handleManualRefresh = useCallback(async () => {
+    setManualRefreshing(true)
+    try {
+      await pollNow()
+    } catch {
+      // A failed poll-now (server unreachable, or a live Apple error
+      // tracker.poll_once let through) still falls through to fullRefresh()
+      // below, whose own reachability check is what actually surfaces the
+      // offline banner.
+    } finally {
+      await fullRefresh()
+      setManualRefreshing(false)
+    }
+  }, [fullRefresh])
 
   const currentAirtag = airtags.find((a) => a.id === currentId) ?? null
   const selectedDevice = ownerDevices.find((d) => d.id === selectedDeviceId) ?? null
@@ -429,6 +482,20 @@ export default function App() {
         )}
       </div>
 
+      {/* Offline banner: server unreachable or timed out (see api.ts's
+          REQUEST_TIMEOUT_MS and this file's fullRefresh/offline state).
+          Shown on both mobile and desktop (unlike the title bar below, which
+          is mobile-only) since desktop has no other fixed header to carry
+          it. Sits above the title bar (higher z-index) rather than pushing
+          it down, so it doesn't shift the map/layout while it's up. */}
+      {offline && (
+        <div className="pointer-events-none absolute inset-x-0 top-[env(safe-area-inset-top)] z-20 flex justify-center px-3 pt-2">
+          <div className="pointer-events-auto rounded-full bg-[var(--destructive)] px-4 py-1.5 text-[13px] font-medium text-white shadow-lg">
+            Keine Verbindung zum Server
+          </div>
+        </div>
+      )}
+
       {/* Title bar for the reserved top safe area. index.html's
           status-bar-style comment covers why this space can't be
           translucent map instead (CLAUDE.md's "iOS status bar" section has
@@ -608,6 +675,8 @@ export default function App() {
                 deviceLocations={deviceLocationsById}
                 selectedDeviceId={selectedDeviceId}
                 onSelectDevice={handleSelectDevice}
+                onRefresh={handleManualRefresh}
+                refreshing={manualRefreshing}
               />
             )}
           </div>

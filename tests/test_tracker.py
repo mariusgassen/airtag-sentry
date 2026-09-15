@@ -58,7 +58,26 @@ def test_poll_once_still_updates_owner_devices_when_airtag_session_missing(monke
     )
 
     cfg = types.SimpleNamespace(database_url="unused")
-    tracker.poll_once(cfg)
+    assert tracker.poll_once(cfg) is True
 
     assert len(calls) == 1
     assert calls[0][0] is cfg
+
+
+def test_poll_once_skips_and_returns_false_when_already_running(monkeypatch):
+    """A manual "refresh now" (web/app.py's /api/poll-now) and the scheduled
+    background poll (scheduler.py) call poll_once() from different threads
+    with no other coordination - an overlapping run must no-op rather than
+    interleave writes to the same Apple session file or double-fire alerts."""
+
+    def fail_get_conn(database_url):
+        raise AssertionError("poll_once() must not do any work while the lock is held")
+
+    monkeypatch.setattr(tracker, "get_conn", fail_get_conn)
+
+    cfg = types.SimpleNamespace(database_url="unused")
+    tracker._poll_lock.acquire()
+    try:
+        assert tracker.poll_once(cfg) is False
+    finally:
+        tracker._poll_lock.release()

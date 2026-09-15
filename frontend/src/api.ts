@@ -89,11 +89,25 @@ export interface AppleLoginResult {
 
 export class ApiError extends Error {}
 
+// A hung request (server unreachable, or a response that never arrives) would
+// otherwise leave a caller awaiting forever - App.tsx's offline detection
+// needs every call to eventually settle so it can distinguish "the server
+// said no" (a normal ApiError) from "the server isn't answering at all".
+const REQUEST_TIMEOUT_MS = 10_000
+
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(path, {
-    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
-    ...init,
-  })
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  let res: Response
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+      signal: controller.signal,
+    })
+  } finally {
+    window.clearTimeout(timeout)
+  }
   if (res.status === 401) {
     window.location.href = '/login'
     // Never resolves - the redirect above takes over the page.
@@ -104,6 +118,22 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     throw new ApiError(body.detail || `HTTP ${res.status}`)
   }
   return res
+}
+
+/** Cheap reachability probe against the public, DB-backed /health route (see
+ * web/app.py) - used by App.tsx's offline banner to detect the server coming
+ * back without re-fetching every AirTag/device/settings endpoint on every
+ * check while it's still down. */
+export async function ping(): Promise<void> {
+  await apiFetch('/health')
+}
+
+/** Triggers an immediate full poll (AirTags + owner devices), independent of
+ * the scheduled background interval - see tracker.poll_once via
+ * POST /api/poll-now. Callers should re-fetch the usual data endpoints
+ * afterwards to pick up whatever this just wrote. */
+export async function pollNow(): Promise<void> {
+  await apiFetch('/api/poll-now', { method: 'POST' })
 }
 
 export async function getAirtags(): Promise<Airtag[]> {

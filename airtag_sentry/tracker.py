@@ -7,6 +7,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
 
 from findmy import FindMyAccessory, KeyPair
 
@@ -104,34 +105,54 @@ def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublishe
                 logger.exception("Failed to publish owner device '%s' to Home Assistant.", location.device_id)
 
 
-def poll_once(cfg: Config) -> None:
+# Guards against two poll_once() calls racing each other - the scheduled
+# background poll (scheduler.py) and a dashboard-triggered manual "refresh
+# now" (web/app.py's /api/poll-now) run on different threads with no other
+# coordination between them, and overlapping runs could interleave writes to
+# the same Apple session file (account.to_json) or double-fire alerts.
+_poll_lock = threading.Lock()
+
+
+def poll_once(cfg: Config) -> bool:
     """Owner-device tracking and AirTag tracking are two independent Apple
     sessions (see owner_tracking.py's module docstring) - connecting only one
     of them must not stop the other from polling. _update_owner_devices() runs
     unconditionally; the AirTag session is only restored/polled if one has
-    actually been connected via the dashboard."""
-    with get_conn(cfg.database_url) as conn:
-        settings = get_settings(conn)
-        notifiers = build_notifiers(cfg, conn)
-        ha_publisher = build_ha_publisher(cfg, conn)
-        try:
-            _update_owner_devices(cfg, conn, ha_publisher)
+    actually been connected via the dashboard.
 
-            if not is_connected(cfg):
-                logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
-                return
+    Returns False (and does nothing else) if another poll is already running -
+    the caller can treat that the same as a completed poll, since the
+    in-progress one will have produced equally fresh data by the time it's
+    done."""
+    if not _poll_lock.acquire(blocking=False):
+        logger.info("Skipping poll - one is already in progress.")
+        return False
+    try:
+        with get_conn(cfg.database_url) as conn:
+            settings = get_settings(conn)
+            notifiers = build_notifiers(cfg, conn)
+            ha_publisher = build_ha_publisher(cfg, conn)
+            try:
+                _update_owner_devices(cfg, conn, ha_publisher)
 
-            account = restore_account(cfg)
-            for airtag in list_airtags(conn):
-                try:
-                    _poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha_publisher)
-                except Exception:
-                    logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
-                finally:
-                    account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
-        finally:
-            if ha_publisher is not None:
-                ha_publisher.close()
+                if not is_connected(cfg):
+                    logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
+                    return True
+
+                account = restore_account(cfg)
+                for airtag in list_airtags(conn):
+                    try:
+                        _poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha_publisher)
+                    except Exception:
+                        logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
+                    finally:
+                        account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
+            finally:
+                if ha_publisher is not None:
+                    ha_publisher.close()
+    finally:
+        _poll_lock.release()
+    return True
 
 
 def _poll_airtag(

@@ -322,6 +322,37 @@ def test_record_owner_device_location_persists_battery(conn):
     assert loc.battery_status == "Charging"
 
 
+def test_record_owner_device_location_carries_battery_forward_when_missing(conn):
+    """A location fix that comes in without a fresh battery reading (see
+    owner_tracking._snapshot_devices - Apple's batteryStatus "Unknown", or a
+    device that just didn't report one this round) shouldn't blank out the
+    dashboard's battery display - it should keep showing the last known
+    value until a real new reading arrives."""
+    upsert_owner_devices(conn, [{"id": "iphone-1", "name": "iPhone", "device_type": "iPhone"}], seen_at=_SEEN_AT)
+    record_owner_device_location(
+        conn,
+        _owner_location("iphone-1", "2026-01-01T10:00", 52.5, 13.4, battery_level=0.8, battery_status="NotCharging"),
+    )
+
+    second = record_owner_device_location(
+        conn,
+        _owner_location("iphone-1", "2026-01-01T10:15", 52.51, 13.41, battery_level=None, battery_status="Unknown"),
+    )
+
+    assert second.battery_level == 0.8
+    assert second.battery_status == "NotCharging"
+
+
+def test_record_owner_device_location_leaves_battery_null_with_no_prior_reading(conn):
+    """A device's very first location (or one that's never reported battery
+    at all) has nothing to carry forward - stays null rather than fabricating
+    a reading."""
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "Mac mini", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    loc = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
+    assert loc.battery_level is None
+    assert loc.battery_status is None
+
+
 def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):
     assert list_owner_devices(conn) == []
 
