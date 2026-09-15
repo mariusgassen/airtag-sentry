@@ -1,19 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { OwnerDevice, OwnerLocation } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import type { LocationStay, OwnerDevice, OwnerLocation } from '../api'
 import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
 import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
-import { clusterByProximity } from '../clustering'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import {
-  capitalize,
-  deviceLabel,
-  formatClusterRange,
-  formatDeviceBattery,
-  formatRelative,
-  isLowBattery,
-} from '../format'
+import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
 import { HistoryStepper, Row, Section } from './AirtagDetail'
+import { StayRow } from './StayRow'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -27,13 +20,10 @@ import {
 interface Props {
   device: OwnerDevice
   location: OwnerLocation | null
-  // Full location history, already fetched by App.tsx for the map's trail -
-  // reused here rather than fetched again. null while still loading.
-  history: OwnerLocation[] | null
-  // "Same spot" radius for collapsing consecutive locations into one stay in
-  // the history list below - see clustering.ts and
-  // AppSettings.history_cluster_radius_meters.
-  historyClusterRadiusMeters: number
+  // Server-computed (see stays.py / GET /api/owner-devices/history). null
+  // while still loading (see App.tsx's `?? null`), distinct from `[]` (no
+  // history yet) - DeviceHistoryList shows "Lädt…" only for the former.
+  stays: LocationStay[] | null
   selectedLocationKey: string | null
   onSelectLocation: (recordedAt: string) => void
   onBack: () => void
@@ -51,8 +41,7 @@ interface Props {
 export function DeviceDetail({
   device,
   location,
-  history,
-  historyClusterRadiusMeters,
+  stays,
   selectedLocationKey,
   onSelectLocation,
   onBack,
@@ -187,7 +176,7 @@ export function DeviceDetail({
               label="Verlauf"
               trailing={
                 <span className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                  {history?.length ?? ''}
+                  {stays?.length ?? ''}
                   <ChevronRightIcon className={`h-4 w-4 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
                 </span>
               }
@@ -196,8 +185,7 @@ export function DeviceDetail({
             />
             {historyOpen && (
               <DeviceHistoryList
-                history={history}
-                clusterRadiusMeters={historyClusterRadiusMeters}
+                stays={stays}
                 selectedLocationKey={selectedLocationKey}
                 onSelectLocation={onSelectLocation}
               />
@@ -329,123 +317,63 @@ function DeviceAppearanceForm({ device, onDone }: { device: OwnerDevice; onDone:
 }
 
 function DeviceHistoryList({
-  history,
-  clusterRadiusMeters,
+  stays,
   selectedLocationKey,
   onSelectLocation,
 }: {
-  history: OwnerLocation[] | null
-  clusterRadiusMeters: number
+  stays: LocationStay[] | null
   selectedLocationKey: string | null
   onSelectLocation: (recordedAt: string) => void
 }) {
-  if (history === null) {
+  if (stays === null) {
     return (
       <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
         Lädt…
       </div>
     )
   }
-  if (history.length === 0) {
+  if (stays.length === 0) {
     return (
       <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
         Noch kein Standortverlauf vorhanden.
       </div>
     )
   }
-  return (
-    <DeviceHistoryRows
-      history={history}
-      clusterRadiusMeters={clusterRadiusMeters}
-      selectedLocationKey={selectedLocationKey}
-      onSelectLocation={onSelectLocation}
-    />
-  )
+  return <DeviceHistoryRows stays={stays} selectedLocationKey={selectedLocationKey} onSelectLocation={onSelectLocation} />
 }
 
 function DeviceHistoryRows({
-  history,
-  clusterRadiusMeters,
+  stays,
   selectedLocationKey,
   onSelectLocation,
 }: {
-  history: OwnerLocation[]
-  clusterRadiusMeters: number
+  stays: LocationStay[]
   selectedLocationKey: string | null
   onSelectLocation: (recordedAt: string) => void
 }) {
-  // Collapses consecutive same-spot locations into one "stay" row - see
-  // clustering.ts. /api/owner-devices/history is already newest-first
-  // (unlike AirTag reports, which arrive oldest-first and get reversed for
-  // display in AirtagDetail's HistoryList) - no reversal needed here.
-  const clusters = useMemo(
-    () => clusterByProximity(history, (l) => [l.lat, l.lon], clusterRadiusMeters),
-    [history, clusterRadiusMeters],
-  )
-  // Keyed by anchor recorded_at (owner locations have no id) so the row for
-  // whatever's currently selected can be scrolled into view below even when
-  // the selection changed via the map or the stepper, not just a click
-  // inside this list - see AirtagDetail.tsx's HistoryList, identical idea.
   const rowRefs = useRef(new Map<string, HTMLButtonElement>())
   useEffect(() => {
     if (selectedLocationKey == null) return
     rowRefs.current.get(selectedLocationKey)?.scrollIntoView({ block: 'nearest' })
   }, [selectedLocationKey])
 
+  // Already newest-first (see stays.py / GET /api/owner-devices/history) -
+  // no reversal needed here, same as before.
   return (
     <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
-      {clusters.map((c, i) => {
-        const isStay = c.points.length > 1
-        // history (and so c.points) is newest-first, so the latest point in
-        // a stay is the first one encountered, the earliest the last.
-        const latest = c.points[0]
-        const earliest = c.points[c.points.length - 1]
-        const isSelected = c.points.some((p) => p.recorded_at === selectedLocationKey)
-        return (
-          <button
-            type="button"
-            key={c.anchor.recorded_at}
-            ref={(el) => {
-              if (el) rowRefs.current.set(c.anchor.recorded_at, el)
-              else rowRefs.current.delete(c.anchor.recorded_at)
-            }}
-            onClick={() => onSelectLocation(c.anchor.recorded_at)}
-            title={
-              isStay
-                ? `${new Date(earliest.recorded_at).toLocaleString()} – ${new Date(latest.recorded_at).toLocaleString()}`
-                : new Date(c.anchor.recorded_at).toLocaleString()
-            }
-            className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
-              isSelected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
-            }`}
-          >
-            <span>
-              {isStay
-                ? formatClusterRange(earliest.recorded_at, latest.recorded_at)
-                : capitalize(formatRelative(c.anchor.recorded_at))}
-            </span>
-            <span className="text-[var(--text-secondary)]">
-              {isStay && `${c.points.length}× · `}
-              {c.anchor.lat.toFixed(4)}, {c.anchor.lon.toFixed(4)}
-              {' · '}
-              {c.anchor.battery_level != null ? (
-                <span
-                  title={
-                    c.anchor.battery_reported
-                      ? undefined
-                      : 'Kein frischer Batteriewert bei diesem Fix - letzter bekannter Stand übernommen'
-                  }
-                >
-                  {formatDeviceBattery(c.anchor.battery_level, c.anchor.battery_status)}
-                  {!c.anchor.battery_reported && '*'}
-                </span>
-              ) : (
-                <span title="Keine Batterieangabe für diesen Zeitpunkt">keine Angabe</span>
-              )}
-            </span>
-          </button>
-        )
-      })}
+      {stays.map((s, i) => (
+        <StayRow
+          key={s.anchor_recorded_at}
+          rowRef={(el) => {
+            if (el) rowRefs.current.set(s.anchor_recorded_at, el)
+            else rowRefs.current.delete(s.anchor_recorded_at)
+          }}
+          stay={s}
+          bordered={i > 0}
+          selected={s.anchor_recorded_at === selectedLocationKey}
+          onSelect={() => onSelectLocation(s.anchor_recorded_at)}
+        />
+      ))}
     </div>
   )
 }
