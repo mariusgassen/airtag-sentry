@@ -175,6 +175,14 @@ class NamedPlace:
 
 
 @dataclasses.dataclass(frozen=True)
+class GeocodedPoint:
+    lat_rounded: float
+    lon_rounded: float
+    address: str | None
+    poi_name: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class AppSettings:
     polling_interval_minutes: int
     movement_distance_threshold_meters: float
@@ -913,4 +921,76 @@ def update_named_place(
 def delete_named_place(conn: psycopg.Connection, place_id: int) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM named_places WHERE id = %s", (place_id,))
+    conn.commit()
+
+
+def round_coord(lat: float, lon: float) -> tuple[float, float]:
+    """~1m precision - shared by geocoded_points and place_label_corrections
+    so a correction overrides exactly the lookup the geocode cache uses."""
+    return (round(lat, 5), round(lon, 5))
+
+
+def get_geocoded_point(conn: psycopg.Connection, lat: float, lon: float) -> GeocodedPoint | None:
+    lat_r, lon_r = round_coord(lat, lon)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT lat_rounded, lon_rounded, address, poi_name FROM geocoded_points "
+            "WHERE lat_rounded = %s AND lon_rounded = %s",
+            (lat_r, lon_r),
+        )
+        row = cur.fetchone()
+        return GeocodedPoint(*row) if row else None
+
+
+def store_geocoded_point(
+    conn: psycopg.Connection, lat: float, lon: float, address: str | None, poi_name: str | None
+) -> GeocodedPoint:
+    lat_r, lon_r = round_coord(lat, lon)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO geocoded_points (lat_rounded, lon_rounded, address, poi_name)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (lat_rounded, lon_rounded) DO UPDATE SET
+                address = EXCLUDED.address, poi_name = EXCLUDED.poi_name, fetched_at = now()
+            RETURNING lat_rounded, lon_rounded, address, poi_name
+            """,
+            (lat_r, lon_r, address, poi_name),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return GeocodedPoint(*row)
+
+
+def get_place_label_correction(conn: psycopg.Connection, lat: float, lon: float) -> str | None:
+    lat_r, lon_r = round_coord(lat, lon)
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT corrected_name FROM place_label_corrections WHERE lat_rounded = %s AND lon_rounded = %s",
+            (lat_r, lon_r),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_place_label_correction(conn: psycopg.Connection, lat: float, lon: float, corrected_name: str) -> None:
+    lat_r, lon_r = round_coord(lat, lon)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO place_label_corrections (lat_rounded, lon_rounded, corrected_name)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (lat_rounded, lon_rounded) DO UPDATE SET corrected_name = EXCLUDED.corrected_name
+            """,
+            (lat_r, lon_r, corrected_name),
+        )
+    conn.commit()
+
+
+def delete_place_label_correction(conn: psycopg.Connection, lat: float, lon: float) -> None:
+    lat_r, lon_r = round_coord(lat, lon)
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM place_label_corrections WHERE lat_rounded = %s AND lon_rounded = %s", (lat_r, lon_r)
+        )
     conn.commit()

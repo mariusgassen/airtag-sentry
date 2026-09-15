@@ -6,6 +6,7 @@ import pytest
 
 from airtag_sentry.db import (
     AppSettings,
+    GeocodedPoint,
     NamedPlace,
     OwnerDevice,
     OwnerLocation,
@@ -19,13 +20,16 @@ from airtag_sentry.db import (
     delete_mqtt_credentials,
     delete_named_place,
     delete_owner_apple_credentials,
+    delete_place_label_correction,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     get_airtag_key,
     get_conn,
+    get_geocoded_point,
     get_ha_api_token,
     get_mqtt_credentials,
     get_owner_apple_credentials,
+    get_place_label_correction,
     get_settings,
     get_telegram_credentials,
     insert_reports,
@@ -38,6 +42,7 @@ from airtag_sentry.db import (
     record_owner_device_location,
     rename_airtag,
     rename_owner_device,
+    round_coord,
     set_airtag_appearance,
     set_airtag_key,
     set_owner_apple_credentials,
@@ -48,8 +53,10 @@ from airtag_sentry.db import (
     set_ha_api_token_hash,
     set_mqtt_credentials,
     set_owner_include_family_devices,
+    set_place_label_correction,
     set_telegram_bot_commands,
     set_telegram_credentials,
+    store_geocoded_point,
     update_named_place,
     update_settings,
     upsert_owner_devices,
@@ -71,7 +78,7 @@ def conn():
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
                     "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings, "
-                    "mqtt_settings, ha_api_tokens, named_places "
+                    "mqtt_settings, ha_api_tokens, named_places, geocoded_points, place_label_corrections "
                     "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
@@ -743,3 +750,36 @@ def test_named_places_crud_round_trip(conn):
 
 def test_update_named_place_returns_none_for_unknown_id(conn):
     assert update_named_place(conn, 999999, "X", 0, 0, 1) is None
+
+
+def test_round_coord_matches_at_one_meter_precision():
+    # ~1m precision (5 decimals) - two fixes a meter apart round to the same
+    # key and share one geocode lookup/correction.
+    assert round_coord(49.87281, 8.65123) == round_coord(49.872814, 8.651233)
+    assert round_coord(49.87281, 8.65123) != round_coord(49.8730, 8.6512)
+
+
+def test_geocoded_point_round_trip_and_upsert(conn):
+    assert get_geocoded_point(conn, 49.8728, 8.6512) is None
+
+    stored = store_geocoded_point(conn, 49.8728, 8.6512, "12 Main St", "REWE")
+    assert stored == GeocodedPoint(lat_rounded=49.8728, lon_rounded=8.6512, address="12 Main St", poi_name="REWE")
+    assert get_geocoded_point(conn, 49.8728, 8.6512) == stored
+
+    # Storing again for the same (rounded) coordinate overwrites, not duplicates.
+    updated = store_geocoded_point(conn, 49.87280001, 8.65120001, "12 Main St", "REWE Markt")
+    assert updated.poi_name == "REWE Markt"
+    assert get_geocoded_point(conn, 49.8728, 8.6512) == updated
+
+
+def test_place_label_correction_round_trip(conn):
+    assert get_place_label_correction(conn, 49.8728, 8.6512) is None
+
+    set_place_label_correction(conn, 49.8728, 8.6512, "My Corner Store")
+    assert get_place_label_correction(conn, 49.8728, 8.6512) == "My Corner Store"
+
+    set_place_label_correction(conn, 49.8728, 8.6512, "Corrected Again")
+    assert get_place_label_correction(conn, 49.8728, 8.6512) == "Corrected Again"
+
+    delete_place_label_correction(conn, 49.8728, 8.6512)
+    assert get_place_label_correction(conn, 49.8728, 8.6512) is None
