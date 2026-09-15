@@ -101,7 +101,7 @@ const DEVICE_GLYPH_SVGS: Record<DeviceIconName, string> = {
     <rect x="7.5" y="7" width="9" height="12" rx="3" fill="currentColor"/>
     <rect x="9" y="3" width="6" height="3" rx="1.2" fill="currentColor"/>
     <rect x="9" y="18" width="6" height="3" rx="1.2" fill="currentColor"/>
-    <rect x="16.3" y="11" width="1.6" height="3" rx="0.7" fill="currentColor"/>
+    <rect x="16.3" y="10.7" width="1.6" height="3" rx="0.7" fill="currentColor"/>
   </svg>`,
   mac: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none">
     <rect x="3.5" y="7" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.8"/>
