@@ -697,6 +697,7 @@ export default function App() {
                   await refreshAirtags()
                   setDetail(null)
                 }}
+                onCorrected={refreshReports}
               />
             ) : detail === 'device' && selectedDevice ? (
               <DeviceDetail
@@ -710,6 +711,7 @@ export default function App() {
                 stepNewer={stepNewer}
                 stepPosition={stepPosition}
                 onChanged={refreshOwnerDevices}
+                onCorrected={refreshOwnerDevices}
               />
             ) : (
               <ObjectsList

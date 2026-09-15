@@ -28,6 +28,7 @@ interface Props {
   onSelectLocation: (recordedAt: string) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
+  onCorrected: () => void | Promise<void>
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -46,6 +47,7 @@ export function DeviceDetail({
   onSelectLocation,
   onBack,
   onChanged,
+  onCorrected,
   stepOlder,
   stepNewer,
   stepPosition,
@@ -188,6 +190,7 @@ export function DeviceDetail({
                 stays={stays}
                 selectedLocationKey={selectedLocationKey}
                 onSelectLocation={onSelectLocation}
+                onCorrected={onCorrected}
               />
             )}
           </Section>
@@ -320,10 +323,12 @@ function DeviceHistoryList({
   stays,
   selectedLocationKey,
   onSelectLocation,
+  onCorrected,
 }: {
   stays: LocationStay[] | null
   selectedLocationKey: string | null
   onSelectLocation: (recordedAt: string) => void
+  onCorrected: () => void | Promise<void>
 }) {
   if (stays === null) {
     return (
@@ -339,17 +344,26 @@ function DeviceHistoryList({
       </div>
     )
   }
-  return <DeviceHistoryRows stays={stays} selectedLocationKey={selectedLocationKey} onSelectLocation={onSelectLocation} />
+  return (
+    <DeviceHistoryRows
+      stays={stays}
+      selectedLocationKey={selectedLocationKey}
+      onSelectLocation={onSelectLocation}
+      onCorrected={onCorrected}
+    />
+  )
 }
 
 function DeviceHistoryRows({
   stays,
   selectedLocationKey,
   onSelectLocation,
+  onCorrected,
 }: {
   stays: LocationStay[]
   selectedLocationKey: string | null
   onSelectLocation: (recordedAt: string) => void
+  onCorrected: () => void | Promise<void>
 }) {
   const rowRefs = useRef(new Map<string, HTMLButtonElement>())
   useEffect(() => {
@@ -372,6 +386,7 @@ function DeviceHistoryRows({
           bordered={i > 0}
           selected={s.anchor_recorded_at === selectedLocationKey}
           onSelect={() => onSelectLocation(s.anchor_recorded_at)}
+          onCorrected={onCorrected}
         />
       ))}
     </div>

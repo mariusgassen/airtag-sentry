@@ -24,6 +24,7 @@ export function StayRow({
   bordered,
   selected,
   onSelect,
+  onCorrected,
 }: {
   stay: {
     start: string
@@ -43,18 +44,24 @@ export function StayRow({
   bordered: boolean
   selected: boolean
   onSelect: () => void
+  onCorrected: () => void | Promise<void>
 }) {
   const [correcting, setCorrecting] = useState(false)
   const [correctionInput, setCorrectionInput] = useState(stay.label ?? '')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function saveCorrection() {
     const trimmed = correctionInput.trim()
     if (!trimmed) return
     setSaving(true)
+    setError(null)
     try {
       await setGeocodeCorrection(stay.lat, stay.lon, trimmed)
+      await onCorrected()
       setCorrecting(false)
+    } catch (err) {
+      setError((err as Error).message)
     } finally {
       setSaving(false)
     }
@@ -62,20 +69,23 @@ export function StayRow({
 
   if (correcting) {
     return (
-      <div className={`flex items-center gap-2 px-4 py-2 text-sm ${bordered ? 'border-t border-[var(--divider)]' : ''}`}>
-        <input
-          autoFocus
-          value={correctionInput}
-          onChange={(e) => setCorrectionInput(e.target.value)}
-          placeholder="Name für diesen Ort"
-          className="min-w-0 flex-1 rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
-        />
-        <button type="button" onClick={saveCorrection} disabled={saving} className="text-[var(--accent)]">
-          Sichern
-        </button>
-        <button type="button" onClick={() => setCorrecting(false)} className="text-[var(--text-secondary)]">
-          Abbrechen
-        </button>
+      <div className={`px-4 py-2 text-sm ${bordered ? 'border-t border-[var(--divider)]' : ''}`}>
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={correctionInput}
+            onChange={(e) => setCorrectionInput(e.target.value)}
+            placeholder="Name für diesen Ort"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
+          />
+          <button type="button" onClick={saveCorrection} disabled={saving} className="text-[var(--accent)]">
+            Sichern
+          </button>
+          <button type="button" onClick={() => setCorrecting(false)} className="text-[var(--text-secondary)]">
+            Abbrechen
+          </button>
+        </div>
+        {error && <p className="mt-1.5 text-[0.72rem] text-[var(--destructive)]">{error}</p>}
       </div>
     )
   }
@@ -97,14 +107,16 @@ export function StayRow({
     >
       <span className="flex items-center gap-1.5">
         {isStay ? formatClusterRange(stay.start, stay.end) : capitalize(formatRelative(stay.start))}
-        <span
+        <button
+          type="button"
+          aria-label="Namen korrigieren"
           onClick={(e) => {
             e.stopPropagation()
             setCorrecting(true)
           }}
         >
-          <PencilIcon className="h-3 w-3 shrink-0 text-[var(--text-secondary)] opacity-0 group-hover:opacity-100" />
-        </span>
+          <PencilIcon className="h-3 w-3 shrink-0 text-[var(--text-secondary)] opacity-60 group-hover:opacity-100" />
+        </button>
       </span>
       <span className="text-[var(--text-secondary)]">
         {isStay && `${stay.count}× · `}

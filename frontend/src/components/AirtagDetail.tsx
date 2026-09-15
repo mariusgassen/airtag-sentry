@@ -36,6 +36,7 @@ interface Props {
   onBack: () => void
   onChanged: () => void | Promise<void>
   onDeleted: () => void | Promise<void>
+  onCorrected: () => void | Promise<void>
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -169,6 +170,7 @@ export function AirtagDetail({
   onBack,
   onChanged,
   onDeleted,
+  onCorrected,
   stepOlder,
   stepNewer,
   stepPosition,
@@ -294,7 +296,12 @@ export function AirtagDetail({
               bordered={false}
             />
             {historyOpen && (
-              <HistoryList stays={stays} selectedReportId={selectedReportId} onSelectReport={onSelectReport} />
+              <HistoryList
+                stays={stays}
+                selectedReportId={selectedReportId}
+                onSelectReport={onSelectReport}
+                onCorrected={onCorrected}
+              />
             )}
           </Section>
 
@@ -544,10 +551,12 @@ function HistoryList({
   stays,
   selectedReportId,
   onSelectReport,
+  onCorrected,
 }: {
   stays: ReportStay[]
   selectedReportId: number | null
   onSelectReport: (id: number) => void
+  onCorrected: () => void | Promise<void>
 }) {
   // Newest first for display - stays arrive in the same oldest-first order
   // as the underlying reports (see stays.py).
@@ -578,6 +587,7 @@ function HistoryList({
           bordered={i > 0}
           selected={s.anchor_id === selectedReportId}
           onSelect={() => onSelectReport(s.anchor_id)}
+          onCorrected={onCorrected}
         />
       ))}
     </div>
