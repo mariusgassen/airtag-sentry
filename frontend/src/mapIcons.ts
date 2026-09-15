@@ -2,7 +2,7 @@ import L from 'leaflet'
 import { airtagColor, glyphColor } from './airtagColor'
 import type { DeviceIconName } from './deviceIcons'
 
-const SIZE = 32
+export const SIZE = 32
 
 // Mirrors AirtagGlyph's two-concentric-circle look, inlined as a raw SVG
 // string since divIcon content is plain HTML rather than React. currentColor
@@ -177,3 +177,8 @@ export const currentLocationIcon: L.DivIcon = L.divIcon({
  * uses; dashed in Polyline usage to stay visually distinct from the
  * AirTag route's solid line despite the similar blue. */
 export const OWNER_TRAIL_COLOR = '#0a84ff'
+
+/** Translucent geofence circle color (PlaceCircles, MapCard.tsx/
+ * DeviceMapCard.tsx) - a distinct green so a user-defined place never reads
+ * as an AirTag/device trail or pin. */
+export const PLACE_CIRCLE_COLOR = '#30d158'
