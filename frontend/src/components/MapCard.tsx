@@ -18,6 +18,7 @@ import type { Airtag, OwnerLocation, Place, Report, ReportStay } from '../api'
 import { getAddress } from '../api'
 import { capitalize, formatClusterRange, formatRelative } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
+import { useCurrentPosition } from '../hooks/useCurrentPosition'
 import {
   OWNER_TRAIL_COLOR,
   PIN_POPUP_OFFSET,
@@ -26,6 +27,7 @@ import {
   airtagPinIcon,
   currentLocationIcon,
   deviceColor,
+  stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
@@ -34,13 +36,6 @@ import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 // shares this shape - a fixed width so the card doesn't reflow oddly between
 // a short ("Letzte Position" only) and a long (address + prev/next) variant.
 export const POPUP_WIDTH_CLASS = 'w-60'
-
-/** A stay's marker grows (mildly, clamped) with how long it lasted - a
- * 10-minute stop and an 8-hour stay should read differently on the map at a
- * glance, matching how Google Timeline treats visit significance. */
-export function stayMarkerRadius(count: number): number {
-  return Math.min(6 + Math.sqrt(count) * 1.5, 16)
-}
 
 /** One icon-prefixed line of secondary popup info (timestamp, address, relative
  * time) - shared so every popup's metadata reads the same way. */
@@ -99,24 +94,6 @@ export function InvalidateSizeOnResize() {
     return () => observer.disconnect()
   }, [map])
   return null
-}
-
-/** Browser geolocation, requested once on mount. Used only as a fallback view
- * for a brand-new AirTag with no reports yet - never overrides real device
- * positions. */
-export function useCurrentPosition() {
-  const [position, setPosition] = useState<[number, number] | null>(null)
-
-  useEffect(() => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setPosition([pos.coords.latitude, pos.coords.longitude]),
-      () => setPosition(null),
-      { enableHighAccuracy: false, timeout: 10_000 },
-    )
-  }, [])
-
-  return position
 }
 
 /** Pans (without changing zoom) to whichever position is currently

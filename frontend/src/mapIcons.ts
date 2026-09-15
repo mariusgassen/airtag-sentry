@@ -182,3 +182,10 @@ export const OWNER_TRAIL_COLOR = '#0a84ff'
  * DeviceMapCard.tsx) - a distinct green so a user-defined place never reads
  * as an AirTag/device trail or pin. */
 export const PLACE_CIRCLE_COLOR = '#30d158'
+
+/** A stay's marker grows (mildly, clamped) with how long it lasted - a
+ * 10-minute stop and an 8-hour stay should read differently on the map at a
+ * glance, matching how Google Timeline treats visit significance. */
+export function stayMarkerRadius(count: number): number {
+  return Math.min(6 + Math.sqrt(count) * 1.5, 16)
+}

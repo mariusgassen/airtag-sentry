@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Polyline } from 'react-leaflet'
 import type { LocationStay, OwnerDevice, OwnerLocation, Place } from '../api'
 import { deviceLabel, formatClusterRange } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
-import { airtagPinIcon, deviceColor } from '../mapIcons'
+import { airtagPinIcon, deviceColor, stayMarkerRadius } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import {
   FitBounds,
@@ -16,7 +16,6 @@ import {
   PlaceCircles,
   POPUP_WIDTH_CLASS,
   SelectedPin,
-  stayMarkerRadius,
 } from './MapCard'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
