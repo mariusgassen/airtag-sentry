@@ -676,6 +676,8 @@ export default function App() {
                 onEnablePush={push.enable}
                 onDisablePush={push.disable}
                 onSettingsChanged={setSettings}
+                places={places}
+                onPlacesChanged={refreshPlaces}
               />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail

@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AppSettings } from '../api'
+import type { AppSettings, Place } from '../api'
 import { getSettings, updateSettings } from '../api'
 import { COLOR_PALETTE_OPTIONS } from '../airtagColor'
 import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
-import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, LogoutIcon, PersonIcon } from './icons'
+import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, LogoutIcon, MapPinIcon, PersonIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
 import { SettingsAppleAccounts } from './SettingsAppleAccounts'
 import { SettingsNotifications } from './SettingsNotifications'
+import { SettingsPlaces } from './SettingsPlaces'
 import type { FieldKey } from './SettingsTracking'
 import { SettingsTracking } from './SettingsTracking'
 
@@ -111,7 +112,7 @@ function BackHeader({ title, onBack, status }: { title: string; onBack: () => vo
   )
 }
 
-type Page = 'root' | 'notifications' | 'apple' | 'tracking'
+type Page = 'root' | 'notifications' | 'apple' | 'tracking' | 'places'
 
 interface Props {
   pushStatus: 'idle' | 'active' | 'error'
@@ -119,9 +120,19 @@ interface Props {
   onEnablePush: () => void
   onDisablePush: () => void
   onSettingsChanged: (settings: AppSettings) => void
+  places: Place[]
+  onPlacesChanged: () => void | Promise<void>
 }
 
-export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePush, onSettingsChanged }: Props) {
+export function SettingsPanel({
+  pushStatus,
+  pushBusy,
+  onEnablePush,
+  onDisablePush,
+  onSettingsChanged,
+  places,
+  onPlacesChanged,
+}: Props) {
   const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({})
@@ -231,6 +242,17 @@ export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePus
     )
   }
 
+  if (page === 'places') {
+    return (
+      <div className="flex h-full flex-col">
+        <BackHeader title="Orte" onBack={() => setPage('root')} />
+        <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
+          <SettingsPlaces places={places} onChanged={onPlacesChanged} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="shrink-0 px-4 pb-2 pt-[0.9rem]">
@@ -270,6 +292,12 @@ export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePus
               label="Tracking"
               trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
               onClick={() => setPage('tracking')}
+            />
+            <Row
+              icon={<MapPinIcon className="h-5 w-5" />}
+              label="Orte"
+              trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
+              onClick={() => setPage('places')}
             />
           </Section>
         </div>
