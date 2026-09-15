@@ -26,6 +26,7 @@ from airtag_sentry.db import (
     fetch_reports_before,
     get_airtag_key,
     get_conn,
+    get_geocoded_point,
     get_settings,
     insert_reports,
     list_airtags,
@@ -33,6 +34,8 @@ from airtag_sentry.db import (
     primary_owner_device_location_near,
     record_alert,
     record_owner_device_location,
+    round_coord,
+    store_geocoded_point,
 )
 from airtag_sentry.geocode import format_location_line, reverse_geocode
 from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
@@ -86,6 +89,29 @@ def _load_key(cfg: Config, conn, airtag_id: str):
     return KeyPair.from_b64(plaintext)
 
 
+def _geocode_new_points(conn, points: list[tuple[float, float]]) -> None:
+    """Best-effort: geocodes any of `points` not already in geocoded_points,
+    deduping by the same ~1m rounding the cache uses so a stay's several
+    pings only trigger one real Nominatim call. Runs on the background
+    scheduler thread, never blocking the web app - a failed lookup just
+    leaves that coordinate ungeocoded until it's seen again."""
+    seen: set[tuple[float, float]] = set()
+    for lat, lon in points:
+        key = round_coord(lat, lon)
+        if key in seen:
+            continue
+        seen.add(key)
+        if get_geocoded_point(conn, lat, lon) is not None:
+            continue
+        try:
+            result = reverse_geocode(lat, lon)
+        except Exception:
+            logger.exception("Reverse geocoding failed for (%s, %s).", lat, lon)
+            continue
+        if result.address is not None or result.poi_name is not None:
+            store_geocoded_point(conn, lat, lon, result.address, result.poi_name)
+
+
 def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublisher | None) -> None:
     """Best-effort refresh of every enabled owner device's location. Never allowed
     to break AirTag polling - a failure here just means this poll's away-correlation
@@ -118,6 +144,7 @@ def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublishe
                 )
             except Exception:
                 logger.exception("Failed to publish owner device '%s' to Home Assistant.", location.device_id)
+    _geocode_new_points(conn, [(loc.lat, loc.lon) for loc in locations])
 
 
 def _owner_location_for_away_check(
@@ -234,6 +261,7 @@ def _poll_airtag(
         return
 
     logger.info("[%s] Inserted %d new report(s).", airtag.id, len(newly_inserted))
+    _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted])
 
     if ha_publisher is not None:
         latest = max(reports, key=lambda r: r.timestamp)
@@ -275,7 +303,7 @@ def _poll_airtag(
                 report_id=report.id,
             ),
         )
-        address = reverse_geocode(report.lat, report.lon)
+        address = reverse_geocode(report.lat, report.lon).address
         if _should_notify(settings, alert.reason):
             message = (
                 f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"

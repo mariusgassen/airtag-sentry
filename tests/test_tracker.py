@@ -1,11 +1,43 @@
 import contextlib
 import datetime as dt
+import os
 import types
 
+import psycopg
 import pytest
 
 from airtag_sentry import tracker
-from airtag_sentry.db import AppSettings, OwnerLocation
+from airtag_sentry.db import (
+    AppSettings,
+    GeocodedPoint,
+    OwnerLocation,
+    get_conn,
+    get_geocoded_point,
+    store_geocoded_point,
+)
+from airtag_sentry.geocode import GeocodeResult
+from airtag_sentry.migrate import upgrade_to_head
+
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql://airtag:airtag@localhost:5432/airtag_sentry_test"
+)
+os.environ.setdefault("TEST_DATABASE_URL", TEST_DATABASE_URL)
+
+
+@pytest.fixture()
+def conn():
+    """Real Postgres connection, test_db.py-style: this module's geocoding
+    tests exercise genuine DB round-tripping (geocoded_points) rather than
+    just call wiring, so a mock connection wouldn't do."""
+    try:
+        with get_conn(TEST_DATABASE_URL) as connection:
+            upgrade_to_head()
+            with connection.cursor() as cur:
+                cur.execute("TRUNCATE geocoded_points RESTART IDENTITY CASCADE")
+            connection.commit()
+            yield connection
+    except psycopg.OperationalError:
+        pytest.skip(f"Postgres not reachable at {TEST_DATABASE_URL}; start it to run this test.")
 
 
 @pytest.mark.parametrize(
@@ -168,3 +200,44 @@ def test_poll_once_skips_and_returns_false_when_already_running(monkeypatch):
         assert tracker.poll_once(cfg) is False
     finally:
         tracker._poll_lock.release()
+
+
+def test_poll_once_geocodes_newly_inserted_report_coordinates(monkeypatch, conn):
+    # Uses the real conn fixture (test_db.py-style) since this is exercising
+    # genuine DB round-tripping (geocoded_points), not just call wiring.
+    from airtag_sentry import tracker as tracker_module
+
+    monkeypatch.setattr(tracker_module, "get_conn", lambda _url: conn)
+    monkeypatch.setattr(tracker_module, "is_connected", lambda _cfg: False)  # skip the AirTag session entirely
+    monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", lambda _cfg, _conn: [])
+    monkeypatch.setattr(tracker_module, "build_notifiers", lambda _cfg, _conn: [])
+    monkeypatch.setattr(tracker_module, "build_ha_publisher", lambda _cfg, _conn: None)
+
+    geocode_calls = []
+
+    def fake_reverse_geocode(lat, lon):
+        geocode_calls.append((lat, lon))
+        return GeocodeResult(address="12 Main St", poi_name="REWE")
+
+    monkeypatch.setattr(tracker_module, "reverse_geocode", fake_reverse_geocode)
+
+    tracker_module._geocode_new_points(conn, [(49.8728, 8.6512), (49.8728, 8.6512)])
+
+    # Same rounded coordinate twice -> one real geocode call, cached after that.
+    assert geocode_calls == [(49.8728, 8.6512)]
+    assert get_geocoded_point(conn, 49.8728, 8.6512) == GeocodedPoint(
+        lat_rounded=49.8728, lon_rounded=8.6512, address="12 Main St", poi_name="REWE"
+    )
+
+
+def test_geocode_new_points_skips_already_cached_coordinates(monkeypatch, conn):
+    from airtag_sentry import tracker as tracker_module
+
+    store_geocoded_point(conn, 49.8728, 8.6512, "Cached Address", "Cached POI")
+
+    def fail_if_called(*_a, **_k):
+        raise AssertionError("reverse_geocode should not be called for an already-cached coordinate")
+
+    monkeypatch.setattr(tracker_module, "reverse_geocode", fail_if_called)
+
+    tracker_module._geocode_new_points(conn, [(49.8728, 8.6512)])
