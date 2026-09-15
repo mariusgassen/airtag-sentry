@@ -263,8 +263,15 @@ third, additional alert — it never replaces the other two:
 - **`moved_without_owner`** — one of the alerts above just fired, *and* the
   tag's new position is more than the away-distance threshold (default
   150 m) from your device's last-known location. If that location reading
-  is older than the max-age setting (default 60 min), this check is skipped
-  entirely for that alert rather than guessing off stale data.
+  is older than the max-age setting, one on-demand live Apple location fetch
+  is attempted before falling back to skipping the check for that alert.
+
+Every alert reason is always recorded (visible in the AirTag's Verlauf),
+regardless of the below. Whether it also sends a Telegram/push notification
+is a separate, per-reason toggle in Settings ⚙️ → **Benachrichtigungen**
+("Bei folgenden Ereignissen benachrichtigen") — e.g. `distance_threshold`
+fires on every trip you take with the tag yourself, so it's reasonable to
+mute just that one while keeping `moved_without_owner` on.
 
 ## Configuration reference
 

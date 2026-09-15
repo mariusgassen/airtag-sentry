@@ -251,6 +251,9 @@ class SettingsIn(BaseModel):
     owner_location_max_age_minutes: float = Field(gt=0)
     history_cluster_radius_meters: float = Field(gt=0)
     color_palette: str
+    notify_on_distance_threshold: bool
+    notify_on_stillstand_movement: bool
+    notify_on_moved_without_owner: bool
 
 
 class AppleLoginIn(BaseModel):

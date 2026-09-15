@@ -169,6 +169,14 @@ class AppSettings:
     owner_location_max_age_minutes: float
     history_cluster_radius_meters: float
     color_palette: str
+    # Whether each alert reason (see tracker.py's _ALERT_TITLES) sends a
+    # Telegram/push notification at all - independent of which notifier
+    # channels are configured. An alert is always recorded (record_alert)
+    # regardless of these, so Verlauf/alert history stays complete either
+    # way; this only gates notify_all().
+    notify_on_distance_threshold: bool
+    notify_on_stillstand_movement: bool
+    notify_on_moved_without_owner: bool
 
 
 @contextmanager
@@ -581,6 +589,9 @@ _SETTINGS_COLUMNS = (
     "owner_location_max_age_minutes",
     "history_cluster_radius_meters",
     "color_palette",
+    "notify_on_distance_threshold",
+    "notify_on_stillstand_movement",
+    "notify_on_moved_without_owner",
 )
 
 
@@ -605,6 +616,9 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 owner_location_max_age_minutes = %s,
                 history_cluster_radius_meters = %s,
                 color_palette = %s,
+                notify_on_distance_threshold = %s,
+                notify_on_stillstand_movement = %s,
+                notify_on_moved_without_owner = %s,
                 updated_at = now()
             WHERE id = 1
             """,
@@ -618,6 +632,9 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.owner_location_max_age_minutes,
                 settings.history_cluster_radius_meters,
                 settings.color_palette,
+                settings.notify_on_distance_threshold,
+                settings.notify_on_stillstand_movement,
+                settings.notify_on_moved_without_owner,
             ),
         )
     conn.commit()

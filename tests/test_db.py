@@ -265,6 +265,9 @@ def test_get_settings_returns_seeded_defaults(conn):
         owner_location_max_age_minutes=60,
         history_cluster_radius_meters=50,
         color_palette="pastel",
+        notify_on_distance_threshold=True,
+        notify_on_stillstand_movement=True,
+        notify_on_moved_without_owner=True,
     )
 
 
@@ -281,6 +284,9 @@ def test_update_settings_round_trips(conn):
             owner_location_max_age_minutes=30,
             history_cluster_radius_meters=25,
             color_palette="vivid",
+            notify_on_distance_threshold=False,
+            notify_on_stillstand_movement=True,
+            notify_on_moved_without_owner=False,
         ),
     )
     assert updated.polling_interval_minutes == 30
