@@ -1,71 +1,67 @@
-import requests
+from unittest.mock import Mock
 
-from airtag_sentry import geocode
+import pytest
 
-
-class _FakeResponse:
-    def __init__(self, payload=None, status=200):
-        self._payload = payload or {}
-        self.status_code = status
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}")
-
-    def json(self):
-        return self._payload
+from airtag_sentry.geocode import GeocodeResult, reverse_geocode
 
 
-def _reset(monkeypatch):
-    monkeypatch.setattr(geocode, "_cache", {})
-    monkeypatch.setattr(geocode, "_last_call", 0.0)
-    # Skip Nominatim's real 1req/s throttle in tests.
-    monkeypatch.setattr(geocode, "_MIN_INTERVAL_SECONDS", 0.0)
+@pytest.fixture(autouse=True)
+def _no_rate_limit(monkeypatch):
+    # The 1 req/sec throttle is real-time and would make every test slow -
+    # tests only concern themselves with the HTTP call/response mapping.
+    import airtag_sentry.geocode as geocode_module
+
+    monkeypatch.setattr(geocode_module, "_MIN_INTERVAL_SECONDS", 0.0)
 
 
-def test_reverse_geocode_returns_address(monkeypatch):
-    _reset(monkeypatch)
-    calls = []
+def test_reverse_geocode_returns_address_and_poi_name(monkeypatch):
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "display_name": "REWE, 12, Musterstraße, Darmstadt, Hessen, 64283, Deutschland",
+        "name": "REWE",
+    }
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
 
-    def fake_get(url, params, headers, timeout):
-        calls.append((url, params))
-        return _FakeResponse({"display_name": "Alexanderplatz, Berlin"})
+    result = reverse_geocode(49.8728, 8.6512)
 
-    monkeypatch.setattr(geocode.requests, "get", fake_get)
-
-    assert geocode.reverse_geocode(52.5219, 13.4132) == "Alexanderplatz, Berlin"
-    assert len(calls) == 1
-
-
-def test_reverse_geocode_caches_by_rounded_coordinates(monkeypatch):
-    _reset(monkeypatch)
-    calls = []
-
-    def fake_get(url, params, headers, timeout):
-        calls.append((url, params))
-        return _FakeResponse({"display_name": "Alexanderplatz, Berlin"})
-
-    monkeypatch.setattr(geocode.requests, "get", fake_get)
-
-    geocode.reverse_geocode(52.52190, 13.41320)
-    geocode.reverse_geocode(52.521900001, 13.413200001)  # rounds to the same cache key
-
-    assert len(calls) == 1
+    assert result == GeocodeResult(
+        address="REWE, 12, Musterstraße, Darmstadt, Hessen, 64283, Deutschland",
+        poi_name="REWE",
+    )
 
 
-def test_reverse_geocode_returns_none_on_request_failure(monkeypatch):
-    _reset(monkeypatch)
+def test_reverse_geocode_returns_none_poi_name_for_a_plain_address(monkeypatch):
+    # Nominatim omits "name" entirely for a point that isn't a named POI.
+    mock_response = Mock()
+    mock_response.json.return_value = {"display_name": "Musterstraße 5, Darmstadt"}
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
 
-    def fake_get(url, params, headers, timeout):
-        raise requests.ConnectionError("no network")
+    result = reverse_geocode(49.8728, 8.6512)
 
-    monkeypatch.setattr(geocode.requests, "get", fake_get)
-
-    assert geocode.reverse_geocode(52.5, 13.4) is None
+    assert result == GeocodeResult(address="Musterstraße 5, Darmstadt", poi_name=None)
 
 
-def test_reverse_geocode_returns_none_on_missing_display_name(monkeypatch):
-    _reset(monkeypatch)
-    monkeypatch.setattr(geocode.requests, "get", lambda *a, **k: _FakeResponse({}))
+def test_reverse_geocode_returns_empty_result_on_request_failure(monkeypatch):
+    import requests
 
-    assert geocode.reverse_geocode(0.0, 0.0) is None
+    def raise_error(*a, **k):
+        raise requests.RequestException("boom")
+
+    monkeypatch.setattr("requests.get", raise_error)
+
+    result = reverse_geocode(49.8728, 8.6512)
+
+    assert result == GeocodeResult(address=None, poi_name=None)
+
+
+def test_reverse_geocode_returns_empty_result_on_missing_display_name(monkeypatch):
+    mock_response = Mock()
+    mock_response.json.return_value = {}
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
+
+    result = reverse_geocode(49.8728, 8.6512)
+
+    assert result == GeocodeResult(address=None, poi_name=None)

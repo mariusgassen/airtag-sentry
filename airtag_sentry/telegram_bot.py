@@ -225,7 +225,7 @@ def _format_location_text(
     lines = [name]
     if battery is not None:
         lines.append(f"Batterie: {battery}")
-    address = reverse_geocode(lat, lon)
+    address = reverse_geocode(lat, lon).address
     lines.append(format_location_line(lat, lon, timestamp, address, tz))
     return "\n".join(lines)
 

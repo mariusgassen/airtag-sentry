@@ -694,7 +694,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/geocode")
     def geocode_route(lat: float, lon: float):
-        return {"address": reverse_geocode(lat, lon)}
+        return {"address": reverse_geocode(lat, lon).address}
 
     @app.get("/api/status")
     def get_status(airtag_id: str | None = None):
