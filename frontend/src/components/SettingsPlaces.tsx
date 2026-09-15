@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MapContainer, TileLayer } from 'react-leaflet'
 import type { Place } from '../api'
 import { createPlace, deletePlace, updatePlace } from '../api'
@@ -8,8 +8,10 @@ import { ChevronRightIcon, MapPinIcon, PlusIcon, TrashIcon } from './icons'
 import { useCurrentPosition } from '../hooks/useCurrentPosition'
 
 const DEFAULT_RADIUS_METERS = 100
-// Only used if browser geolocation is unavailable when adding a brand-new
-// place - immediately overridden once/if it resolves (see useCurrentPosition).
+// Initial center for a brand-new place before browser geolocation resolves
+// (or if it's unavailable/denied) - PlaceEditor's effect swaps this for the
+// real fix once/if one arrives and the user hasn't started editing yet (see
+// useCurrentPosition and the `mapGeneration` effect below).
 const FALLBACK_CENTER: [number, number] = [51.1657, 10.4515]
 
 interface Props {
@@ -72,11 +74,30 @@ function PlaceEditor({
 }) {
   const here = useCurrentPosition()
   const [name, setName] = useState(place?.name ?? '')
-  const [center, setCenter] = useState<[number, number]>(
-    place ? [place.lat, place.lon] : (here ?? FALLBACK_CENTER),
-  )
+  // Seeded at FALLBACK_CENTER for a brand-new place, not `here` - browser
+  // geolocation is asynchronous by spec, so `here` is guaranteed to still be
+  // null on this very first render even when it goes on to resolve a moment
+  // later. The effect below is what actually applies a late-resolving fix.
+  const [center, setCenter] = useState<[number, number]>(place ? [place.lat, place.lon] : FALLBACK_CENTER)
   const [radius, setRadius] = useState(place?.radius_meters ?? DEFAULT_RADIUS_METERS)
   const [saving, setSaving] = useState(false)
+  // Set inside EditableCircle's onChange below the moment the user first
+  // drags the circle - once true, a geolocation fix resolving afterwards
+  // must never override their in-progress edit.
+  const hasUserEditedRef = useRef(false)
+  // Bumped exactly once, the first time browser geolocation resolves for a
+  // brand-new place the user hasn't touched yet. MapContainer's `center`
+  // prop and EditableCircle's underlying L.circle layer are both only ever
+  // applied at mount time (see EditableCircle's own mount-once comment), so
+  // merely calling setCenter here wouldn't move anything already on screen -
+  // changing this key remounts the map + circle at the real location.
+  const [mapGeneration, setMapGeneration] = useState(0)
+
+  useEffect(() => {
+    if (place || !here || hasUserEditedRef.current) return
+    setCenter(here)
+    setMapGeneration((g) => g + 1)
+  }, [place, here])
 
   async function save() {
     const trimmed = name.trim()
@@ -123,7 +144,7 @@ function PlaceEditor({
         </button>
       </div>
       <div className="h-64 shrink-0">
-        <MapContainer center={center} zoom={16} className="h-full w-full">
+        <MapContainer key={mapGeneration} center={center} zoom={16} className="h-full w-full">
           <TileLayer
             attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -132,6 +153,7 @@ function PlaceEditor({
             center={center}
             radius={radius}
             onChange={(nextCenter, nextRadius) => {
+              hasUserEditedRef.current = true
               setCenter(nextCenter)
               setRadius(nextRadius)
             }}
