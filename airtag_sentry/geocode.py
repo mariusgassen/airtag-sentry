@@ -7,6 +7,7 @@ label for a marker that already has its lat/lon, never load-bearing.
 
 from __future__ import annotations
 
+import datetime as dt
 import threading
 import time
 
@@ -61,3 +62,16 @@ def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> str | None:
             _cache.clear()
         _cache[key] = address
         return address
+
+
+def format_location_line(lat: float, lon: float, timestamp: dt.datetime, address: str | None) -> str:
+    """Timestamp + optional reverse-geocoded address + a Google Maps link, one
+    per line - the shared "where/when" tail for anything telling a human
+    about a location (telegram_bot.py's /where reply, tracker.py's movement
+    alerts). Callers fetch `address` themselves via reverse_geocode() so this
+    stays a pure formatter."""
+    lines = [timestamp.strftime("%d.%m.%Y %H:%M")]
+    if address:
+        lines.append(address)
+    lines.append(f"https://maps.google.com/?q={lat},{lon}")
+    return "\n".join(lines)
