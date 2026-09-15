@@ -51,9 +51,9 @@ def _battery_level(status: int) -> str:
 
 
 _ALERT_TITLES = {
-    "distance_threshold": "AirTagSentry: unerwartete Bewegung",
-    "stillstand_movement": "AirTagSentry: Bewegung nach Stillstand",
-    "moved_without_owner": "AirTagSentry: Bewegung ohne dich",
+    "distance_threshold": "Unerwartete Bewegung",
+    "stillstand_movement": "Bewegung nach Stillstand",
+    "moved_without_owner": "Bewegung ohne dich",
 }
 
 
