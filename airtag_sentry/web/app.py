@@ -37,14 +37,17 @@ from airtag_sentry.geocode import reverse_geocode
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     AppSettings,
+    NamedPlace,
     PushSubscription,
     StoredKey,
     add_push_subscription,
     create_airtag,
+    create_named_place,
     delete_airtag,
     delete_airtag_key,
     delete_ha_api_token,
     delete_mqtt_credentials,
+    delete_named_place,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
@@ -58,6 +61,7 @@ from airtag_sentry.db import (
     latest_owner_device_locations,
     list_airtags,
     list_keyed_airtag_ids,
+    list_named_places,
     list_owner_devices as db_list_owner_devices,
     remove_push_subscription,
     rename_airtag,
@@ -67,6 +71,7 @@ from airtag_sentry.db import (
     set_mqtt_credentials,
     set_telegram_bot_commands,
     set_telegram_credentials,
+    update_named_place,
     update_settings,
 )
 from airtag_sentry.scheduler import start_scheduler
@@ -254,6 +259,13 @@ class SettingsIn(BaseModel):
     notify_on_distance_threshold: bool
     notify_on_stillstand_movement: bool
     notify_on_moved_without_owner: bool
+
+
+class NamedPlaceIn(BaseModel):
+    name: str
+    lat: float
+    lon: float
+    radius_meters: float = Field(gt=0)
 
 
 class AppleLoginIn(BaseModel):
@@ -750,6 +762,38 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             settings = update_settings(conn, AppSettings(**body.model_dump()))
         return dataclasses.asdict(settings)
+
+    @app.get("/api/places")
+    def get_places():
+        with get_conn(cfg.database_url) as conn:
+            places = list_named_places(conn)
+        return [dataclasses.asdict(p) for p in places]
+
+    @app.post("/api/places")
+    def create_place_route(body: NamedPlaceIn):
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name must not be empty.")
+        with get_conn(cfg.database_url) as conn:
+            place = create_named_place(conn, name, body.lat, body.lon, body.radius_meters)
+        return dataclasses.asdict(place)
+
+    @app.put("/api/places/{place_id}")
+    def update_place_route(place_id: int, body: NamedPlaceIn):
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name must not be empty.")
+        with get_conn(cfg.database_url) as conn:
+            place = update_named_place(conn, place_id, name, body.lat, body.lon, body.radius_meters)
+            if place is None:
+                raise HTTPException(status_code=404, detail="Place not found.")
+        return dataclasses.asdict(place)
+
+    @app.delete("/api/places/{place_id}")
+    def delete_place_route(place_id: int):
+        with get_conn(cfg.database_url) as conn:
+            delete_named_place(conn, place_id)
+        return {"ok": True}
 
     @app.get("/api/owner-devices")
     def get_owner_devices():

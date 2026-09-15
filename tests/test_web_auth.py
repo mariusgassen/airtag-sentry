@@ -14,6 +14,7 @@ from airtag_sentry.config import load_config
 from airtag_sentry.db import (
     AirtagRecord,
     HaApiToken,
+    NamedPlace,
     OwnerAppleCredentials,
     OwnerDevice,
     OwnerLocation,
@@ -554,3 +555,65 @@ def test_favicon_is_servable_without_a_session(client):
         assert resp.status_code == 200
     finally:
         favicon.unlink()
+
+
+def test_get_places_returns_persisted_places(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(
+        app_module,
+        "list_named_places",
+        lambda _conn: [NamedPlace(id=1, name="Home", lat=49.87, lon=8.65, radius_meters=75.0)],
+    )
+
+    resp = client.get("/api/places")
+
+    assert resp.status_code == 200
+    assert resp.json() == [{"id": 1, "name": "Home", "lat": 49.87, "lon": 8.65, "radius_meters": 75.0}]
+
+
+def test_create_place_rejects_empty_name(client, monkeypatch):
+    _login(client, monkeypatch)
+
+    resp = client.post("/api/places", json={"name": "  ", "lat": 0, "lon": 0, "radius_meters": 50})
+
+    assert resp.status_code == 400
+
+
+def test_create_place_route(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(
+        app_module,
+        "create_named_place",
+        lambda _conn, name, lat, lon, radius_meters: NamedPlace(
+            id=1, name=name, lat=lat, lon=lon, radius_meters=radius_meters
+        ),
+    )
+
+    resp = client.post("/api/places", json={"name": "Home", "lat": 49.87, "lon": 8.65, "radius_meters": 75.0})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"id": 1, "name": "Home", "lat": 49.87, "lon": 8.65, "radius_meters": 75.0}
+
+
+def test_update_place_route_404s_for_unknown_id(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(app_module, "update_named_place", lambda *a, **k: None)
+
+    resp = client.put("/api/places/999", json={"name": "Home", "lat": 0, "lon": 0, "radius_meters": 50})
+
+    assert resp.status_code == 404
+
+
+def test_delete_place_route(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    deleted_ids = []
+    monkeypatch.setattr(app_module, "delete_named_place", lambda _conn, place_id: deleted_ids.append(place_id))
+
+    resp = client.delete("/api/places/1")
+
+    assert resp.status_code == 200
+    assert deleted_ids == [1]
