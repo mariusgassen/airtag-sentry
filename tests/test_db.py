@@ -320,6 +320,7 @@ def test_record_owner_device_location_persists_battery(conn):
     )
     assert loc.battery_level == 0.42
     assert loc.battery_status == "Charging"
+    assert loc.battery_reported is True
 
 
 def test_record_owner_device_location_carries_battery_forward_when_missing(conn):
@@ -341,6 +342,9 @@ def test_record_owner_device_location_carries_battery_forward_when_missing(conn)
 
     assert second.battery_level == 0.8
     assert second.battery_status == "NotCharging"
+    # Carried forward, not a fresh reading this poll - see battery_reported's
+    # docstring on OwnerLocation (db.py).
+    assert second.battery_reported is False
 
 
 def test_record_owner_device_location_leaves_battery_null_with_no_prior_reading(conn):
@@ -351,6 +355,7 @@ def test_record_owner_device_location_leaves_battery_null_with_no_prior_reading(
     loc = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
     assert loc.battery_level is None
     assert loc.battery_status is None
+    assert loc.battery_reported is False
 
 
 def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):

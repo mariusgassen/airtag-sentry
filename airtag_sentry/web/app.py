@@ -869,6 +869,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "horizontal_accuracy": loc.horizontal_accuracy,
                     "battery_level": loc.battery_level,
                     "battery_status": loc.battery_status,
+                    "battery_reported": loc.battery_reported,
                 }
             )
         return results
@@ -887,6 +888,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "horizontal_accuracy": loc.horizontal_accuracy,
                 "battery_level": loc.battery_level,
                 "battery_status": loc.battery_status,
+                "battery_reported": loc.battery_reported,
             }
             for loc in locations
         ]

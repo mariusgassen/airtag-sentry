@@ -113,8 +113,14 @@ export function DeviceDetail({
                   className={`mt-1 text-sm ${
                     isLowBattery(location.battery_level) ? 'text-[var(--destructive)]' : 'text-[var(--text-secondary)]'
                   }`}
+                  title={
+                    location.battery_reported
+                      ? undefined
+                      : 'Kein frischer Batteriewert beim letzten Fix - letzter bekannter Stand übernommen'
+                  }
                 >
                   Batterie: {formatDeviceBattery(location.battery_level, location.battery_status)}
+                  {!location.battery_reported && '*'}
                 </p>
               )}
             </>
@@ -421,6 +427,21 @@ function DeviceHistoryRows({
             <span className="text-[var(--text-secondary)]">
               {isStay && `${c.points.length}× · `}
               {c.anchor.lat.toFixed(4)}, {c.anchor.lon.toFixed(4)}
+              {' · '}
+              {c.anchor.battery_level != null ? (
+                <span
+                  title={
+                    c.anchor.battery_reported
+                      ? undefined
+                      : 'Kein frischer Batteriewert bei diesem Fix - letzter bekannter Stand übernommen'
+                  }
+                >
+                  {formatDeviceBattery(c.anchor.battery_level, c.anchor.battery_status)}
+                  {!c.anchor.battery_reported && '*'}
+                </span>
+              ) : (
+                <span title="Keine Batterieangabe für diesen Zeitpunkt">keine Angabe</span>
+              )}
             </span>
           </button>
         )

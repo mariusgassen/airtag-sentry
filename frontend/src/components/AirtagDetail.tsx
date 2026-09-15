@@ -625,6 +625,16 @@ function HistoryList({
             <span className="text-[var(--text-secondary)]">
               {isStay && `${c.points.length}× · `}
               {c.anchor.lat.toFixed(4)}, {c.anchor.lon.toFixed(4)}
+              {' · '}
+              {/* Recorded straight off this report's own status byte (see
+                  tracker._battery_level) - always present for a real poll,
+                  null only for a row from before the battery_level column
+                  existed, so "keine Angabe" is shown explicitly rather than
+                  silently omitted (for later visualization, see
+                  DeviceHistoryRows' identical battery_reported treatment -
+                  AirTag reports have no equivalent gap-fill to flag since
+                  they're never carried forward). */}
+              {c.anchor.battery_level ? formatAirtagBattery(c.anchor.battery_level) : 'keine Angabe'}
             </span>
           </button>
         )
