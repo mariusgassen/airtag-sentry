@@ -32,6 +32,7 @@ from airtag_sentry.db import (
     record_alert,
     record_owner_device_location,
 )
+from airtag_sentry.geocode import format_location_line, reverse_geocode
 from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
 from airtag_sentry.notifiers import build_notifiers, notify_all
 from airtag_sentry.notifiers.homeassistant import HomeAssistantPublisher, build_ha_publisher
@@ -212,9 +213,10 @@ def _poll_airtag(
                 report_id=report.id,
             ),
         )
+        address = reverse_geocode(report.lat, report.lon)
         message = (
-            f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt "
-            f"(Report {report.timestamp.isoformat()})."
+            f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
+            f"{format_location_line(report.lat, report.lon, report.timestamp, address)}"
         )
         notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
 
@@ -232,7 +234,7 @@ def _poll_airtag(
                 ),
             )
             away_message = (
-                f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt "
-                f"(Report {report.timestamp.isoformat()})."
+                f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
+                f"{format_location_line(report.lat, report.lon, report.timestamp, address)}"
             )
             notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)

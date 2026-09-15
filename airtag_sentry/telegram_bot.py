@@ -27,7 +27,7 @@ from airtag_sentry.db import (
     list_airtags,
     list_owner_devices,
 )
-from airtag_sentry.geocode import reverse_geocode
+from airtag_sentry.geocode import format_location_line, reverse_geocode
 
 logger = logging.getLogger(__name__)
 
@@ -220,11 +220,8 @@ def _format_location_text(name: str, lat: float, lon: float, timestamp: dt.datet
     lines = [name]
     if battery is not None:
         lines.append(f"Batterie: {battery}")
-    lines.append(timestamp.strftime("%d.%m.%Y %H:%M"))
     address = reverse_geocode(lat, lon)
-    if address:
-        lines.append(address)
-    lines.append(f"https://maps.google.com/?q={lat},{lon}")
+    lines.append(format_location_line(lat, lon, timestamp, address))
     return "\n".join(lines)
 
 
