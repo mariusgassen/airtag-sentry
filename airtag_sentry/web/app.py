@@ -33,7 +33,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
-from airtag_sentry.geocode import reverse_geocode
+from airtag_sentry.geocode import get_or_fetch_geocode
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     AppSettings,
@@ -749,7 +749,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/geocode")
     def geocode_route(lat: float, lon: float):
-        return {"address": reverse_geocode(lat, lon).address}
+        with get_conn(cfg.database_url) as conn:
+            return {"address": get_or_fetch_geocode(conn, lat, lon).address}
 
     @app.put("/api/geocode/correction")
     def set_geocode_correction_route(body: GeocodeCorrectionIn):

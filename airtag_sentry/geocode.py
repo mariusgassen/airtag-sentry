@@ -6,7 +6,13 @@ have" label for a marker that already has its lat/lon, never load-bearing.
 
 Results are persisted by callers via db.py's geocoded_points table (the
 poller, see tracker.py) rather than cached here - this module now only ever
-makes the HTTP call, rate-limited.
+makes the HTTP call, rate-limited. get_or_fetch_geocode() below is the
+cache-aware entry point every *request-time* caller (the /api/geocode route,
+the Telegram bot) should use instead of calling reverse_geocode() directly,
+so those paths get the same persisted cache tracker.py's poller already
+benefits from - both for latency (skip the live Nominatim round-trip
+entirely on a cache hit) and consistency (Nominatim only; the geofence/
+correction priority chain lives in stays.py and is layered on top by web/app.py).
 """
 
 from __future__ import annotations
@@ -16,7 +22,10 @@ import datetime as dt
 import threading
 import time
 
+import psycopg
 import requests
+
+from airtag_sentry.db import get_geocoded_point, store_geocoded_point
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 # Nominatim's usage policy caps unauthenticated public use at 1 request/sec
@@ -73,3 +82,20 @@ def format_location_line(
         lines.append(address)
     lines.append(f"https://maps.google.com/?q={lat},{lon}")
     return "\n".join(lines)
+
+
+def get_or_fetch_geocode(conn: psycopg.Connection, lat: float, lon: float) -> GeocodeResult:
+    """Cache-aware wrapper for request-time geocode lookups (the /api/geocode
+    route, the Telegram bot) - mirrors tracker.py's _geocode_new_points'
+    "only cache a successful lookup" behavior, just for a single point rather
+    than a batch. Checks the geocoded_points table first so a coordinate the
+    poller (or an earlier request) already resolved never triggers another
+    live, rate-limited Nominatim call."""
+    cached = get_geocoded_point(conn, lat, lon)
+    if cached is not None:
+        return GeocodeResult(address=cached.address, poi_name=cached.poi_name)
+
+    result = reverse_geocode(lat, lon)
+    if result.address is not None or result.poi_name is not None:
+        store_geocoded_point(conn, lat, lon, result.address, result.poi_name)
+    return result

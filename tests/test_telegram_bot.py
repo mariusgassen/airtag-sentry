@@ -136,19 +136,19 @@ def test_where_without_arg_lists_devices_before_airtags(mock_post, mock_list_air
     assert [row[0]["callback_data"] for row in buttons] == ["where:0", "where:1", "where:2", "where:3"]
 
 
-@patch("airtag_sentry.telegram_bot.reverse_geocode")
+@patch("airtag_sentry.telegram_bot.get_or_fetch_geocode")
 @patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.fetch_reports")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
 def test_where_with_unique_matching_name_sends_location(
-    mock_post, mock_list_airtags, mock_fetch_reports, mock_list_owner_devices, mock_reverse_geocode
+    mock_post, mock_list_airtags, mock_fetch_reports, mock_list_owner_devices, mock_get_or_fetch_geocode
 ):
     mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
     mock_list_owner_devices.return_value = []
     mock_fetch_reports.return_value = [_make_report("a2")]
-    mock_reverse_geocode.return_value = GeocodeResult(address=None, poi_name=None)
+    mock_get_or_fetch_geocode.return_value = GeocodeResult(address=None, poi_name=None)
 
     telegram_bot.handle_update(
         conn=MagicMock(),
@@ -166,28 +166,29 @@ def test_where_with_unique_matching_name_sends_location(
     assert "reply_markup" not in kwargs["json"]
 
 
-@patch("airtag_sentry.telegram_bot.reverse_geocode")
+@patch("airtag_sentry.telegram_bot.get_or_fetch_geocode")
 @patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.fetch_reports")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
 def test_where_location_includes_battery_and_address(
-    mock_post, mock_list_airtags, mock_fetch_reports, mock_list_owner_devices, mock_reverse_geocode
+    mock_post, mock_list_airtags, mock_fetch_reports, mock_list_owner_devices, mock_get_or_fetch_geocode
 ):
     mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
     mock_list_owner_devices.return_value = []
     mock_fetch_reports.return_value = [_make_report("a2", battery_level="low")]
-    mock_reverse_geocode.return_value = GeocodeResult(address="Musterstraße 1, Berlin", poi_name=None)
+    mock_get_or_fetch_geocode.return_value = GeocodeResult(address="Musterstraße 1, Berlin", poi_name=None)
 
+    conn = MagicMock()
     telegram_bot.handle_update(
-        conn=MagicMock(),
+        conn=conn,
         bot_token="tok",
         chat_id="111",
         update={"message": {"chat": {"id": 111}, "text": "/where fahrrad"}},
     )
 
-    mock_reverse_geocode.assert_called_once_with(52.5, 13.4)
+    mock_get_or_fetch_geocode.assert_called_once_with(conn, 52.5, 13.4)
     text = mock_post.call_args.kwargs["json"]["text"]
     assert "Batterie: Niedrig" in text
     assert "Musterstraße 1, Berlin" in text
@@ -212,13 +213,13 @@ def test_where_with_no_match_reports_not_found(mock_post, mock_list_airtags, moc
     assert "Nichts gefunden" in kwargs["json"]["text"]
 
 
-@patch("airtag_sentry.telegram_bot.reverse_geocode")
+@patch("airtag_sentry.telegram_bot.get_or_fetch_geocode")
 @patch("airtag_sentry.telegram_bot.fetch_owner_device_location_history")
 @patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
 def test_where_with_unique_matching_device_name_sends_location(
-    mock_post, mock_list_airtags, mock_list_owner_devices, mock_fetch_history, mock_reverse_geocode
+    mock_post, mock_list_airtags, mock_list_owner_devices, mock_fetch_history, mock_get_or_fetch_geocode
 ):
     mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
@@ -226,7 +227,7 @@ def test_where_with_unique_matching_device_name_sends_location(
     mock_fetch_history.return_value = [
         OwnerLocation(id=1, device_id="d1", recorded_at=dt.datetime(2026, 1, 1, 12, 0), lat=52.5, lon=13.4, horizontal_accuracy=5.0)
     ]
-    mock_reverse_geocode.return_value = GeocodeResult(address=None, poi_name=None)
+    mock_get_or_fetch_geocode.return_value = GeocodeResult(address=None, poi_name=None)
 
     telegram_bot.handle_update(
         conn=MagicMock(),
@@ -244,13 +245,13 @@ def test_where_with_unique_matching_device_name_sends_location(
     assert "reply_markup" not in kwargs["json"]
 
 
-@patch("airtag_sentry.telegram_bot.reverse_geocode")
+@patch("airtag_sentry.telegram_bot.get_or_fetch_geocode")
 @patch("airtag_sentry.telegram_bot.fetch_owner_device_location_history")
 @patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
 def test_where_device_location_includes_battery(
-    mock_post, mock_list_airtags, mock_list_owner_devices, mock_fetch_history, mock_reverse_geocode
+    mock_post, mock_list_airtags, mock_list_owner_devices, mock_fetch_history, mock_get_or_fetch_geocode
 ):
     mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
@@ -267,7 +268,7 @@ def test_where_device_location_includes_battery(
             battery_status="Charging",
         )
     ]
-    mock_reverse_geocode.return_value = GeocodeResult(address=None, poi_name=None)
+    mock_get_or_fetch_geocode.return_value = GeocodeResult(address=None, poi_name=None)
 
     telegram_bot.handle_update(
         conn=MagicMock(),
@@ -280,19 +281,19 @@ def test_where_device_location_includes_battery(
     assert "Batterie: 42 % (lädt)" in text
 
 
-@patch("airtag_sentry.telegram_bot.reverse_geocode")
+@patch("airtag_sentry.telegram_bot.get_or_fetch_geocode")
 @patch("airtag_sentry.telegram_bot.list_owner_devices")
 @patch("airtag_sentry.telegram_bot.fetch_reports")
 @patch("airtag_sentry.telegram_bot.list_airtags")
 @patch("airtag_sentry.telegram_bot.requests.post")
 def test_callback_query_resolves_picker_selection(
-    mock_post, mock_list_airtags, mock_fetch_reports, mock_list_owner_devices, mock_reverse_geocode
+    mock_post, mock_list_airtags, mock_fetch_reports, mock_list_owner_devices, mock_get_or_fetch_geocode
 ):
     mock_post.return_value.raise_for_status = MagicMock()
     mock_list_airtags.return_value = _make_airtags()
     mock_list_owner_devices.return_value = []
     mock_fetch_reports.return_value = [_make_report("a2")]
-    mock_reverse_geocode.return_value = GeocodeResult(address=None, poi_name=None)
+    mock_get_or_fetch_geocode.return_value = GeocodeResult(address=None, poi_name=None)
 
     telegram_bot.handle_update(
         conn=MagicMock(),
