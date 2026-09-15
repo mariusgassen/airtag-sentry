@@ -18,6 +18,22 @@ export interface Report {
   battery_level: string | null
 }
 
+export interface ReportStay {
+  anchor_id: number
+  start: string
+  end: string
+  count: number
+  lat: number
+  lon: number
+  label: string | null
+  place_id: number | null
+}
+
+export interface ReportHistory {
+  raw: Report[]
+  stays: ReportStay[]
+}
+
 export interface Status {
   airtag_id: string
   airtag_name: string
@@ -84,6 +100,22 @@ export interface OwnerLocation {
   // readings are real vs. inherited, for later visualization (a
   // battery-over-time chart shouldn't treat a filled gap as a real sample).
   battery_reported: boolean
+}
+
+export interface LocationStay {
+  anchor_recorded_at: string
+  start: string
+  end: string
+  count: number
+  lat: number
+  lon: number
+  label: string | null
+  place_id: number | null
+}
+
+export interface LocationHistory {
+  raw: OwnerLocation[]
+  stays: LocationStay[]
 }
 
 export interface AppleTwoFactorMethod {
@@ -198,7 +230,7 @@ export async function deleteAirtagKey(id: string): Promise<void> {
   await apiFetch(`/api/airtags/${encodeURIComponent(id)}/key`, { method: 'DELETE' })
 }
 
-export async function getReports(airtagId: string, limit = 500): Promise<Report[]> {
+export async function getReports(airtagId: string, limit = 500): Promise<ReportHistory> {
   return (
     await apiFetch(`/api/reports?airtag_id=${encodeURIComponent(airtagId)}&limit=${limit}`)
   ).json()
@@ -280,7 +312,7 @@ export async function getOwnerDeviceLocations(): Promise<OwnerLocation[]> {
   return (await apiFetch('/api/owner-device-locations')).json()
 }
 
-export async function getOwnerDeviceHistory(id: string, limit = 200): Promise<OwnerLocation[]> {
+export async function getOwnerDeviceHistory(id: string, limit = 200): Promise<LocationHistory> {
   return (
     await apiFetch(
       `/api/owner-devices/history?device_id=${encodeURIComponent(id)}&limit=${limit}`,
@@ -467,4 +499,53 @@ export async function subscribePush(subscription: PushSubscription): Promise<voi
 
 export async function unsubscribePush(subscription: PushSubscription): Promise<void> {
   await apiFetch('/api/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: subscription.endpoint }) })
+}
+
+export interface Place {
+  id: number
+  name: string
+  lat: number
+  lon: number
+  radius_meters: number
+}
+
+export async function getPlaces(): Promise<Place[]> {
+  return (await apiFetch('/api/places')).json()
+}
+
+export async function createPlace(input: {
+  name: string
+  lat: number
+  lon: number
+  radius_meters: number
+}): Promise<Place> {
+  return (await apiFetch('/api/places', { method: 'POST', body: JSON.stringify(input) })).json()
+}
+
+export async function updatePlace(
+  id: number,
+  input: { name: string; lat: number; lon: number; radius_meters: number },
+): Promise<Place> {
+  return (
+    await apiFetch(`/api/places/${id}`, { method: 'PUT', body: JSON.stringify(input) })
+  ).json()
+}
+
+export async function deletePlace(id: number): Promise<void> {
+  await apiFetch(`/api/places/${id}`, { method: 'DELETE' })
+}
+
+export async function setGeocodeCorrection(
+  lat: number,
+  lon: number,
+  correctedName: string,
+): Promise<void> {
+  await apiFetch('/api/geocode/correction', {
+    method: 'PUT',
+    body: JSON.stringify({ lat, lon, corrected_name: correctedName }),
+  })
+}
+
+export async function clearGeocodeCorrection(lat: number, lon: number): Promise<void> {
+  await apiFetch(`/api/geocode/correction?lat=${lat}&lon=${lon}`, { method: 'DELETE' })
 }
