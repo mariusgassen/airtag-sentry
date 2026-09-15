@@ -180,14 +180,14 @@ export function IphoneIcon({ className }: IconProps) {
 }
 
 export function WatchIcon({ className }: IconProps) {
-  // Crown just above the case's vertical center (not dead-centered, not up
-  // by the lug) and narrow.
+  // Crown a touch above the case's vertical center - centering it exactly
+  // read as too central; nudged back up slightly.
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
       <rect x="7.5" y="7" width="9" height="12" rx="3" fill="currentColor" />
       <rect x="9" y="3" width="6" height="3" rx="1.2" fill="currentColor" />
       <rect x="9" y="18" width="6" height="3" rx="1.2" fill="currentColor" />
-      <rect x="16.3" y="11" width="1.6" height="3" rx="0.7" fill="currentColor" />
+      <rect x="16.3" y="10.7" width="1.6" height="3" rx="0.7" fill="currentColor" />
     </svg>
   )
 }
