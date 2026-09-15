@@ -36,6 +36,9 @@ export interface AppSettings {
   owner_location_max_age_minutes: number
   history_cluster_radius_meters: number
   color_palette: 'vivid' | 'pastel' | 'pastel_white'
+  notify_on_distance_threshold: boolean
+  notify_on_stillstand_movement: boolean
+  notify_on_moved_without_owner: boolean
 }
 
 export interface OwnerDevice {

@@ -97,24 +97,27 @@ def delete_webhook(bot_token: str) -> None:
     requests.post(_api_url(bot_token, "deleteWebhook"), timeout=_API_TIMEOUT).raise_for_status()
 
 
-def handle_update(conn, bot_token: str, chat_id: str, update: dict) -> None:
+def handle_update(conn, bot_token: str, chat_id: str, update: dict, tz: dt.tzinfo = dt.timezone.utc) -> None:
     """Route one Telegram Update to the right handler. Never raises for
     malformed/unexpected updates - the webhook route responds 200 to Telegram
-    either way, so this just logs and returns on anything unusable."""
+    either way, so this just logs and returns on anything unusable.
+
+    `tz` (Config.display_timezone) is what a /where reply's timestamp gets
+    converted to before display - see geocode.format_location_line."""
     message = update.get("message")
     callback_query = update.get("callback_query")
 
     if message is not None:
-        _handle_message(conn, bot_token, chat_id, message)
+        _handle_message(conn, bot_token, chat_id, message, tz)
     elif callback_query is not None:
-        _handle_callback_query(conn, bot_token, chat_id, callback_query)
+        _handle_callback_query(conn, bot_token, chat_id, callback_query, tz)
 
 
 def _is_authorized_chat(chat_id: str, candidate) -> bool:
     return candidate is not None and str(candidate) == str(chat_id)
 
 
-def _handle_message(conn, bot_token: str, chat_id: str, message: dict) -> None:
+def _handle_message(conn, bot_token: str, chat_id: str, message: dict, tz: dt.tzinfo) -> None:
     if not _is_authorized_chat(chat_id, message.get("chat", {}).get("id")):
         return
     text = (message.get("text") or "").strip()
@@ -131,7 +134,7 @@ def _handle_message(conn, bot_token: str, chat_id: str, message: dict) -> None:
         devices = [d for d in list_owner_devices(conn) if d.enabled]
         _send_message(bot_token, chat_id, _format_list(devices, list_airtags(conn)))
     elif command == "/where":
-        _handle_where(conn, bot_token, chat_id, arg)
+        _handle_where(conn, bot_token, chat_id, arg, tz)
     else:
         _send_message(bot_token, chat_id, f"Unbekannter Befehl: {command}\n\n{_HELP_TEXT}")
 
@@ -175,7 +178,7 @@ def _item_button_label(item: _WhereItem) -> str:
     return f"⭐ {name}" if kind == "device" and obj.is_primary else name
 
 
-def _handle_where(conn, bot_token: str, chat_id: str, arg: str) -> None:
+def _handle_where(conn, bot_token: str, chat_id: str, arg: str, tz: dt.tzinfo) -> None:
     items = _where_items(conn)
     if not items:
         _send_message(bot_token, chat_id, "Keine Geräte oder AirTags konfiguriert.")
@@ -190,7 +193,7 @@ def _handle_where(conn, bot_token: str, chat_id: str, arg: str) -> None:
     if not matches:
         _send_message(bot_token, chat_id, f"Nichts gefunden für „{arg}“. /list zeigt alle an.")
     elif len(matches) == 1:
-        _send_message(bot_token, chat_id, _format_location(matches[0][1], conn))
+        _send_message(bot_token, chat_id, _format_location(matches[0][1], conn, tz))
     else:
         _send_picker(bot_token, chat_id, f"Mehrere Treffer für „{arg}“ – welches Gerät oder AirTag?", matches)
 
@@ -216,16 +219,18 @@ def _format_device_battery(level: float, status: str | None) -> str:
     return f"{percent} (lädt)" if status == "Charging" else percent
 
 
-def _format_location_text(name: str, lat: float, lon: float, timestamp: dt.datetime, battery: str | None) -> str:
+def _format_location_text(
+    name: str, lat: float, lon: float, timestamp: dt.datetime, battery: str | None, tz: dt.tzinfo
+) -> str:
     lines = [name]
     if battery is not None:
         lines.append(f"Batterie: {battery}")
     address = reverse_geocode(lat, lon)
-    lines.append(format_location_line(lat, lon, timestamp, address))
+    lines.append(format_location_line(lat, lon, timestamp, address, tz))
     return "\n".join(lines)
 
 
-def _format_location(item: _WhereItem, conn) -> str:
+def _format_location(item: _WhereItem, conn, tz: dt.tzinfo) -> str:
     kind, obj = item
     if kind == "device":
         name = obj.display_name or obj.name
@@ -234,7 +239,7 @@ def _format_location(item: _WhereItem, conn) -> str:
             return f"{name}: noch kein Standort bekannt."
         location = history[0]  # newest-first, unlike fetch_reports
         battery = _format_device_battery(location.battery_level, location.battery_status) if location.battery_level is not None else None
-        return _format_location_text(name, location.lat, location.lon, location.recorded_at, battery)
+        return _format_location_text(name, location.lat, location.lon, location.recorded_at, battery, tz)
 
     airtag = obj
     reports: list[Report] = fetch_reports(conn, airtag.id, limit=1)
@@ -242,10 +247,10 @@ def _format_location(item: _WhereItem, conn) -> str:
         return f"{airtag.name}: noch kein Standort bekannt."
     report = reports[-1]
     battery = _format_airtag_battery(report.battery_level) if report.battery_level else None
-    return _format_location_text(airtag.name, report.lat, report.lon, report.timestamp, battery)
+    return _format_location_text(airtag.name, report.lat, report.lon, report.timestamp, battery, tz)
 
 
-def _handle_callback_query(conn, bot_token: str, chat_id: str, callback_query: dict) -> None:
+def _handle_callback_query(conn, bot_token: str, chat_id: str, callback_query: dict, tz: dt.tzinfo) -> None:
     message = callback_query.get("message") or {}
     callback_id = callback_query.get("id")
     if not _is_authorized_chat(chat_id, message.get("chat", {}).get("id")):
@@ -265,7 +270,7 @@ def _handle_callback_query(conn, bot_token: str, chat_id: str, callback_query: d
             _answer_callback_query(bot_token, callback_id)
         return
 
-    text = _format_location(item, conn)
+    text = _format_location(item, conn, tz)
     if callback_id:
         _answer_callback_query(bot_token, callback_id)
     message_id = message.get("message_id")

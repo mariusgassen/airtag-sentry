@@ -6,6 +6,7 @@ import dataclasses
 import logging
 import os
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.fernet import Fernet
 
@@ -69,6 +70,14 @@ class Config:
     database_url: str
     key_encryption_key: str
     notifications: NotificationsConfig
+    # Report/location timestamps are stored in Postgres as TIMESTAMPTZ (UTC) -
+    # this is what every user-facing rendering of one (Telegram/push alert
+    # text, the /where reply) converts to before formatting, so "21:06"
+    # printed there means 21:06 in this timezone, not UTC. The dashboard
+    # frontend needs no such conversion: it renders ISO timestamps with the
+    # browser's own Intl/Date APIs, which already convert to the browser's
+    # local timezone automatically.
+    display_timezone: ZoneInfo
 
 
 def _env(name: str) -> str | None:
@@ -185,6 +194,14 @@ def load_config() -> Config:
             "in the logs and the dashboard's alert list."
         )
 
+    tz_name = _env_str("TZ", "UTC")
+    try:
+        display_timezone = ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ConfigError(
+            f"TZ={tz_name!r} is not a valid IANA timezone name (e.g. 'Europe/Berlin')"
+        ) from exc
+
     return Config(
         apple=apple,
         web=web,
@@ -192,4 +209,5 @@ def load_config() -> Config:
         database_url=database_url,
         key_encryption_key=key_encryption_key,
         notifications=notifications,
+        display_timezone=display_timezone,
     )
