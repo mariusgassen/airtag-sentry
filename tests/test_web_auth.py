@@ -431,6 +431,11 @@ def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):
         "fetch_owner_device_location_history",
         lambda _conn, device_id, limit: seen_history.update(device_id=device_id, limit=limit) or [],
     )
+    # GET .../history also computes stays now (see test_web_history.py) -
+    # stub the two extra db calls it makes so the Mock() conn above is never
+    # touched for them either.
+    monkeypatch.setattr(app_module, "get_settings", lambda _conn: Mock(history_cluster_radius_meters=50.0))
+    monkeypatch.setattr(app_module, "list_named_places", lambda _conn: [])
     resp = client.get("/api/owner-devices/history", params={"device_id": slashy_id, "limit": 50})
     assert resp.status_code == 200
     assert seen_history == {"device_id": slashy_id, "limit": 50}

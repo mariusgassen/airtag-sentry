@@ -53,9 +53,11 @@ from airtag_sentry.db import (
     fetch_owner_device_location_history,
     fetch_reports,
     get_conn,
+    get_geocoded_point,
     get_ha_api_token,
     get_mqtt_credentials,
     get_owner_apple_credentials,
+    get_place_label_correction,
     get_settings,
     get_telegram_credentials,
     latest_alert,
@@ -77,6 +79,7 @@ from airtag_sentry.db import (
     update_settings,
 )
 from airtag_sentry.scheduler import start_scheduler
+from airtag_sentry.stays import cluster_by_proximity, match_place, resolve_label
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -356,6 +359,17 @@ class MqttSettingsIn(BaseModel):
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
     return slug or "airtag"
+
+
+def _stay_label(conn, place, lat: float, lon: float) -> str | None:
+    correction = get_place_label_correction(conn, lat, lon)
+    geocoded = get_geocoded_point(conn, lat, lon)
+    return resolve_label(
+        place,
+        correction,
+        geocoded.poi_name if geocoded else None,
+        geocoded.address if geocoded else None,
+    )
 
 
 def _hash_ha_token(token: str) -> str:
@@ -699,18 +713,39 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             resolved = _resolve_airtag_id(conn, airtag_id)
             reports = fetch_reports(conn, resolved, limit=limit)
-        return [
-            {
-                "id": r.id,
-                "timestamp": r.timestamp.isoformat(),
-                "lat": r.lat,
-                "lon": r.lon,
-                "accuracy": r.accuracy,
-                "confidence": r.confidence,
-                "battery_level": r.battery_level,
-            }
-            for r in reports
-        ]
+            radius = get_settings(conn).history_cluster_radius_meters
+            places = list_named_places(conn)
+            clusters = cluster_by_proximity(reports, lambda r: (r.lat, r.lon), radius)
+            stays = []
+            for c in clusters:
+                place = match_place(c.anchor.lat, c.anchor.lon, places)
+                stays.append(
+                    {
+                        "anchor_id": c.anchor.id,
+                        "start": c.points[0].timestamp.isoformat(),
+                        "end": c.points[-1].timestamp.isoformat(),
+                        "count": len(c.points),
+                        "lat": c.anchor.lat,
+                        "lon": c.anchor.lon,
+                        "label": _stay_label(conn, place, c.anchor.lat, c.anchor.lon),
+                        "place_id": place.id if place else None,
+                    }
+                )
+        return {
+            "raw": [
+                {
+                    "id": r.id,
+                    "timestamp": r.timestamp.isoformat(),
+                    "lat": r.lat,
+                    "lon": r.lon,
+                    "accuracy": r.accuracy,
+                    "confidence": r.confidence,
+                    "battery_level": r.battery_level,
+                }
+                for r in reports
+            ],
+            "stays": stays,
+        }
 
     @app.get("/api/geocode")
     def geocode_route(lat: float, lon: float):
@@ -946,22 +981,47 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/owner-devices/history")
     def get_owner_device_history(device_id: str, limit: int = 200):
-        """History of one owner device's location, newest first. device_id is a
-        query param, not a path segment - see OwnerDeviceEnabledIn for why."""
+        """History of one owner device's location, newest first, plus its
+        computed stays. device_id is a query param, not a path segment - see
+        OwnerDeviceEnabledIn for why."""
         with get_conn(cfg.database_url) as conn:
             locations = fetch_owner_device_location_history(conn, device_id, limit=limit)
-        return [
-            {
-                "recorded_at": loc.recorded_at.isoformat(),
-                "lat": loc.lat,
-                "lon": loc.lon,
-                "horizontal_accuracy": loc.horizontal_accuracy,
-                "battery_level": loc.battery_level,
-                "battery_status": loc.battery_status,
-                "battery_reported": loc.battery_reported,
-            }
-            for loc in locations
-        ]
+            radius = get_settings(conn).history_cluster_radius_meters
+            places = list_named_places(conn)
+            clusters = cluster_by_proximity(locations, lambda l: (l.lat, l.lon), radius)
+            stays = []
+            for c in clusters:
+                place = match_place(c.anchor.lat, c.anchor.lon, places)
+                # locations (and so c.points) are newest-first - the latest
+                # point in a stay is the first one encountered, the earliest
+                # the last (see CLAUDE.md's Report/OwnerLocation asymmetry).
+                stays.append(
+                    {
+                        "anchor_recorded_at": c.anchor.recorded_at.isoformat(),
+                        "start": c.points[-1].recorded_at.isoformat(),
+                        "end": c.points[0].recorded_at.isoformat(),
+                        "count": len(c.points),
+                        "lat": c.anchor.lat,
+                        "lon": c.anchor.lon,
+                        "label": _stay_label(conn, place, c.anchor.lat, c.anchor.lon),
+                        "place_id": place.id if place else None,
+                    }
+                )
+        return {
+            "raw": [
+                {
+                    "recorded_at": loc.recorded_at.isoformat(),
+                    "lat": loc.lat,
+                    "lon": loc.lon,
+                    "horizontal_accuracy": loc.horizontal_accuracy,
+                    "battery_level": loc.battery_level,
+                    "battery_status": loc.battery_status,
+                    "battery_reported": loc.battery_reported,
+                }
+                for loc in locations
+            ],
+            "stays": stays,
+        }
 
     @app.get("/api/apple/status")
     def apple_status():
