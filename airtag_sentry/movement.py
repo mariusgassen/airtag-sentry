@@ -41,11 +41,25 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return EARTH_RADIUS_METERS * c
 
 
+def _accuracy_adjusted_distance(distance: float, accuracy1: float | None, accuracy2: float | None) -> float:
+    """Discount a raw haversine distance by the two points' combined
+    position-uncertainty radii, so a single noisy/low-accuracy fix can't look
+    like real movement that's actually within both points' error margins.
+    Missing accuracy (None) gets no discount, never a more permissive read
+    than before this existed.
+    """
+    slack = (accuracy1 or 0.0) + (accuracy2 or 0.0)
+    return max(distance - slack, 0.0)
+
+
 def _stillstand_anchor(prior_reports: list[Report], cfg: MovementConfig) -> Report:
     """Walk backward through the stationary streak and return its earliest report."""
     anchor = prior_reports[-1]
     for report in reversed(prior_reports[:-1]):
-        if haversine_distance(report.lat, report.lon, anchor.lat, anchor.lon) > cfg.distance_threshold_meters:
+        step_distance = _accuracy_adjusted_distance(
+            haversine_distance(report.lat, report.lon, anchor.lat, anchor.lon), report.accuracy, anchor.accuracy
+        )
+        if step_distance > cfg.distance_threshold_meters:
             break
         anchor = report
     return anchor
@@ -65,7 +79,8 @@ def evaluate_movement(
         return None
 
     last = prior_reports[-1]
-    distance = haversine_distance(new_report.lat, new_report.lon, last.lat, last.lon)
+    raw_distance = haversine_distance(new_report.lat, new_report.lon, last.lat, last.lon)
+    distance = _accuracy_adjusted_distance(raw_distance, new_report.accuracy, last.accuracy)
 
     if distance > cfg.distance_threshold_meters:
         return MovementAlert(reason="distance_threshold", distance_meters=distance)
@@ -82,11 +97,11 @@ def evaluate_movement(
 def evaluate_away(
     new_report: Report,
     owner_location: OwnerLocation | None,
-    now: dt.datetime,
     cfg: MovementConfig,
 ) -> float | None:
-    """Distance from the primary owner device's last-known location if
-    `new_report` qualifies as "moved without the owner nearby", else None.
+    """Distance from the primary owner device's location around the same time
+    as `new_report`, if `new_report` qualifies as "moved without the owner
+    nearby", else None.
 
     Only meaningful to call once a real movement alert has already fired for
     `new_report` - this doesn't independently decide whether the tag moved,
@@ -94,13 +109,23 @@ def evaluate_away(
     always the *primary* tracked device (see owner_tracking.py) - other
     tracked-but-not-primary devices don't factor into this at all, so there's
     exactly one definite answer to "where does the app think the owner is."
+
+    `owner_location` must be the primary device's reading closest in time to
+    `new_report.timestamp` (see db.py's `primary_owner_device_location_near`),
+    not simply its latest-ever reading - AirTag reports are crowd-sourced and
+    can arrive with real delay, so comparing a late-arriving report's
+    position against the owner's *current* position would compare two
+    different points in time and misclassify a coincidence as "away" (or vice
+    versa).
     """
     if owner_location is None:
         return None
-    if now - owner_location.recorded_at > dt.timedelta(minutes=cfg.owner_location_max_age_minutes):
-        return None  # stale owner fix - don't classify off data that's too old to trust
+    time_delta = abs(new_report.timestamp - owner_location.recorded_at)
+    if time_delta > dt.timedelta(minutes=cfg.owner_location_max_age_minutes):
+        return None  # no owner reading close enough in time to trust the comparison
 
-    distance = haversine_distance(
+    raw_distance = haversine_distance(
         new_report.lat, new_report.lon, owner_location.lat, owner_location.lon
     )
+    distance = _accuracy_adjusted_distance(raw_distance, new_report.accuracy, owner_location.horizontal_accuracy)
     return distance if distance > cfg.away_distance_threshold_meters else None

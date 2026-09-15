@@ -15,15 +15,27 @@ CFG = MovementConfig(
 NOW = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
 
 
-def _report(hours_ago: float, lat: float, lon: float) -> Report:
+def _report(hours_ago: float, lat: float, lon: float, accuracy: float | None = 5.0) -> Report:
     ts = NOW - dt.timedelta(hours=hours_ago)
-    return Report(id=None, airtag_id="test", timestamp=ts, lat=lat, lon=lon, accuracy=5.0, confidence=2)
+    return Report(id=None, airtag_id="test", timestamp=ts, lat=lat, lon=lon, accuracy=accuracy, confidence=2)
 
 
-def _owner_location(minutes_ago: float, lat: float, lon: float, device_id: str = "device-1") -> OwnerLocation:
-    recorded_at = NOW - dt.timedelta(minutes=minutes_ago)
+def _owner_location(
+    minutes_ago: float,
+    lat: float,
+    lon: float,
+    device_id: str = "device-1",
+    horizontal_accuracy: float | None = 5.0,
+    relative_to: dt.datetime = NOW,
+) -> OwnerLocation:
+    recorded_at = relative_to - dt.timedelta(minutes=minutes_ago)
     return OwnerLocation(
-        id=None, device_id=device_id, recorded_at=recorded_at, lat=lat, lon=lon, horizontal_accuracy=5.0
+        id=None,
+        device_id=device_id,
+        recorded_at=recorded_at,
+        lat=lat,
+        lon=lon,
+        horizontal_accuracy=horizontal_accuracy,
     )
 
 
@@ -88,13 +100,13 @@ def test_no_stillstand_alert_below_movement_epsilon():
 
 def test_evaluate_away_none_without_owner_location():
     new = _report(0, 52.5, 13.4)
-    assert evaluate_away(new, None, NOW, CFG) is None
+    assert evaluate_away(new, None, CFG) is None
 
 
-def test_evaluate_away_returns_distance_when_far_and_fresh():
+def test_evaluate_away_returns_distance_when_far_and_close_in_time():
     new = _report(0, 52.51, 13.4)  # ~1.1km from the owner location below
     owner = _owner_location(5, 52.5, 13.4)
-    distance = evaluate_away(new, owner, NOW, CFG)
+    distance = evaluate_away(new, owner, CFG)
     assert distance is not None
     assert distance > CFG.away_distance_threshold_meters
 
@@ -102,10 +114,52 @@ def test_evaluate_away_returns_distance_when_far_and_fresh():
 def test_evaluate_away_none_when_near_owner():
     new = _report(0, 52.5, 13.4)
     owner = _owner_location(5, 52.50005, 13.40005)  # a few meters of GPS noise
-    assert evaluate_away(new, owner, NOW, CFG) is None
+    assert evaluate_away(new, owner, CFG) is None
 
 
-def test_evaluate_away_none_when_owner_location_stale():
+def test_evaluate_away_none_when_owner_location_far_in_time_from_report():
     new = _report(0, 52.51, 13.4)  # far from the owner location below
-    owner = _owner_location(120, 52.5, 13.4)  # 120 min old, over the 60 min max age
-    assert evaluate_away(new, owner, NOW, CFG) is None
+    owner = _owner_location(120, 52.5, 13.4)  # 120 min from the report, over the 60 min max age
+    assert evaluate_away(new, owner, CFG) is None
+
+
+def test_evaluate_away_uses_owner_reading_near_the_reports_own_timestamp():
+    """Regression test: a delayed, crowd-sourced report timestamped hours in
+    the past must be compared against the owner's location from around that
+    same time, not whatever the owner's latest reading is by the time the
+    report is processed - otherwise a report that only just arrived looks
+    "far from the owner" purely because the owner has since moved on."""
+    report_time = NOW - dt.timedelta(hours=4, minutes=30)
+    new = Report(id=None, airtag_id="test", timestamp=report_time, lat=52.5, lon=13.4, accuracy=5.0, confidence=2)
+    # Owner was right there when the report happened...
+    owner_then = _owner_location(5, 52.5, 13.4, relative_to=report_time)
+    assert evaluate_away(new, owner_then, CFG) is None
+    # ...even though by "now" (when the report is actually processed) the
+    # owner has moved far away - that later reading must not be used here.
+    owner_now = _owner_location(5, 52.6, 13.6, relative_to=NOW)
+    assert haversine_distance(52.5, 13.4, 52.6, 13.6) > CFG.away_distance_threshold_meters
+    assert evaluate_away(new, owner_now, CFG) is None  # too far in time from report_time to be used
+
+
+def test_evaluate_away_discounts_combined_accuracy_radius():
+    # ~100m raw distance, entirely absorbed by the two points' noise margins.
+    new = _report(0, 52.5, 13.4, accuracy=100.0)
+    owner = _owner_location(5, 52.5009, 13.4, horizontal_accuracy=100.0)  # ~100m raw
+    assert evaluate_away(new, owner, CFG) is None
+
+
+def test_distance_threshold_alert_suppressed_by_low_accuracy_spike():
+    """A single noisy/low-accuracy fix (e.g. a crowd-sourced relay far from
+    the real position) must not read as real movement once its own reported
+    uncertainty could explain the apparent jump."""
+    prior = [_report(1, 52.5, 13.4, accuracy=5.0)]
+    new = _report(0, 52.501, 13.4, accuracy=2000.0)  # ~111m raw move, but a 2km error radius
+    assert evaluate_movement(new, prior, CFG) is None
+
+
+def test_distance_threshold_alert_still_fires_for_real_move_despite_accuracy():
+    prior = [_report(1, 52.5, 13.4, accuracy=5.0)]
+    new = _report(0, 52.51, 13.4, accuracy=50.0)  # ~1.1km move, well beyond any plausible noise
+    alert = evaluate_movement(new, prior, CFG)
+    assert alert is not None
+    assert alert.reason == "distance_threshold"
