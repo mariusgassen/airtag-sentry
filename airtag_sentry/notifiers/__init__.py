@@ -30,7 +30,8 @@ def build_notifiers(cfg: Config, conn) -> list[Notifier]:
     if telegram:
         bot_token = keystore.decrypt(cfg.key_encryption_key, telegram.bot_token_encrypted)
         notifiers.append(TelegramNotifier(bot_token, telegram.chat_id))
-    notifiers.append(WebPushNotifier(cfg.database_url, cfg.key_encryption_key))
+    if cfg.notifications.webpush:
+        notifiers.append(WebPushNotifier(cfg.database_url, cfg.notifications.webpush))
     return notifiers
 
 

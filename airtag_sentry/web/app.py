@@ -35,7 +35,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
 from airtag_sentry.geocode import reverse_geocode
 from airtag_sentry.config import Config, load_config
-from airtag_sentry.notifiers.webpush import get_or_create_vapid_keys
 from airtag_sentry.db import (
     AppSettings,
     PushSubscription,
@@ -1085,7 +1084,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             bot_token = keystore.decrypt(cfg.key_encryption_key, creds.bot_token_encrypted)
             try:
                 update = await request.json()
-                telegram_bot.handle_update(conn, bot_token, creds.chat_id, update)
+                telegram_bot.handle_update(conn, bot_token, creds.chat_id, update, cfg.display_timezone)
             except Exception:
                 logger.exception("Telegram webhook handler failed.")
         return {"ok": True}
@@ -1214,9 +1213,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/push/vapid-public-key")
     def get_vapid_public_key():
-        with get_conn(cfg.database_url) as conn:
-            keys = get_or_create_vapid_keys(conn, cfg.key_encryption_key)
-        return {"publicKey": keys.public_key}
+        if not cfg.notifications.webpush:
+            raise HTTPException(status_code=404, detail="Web push is not configured")
+        return {"publicKey": cfg.notifications.webpush.public_key}
 
     @app.post("/api/push/subscribe")
     def subscribe(sub: SubscriptionIn):

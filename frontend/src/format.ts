@@ -1,14 +1,3 @@
-/** This app has no locale switcher (see CLAUDE.md - single-user, all UI text
- * hardcoded German) - pin every date/time rendering to 'de-DE' explicitly so
- * it always matches the rest of the UI instead of following whatever locale
- * the browser/OS happens to be set to. */
-const LOCALE = 'de-DE'
-
-/** `new Date(iso).toLocaleString()`, but always in German format. */
-export function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(LOCALE)
-}
-
 export function formatRelative(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime()
   const minutes = Math.round(diffMs / 60000)
@@ -18,7 +7,7 @@ export function formatRelative(iso: string): string {
   if (hours < 24) return `vor ${hours} Stunde${hours === 1 ? '' : 'n'}`
   const days = Math.round(hours / 24)
   if (days < 7) return `vor ${days} Tag${days === 1 ? '' : 'en'}`
-  return new Date(iso).toLocaleDateString(LOCALE)
+  return new Date(iso).toLocaleDateString()
 }
 
 /** formatRelative()'s output reads correctly lowercase mid-sentence (e.g.
@@ -35,11 +24,11 @@ export function capitalize(text: string): string {
 export function formatClusterRange(earliestIso: string, latestIso: string): string {
   const earliest = new Date(earliestIso)
   const latest = new Date(latestIso)
-  const time = (d: Date) => d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' })
+  const time = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   if (earliest.toDateString() === latest.toDateString()) {
     return `${time(earliest)}–${time(latest)}`
   }
-  const dateTime = (d: Date) => `${d.toLocaleDateString(LOCALE)} ${time(d)}`
+  const dateTime = (d: Date) => `${d.toLocaleDateString()} ${time(d)}`
   return `${dateTime(earliest)} – ${dateTime(latest)}`
 }
 

@@ -17,7 +17,6 @@ import {
   formatAirtagBattery,
   formatAlertReason,
   formatClusterRange,
-  formatDateTime,
   formatRelative,
   isLowBattery,
 } from '../format'
@@ -613,8 +612,8 @@ function HistoryList({
             onClick={() => onSelectReport(c.anchor.id)}
             title={
               isStay
-                ? `${formatDateTime(earliest.timestamp)} – ${formatDateTime(latest.timestamp)}`
-                : formatDateTime(c.anchor.timestamp)
+                ? `${new Date(earliest.timestamp).toLocaleString()} – ${new Date(latest.timestamp).toLocaleString()}`
+                : new Date(c.anchor.timestamp).toLocaleString()
             }
             className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
               isSelected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'

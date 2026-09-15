@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pywebpush import WebPushException
 
-from airtag_sentry.db import MqttCredentials, PushSubscription, WebPushKeys
+from airtag_sentry.db import MqttCredentials, PushSubscription
 from airtag_sentry.notifiers.homeassistant import HomeAssistantPublisher, MqttConfig, build_ha_publisher
 from airtag_sentry.notifiers.telegram import TelegramNotifier
-from airtag_sentry.notifiers.webpush import WebPushNotifier
+from airtag_sentry.notifiers.webpush import WebPushConfig, WebPushNotifier
 
 
 @patch("airtag_sentry.notifiers.telegram.requests.post")
@@ -20,82 +20,42 @@ def test_telegram_notifier_posts_message(mock_post):
     assert kwargs["json"] == {"chat_id": "12345", "text": "Titel\nNachricht"}
 
 
-@patch("airtag_sentry.notifiers.webpush.keystore.decrypt", return_value="priv")
-@patch("airtag_sentry.notifiers.webpush.get_webpush_keys")
 @patch("airtag_sentry.notifiers.webpush.webpush")
 @patch("airtag_sentry.notifiers.webpush.list_push_subscriptions")
 @patch("airtag_sentry.notifiers.webpush.get_conn")
-def test_webpush_notifier_sends_to_all_subscriptions(
-    mock_get_conn, mock_list_subs, mock_webpush, mock_get_keys, mock_decrypt
-):
+def test_webpush_notifier_sends_to_all_subscriptions(mock_get_conn, mock_list_subs, mock_webpush):
     mock_get_conn.return_value.__enter__.return_value = MagicMock()
-    mock_get_keys.return_value = WebPushKeys(
-        public_key="pub", private_key_encrypted="encrypted", subject="mailto:me@example.com"
-    )
     mock_list_subs.return_value = [
         PushSubscription(endpoint="https://push.example/a", p256dh="p1", auth="a1"),
         PushSubscription(endpoint="https://push.example/b", p256dh="p2", auth="a2"),
     ]
+    cfg = WebPushConfig(public_key="pub", private_key="priv", subject="mailto:me@example.com")
 
-    WebPushNotifier("postgresql://unused", "key").send("Titel", "Nachricht")
+    WebPushNotifier("postgresql://unused", cfg).send("Titel", "Nachricht")
 
     assert mock_webpush.call_count == 2
     endpoints = {call.kwargs["subscription_info"]["endpoint"] for call in mock_webpush.call_args_list}
     assert endpoints == {"https://push.example/a", "https://push.example/b"}
 
 
-@patch("airtag_sentry.notifiers.webpush.keystore.decrypt", return_value="priv")
-@patch("airtag_sentry.notifiers.webpush.get_webpush_keys")
 @patch("airtag_sentry.notifiers.webpush.remove_push_subscription")
 @patch("airtag_sentry.notifiers.webpush.webpush")
 @patch("airtag_sentry.notifiers.webpush.list_push_subscriptions")
 @patch("airtag_sentry.notifiers.webpush.get_conn")
 def test_webpush_notifier_prunes_expired_subscription(
-    mock_get_conn, mock_list_subs, mock_webpush, mock_remove, mock_get_keys, mock_decrypt
+    mock_get_conn, mock_list_subs, mock_webpush, mock_remove
 ):
     mock_get_conn.return_value.__enter__.return_value = MagicMock()
-    mock_get_keys.return_value = WebPushKeys(
-        public_key="pub", private_key_encrypted="encrypted", subject="mailto:me@example.com"
-    )
     mock_list_subs.return_value = [
         PushSubscription(endpoint="https://push.example/gone", p256dh="p1", auth="a1"),
     ]
     response = MagicMock(status_code=410)
     mock_webpush.side_effect = WebPushException("gone", response=response)
+    cfg = WebPushConfig(public_key="pub", private_key="priv", subject="mailto:me@example.com")
 
-    WebPushNotifier("postgresql://unused", "key").send("Titel", "Nachricht")
+    WebPushNotifier("postgresql://unused", cfg).send("Titel", "Nachricht")
 
     mock_remove.assert_called_once_with(mock_get_conn.return_value.__enter__.return_value, "https://push.example/gone")
-
-
-@patch("airtag_sentry.notifiers.webpush.set_webpush_keys")
-@patch("airtag_sentry.notifiers.webpush.get_webpush_keys")
-def test_get_or_create_vapid_keys_generates_once(mock_get_keys, mock_set_keys):
-    from cryptography.fernet import Fernet
-
-    from airtag_sentry.notifiers.webpush import get_or_create_vapid_keys
-
-    generated = WebPushKeys(public_key="pub", private_key_encrypted="encrypted", subject="mailto:x@x")
-    mock_get_keys.side_effect = [None, generated]
-
-    result = get_or_create_vapid_keys(MagicMock(), Fernet.generate_key().decode())
-
-    mock_set_keys.assert_called_once()
-    assert result == generated
-
-
-@patch("airtag_sentry.notifiers.webpush.set_webpush_keys")
-@patch("airtag_sentry.notifiers.webpush.get_webpush_keys")
-def test_get_or_create_vapid_keys_reuses_existing(mock_get_keys, mock_set_keys):
-    from airtag_sentry.notifiers.webpush import get_or_create_vapid_keys
-
-    existing = WebPushKeys(public_key="pub", private_key_encrypted="encrypted", subject="mailto:x@x")
-    mock_get_keys.return_value = existing
-
-    result = get_or_create_vapid_keys(MagicMock(), "key")
-
-    mock_set_keys.assert_not_called()
-    assert result == existing
 
 
 def _fake_publisher():

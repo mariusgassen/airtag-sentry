@@ -236,7 +236,7 @@ def _poll_airtag(
         address = reverse_geocode(report.lat, report.lon)
         message = (
             f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
-            f"{format_location_line(report.lat, report.lon, report.timestamp, address)}"
+            f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
         )
         notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
 
@@ -255,6 +255,6 @@ def _poll_airtag(
             )
             away_message = (
                 f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
-                f"{format_location_line(report.lat, report.lon, report.timestamp, address)}"
+                f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
             )
             notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)

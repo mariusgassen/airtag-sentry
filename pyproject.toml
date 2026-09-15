@@ -24,6 +24,10 @@ dependencies = [
     "py-vapid>=1.9",
     "itsdangerous>=2.1",
     "cryptography>=42",
+    # python:3.14-slim isn't guaranteed to ship /usr/share/zoneinfo - this
+    # package is zoneinfo's documented fallback data source so TZ=Europe/Berlin
+    # (see config.py's display_timezone) resolves regardless of the base image.
+    "tzdata>=2024.1",
     "alembic>=1.13",
     "sqlalchemy>=2.0",
     "pyicloud>=1.0",

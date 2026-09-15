@@ -96,13 +96,6 @@ class TelegramCredentials:
 
 
 @dataclasses.dataclass(frozen=True)
-class WebPushKeys:
-    public_key: str
-    private_key_encrypted: str
-    subject: str
-
-
-@dataclasses.dataclass(frozen=True)
 class OwnerDevice:
     id: str
     name: str
@@ -348,26 +341,6 @@ def list_push_subscriptions(conn: psycopg.Connection) -> list[PushSubscription]:
     with conn.cursor() as cur:
         cur.execute("SELECT endpoint, p256dh, auth FROM push_subscriptions")
         return [PushSubscription(*row) for row in cur.fetchall()]
-
-
-def get_webpush_keys(conn: psycopg.Connection) -> WebPushKeys | None:
-    with conn.cursor() as cur:
-        cur.execute("SELECT public_key, private_key_encrypted, subject FROM webpush_settings WHERE id = 1")
-        row = cur.fetchone()
-        return WebPushKeys(*row) if row else None
-
-
-def set_webpush_keys(conn: psycopg.Connection, keys: WebPushKeys) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO webpush_settings (id, public_key, private_key_encrypted, subject, updated_at)
-            VALUES (1, %s, %s, %s, now())
-            ON CONFLICT (id) DO NOTHING
-            """,
-            (keys.public_key, keys.private_key_encrypted, keys.subject),
-        )
-    conn.commit()
 
 
 def set_airtag_key(conn: psycopg.Connection, key: StoredKey) -> None:

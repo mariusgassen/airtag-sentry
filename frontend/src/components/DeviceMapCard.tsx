@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { MapContainer, TileLayer, Polyline } from 'react-leaflet'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { clusterByProximity } from '../clustering'
-import { deviceLabel, formatClusterRange, formatDateTime } from '../format'
+import { deviceLabel, formatClusterRange } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { airtagPinIcon, deviceColor } from '../mapIcons'
 import { mapsUrl } from '../maps'
@@ -134,7 +134,7 @@ export function DeviceMapCard({
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
             {displayedCluster && displayedCluster.points.length > 1
               ? `${formatClusterRange(displayedCluster.points[displayedCluster.points.length - 1].recorded_at, displayedCluster.points[0].recorded_at)} · ${displayedCluster.points.length}×`
-              : formatDateTime(resolvedPinLocation.recorded_at)}
+              : new Date(resolvedPinLocation.recorded_at).toLocaleString()}
           </InfoRow>
           <AddressLine lat={resolvedPinLocation.lat} lon={resolvedPinLocation.lon} />
           <a

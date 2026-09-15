@@ -56,11 +56,14 @@ your host Python, not inside Docker, so install the two packages they need
 first:
 
 ```bash
-pip install cryptography
+pip install cryptography py-vapid
 
 # AIRTAG_KEY_ENCRYPTION_KEY — encrypts AirTag keys at rest. Back it up: losing
 # it makes every stored AirTag key permanently undecryptable.
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY — for Web Push notifications.
+python scripts/generate_vapid_keys.py
 ```
 
 Then, in your OIDC provider, register an OAuth2/OIDC application for the
@@ -187,15 +190,11 @@ Each backend is optional and independent:
 | Backend  | Enable by setting                                                                                             |
 |----------|-----------------------------------------------------------------------------------------------------------------|
 | Telegram | Bot token + chat ID, connected from the dashboard's Settings ⚙️ → **Benachrichtigungen** panel                |
-| Web Push | Click "Enable notifications" on the dashboard - no setup needed                                              |
+| Web Push | `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` in `.env`, then click "Enable notifications" on the dashboard |
 
 Telegram's bot token is encrypted and stored in Postgres (never in `.env`) -
 create a bot via [@BotFather](https://t.me/BotFather) to get a token, then
 message the bot (or add it to a group) and use its chat ID.
-
-Web Push's VAPID keypair is generated automatically the first time a browser
-asks for it and stored encrypted in Postgres, the same treatment as
-Telegram's bot token - there's nothing to configure in `.env`.
 
 ### Home Assistant
 
@@ -238,9 +237,9 @@ Each object in the response's `objects` array has `id`, `type`
 rather than just sensors, add an automation that calls the
 `device_tracker.see` service with the same template data.
 
-Every device's push subscription is tied to the VAPID public key that was
-active when it subscribed, so devices re-subscribe after the `webpush_settings`
-row is ever deleted or regenerated.
+Treat the VAPID keypair like the encryption key above — generate it once and
+back it up. Every device's push subscription is tied to the public key that
+was active when it subscribed, so devices re-subscribe after a key change.
 
 ## Movement detection
 
@@ -280,6 +279,7 @@ third, additional alert — it never replaces the other two:
 | `ANISETTE_REMOTE_URL` | unset                 | URL of the anisette server. Required when `ANISETTE_MODE=remote`.               |
 | `WEB_HOST`            | `0.0.0.0`             | Dashboard bind address.                                                          |
 | `WEB_PORT`            | `8000`                | Dashboard bind port.                                                             |
+| `TZ`                  | `UTC`                 | IANA timezone (e.g. `Europe/Berlin`) for timestamps in Telegram/push alert text and the `/where` reply. Report/location timestamps are stored in UTC, so without this they display in UTC too. The dashboard itself needs no setting here - it already renders timestamps in the browser's local timezone. |
 
 **Dashboard settings** (⚙️ panel, stored in Postgres) — polling interval,
 the movement thresholds above, and (if owner device tracking is configured)
