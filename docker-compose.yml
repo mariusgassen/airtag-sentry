@@ -74,9 +74,6 @@ services:
       OIDC_ALLOWED_USERNAME: ${OIDC_ALLOWED_USERNAME}
       SESSION_SECRET_KEY: ${SESSION_SECRET_KEY}
       AIRTAG_KEY_ENCRYPTION_KEY: ${AIRTAG_KEY_ENCRYPTION_KEY}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
-      VAPID_SUBJECT: ${VAPID_SUBJECT}
       # Bundled anisette container, not the in-process generator - fixed by
       # this compose topology, not something to set in .env.
       ANISETTE_MODE: remote

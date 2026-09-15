@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
-import logging
 import os
 from urllib.parse import quote
 
 from cryptography.fernet import Fernet
-
-logger = logging.getLogger(__name__)
 
 
 class ConfigError(RuntimeError):
@@ -46,29 +43,12 @@ class AuthConfig:
 
 
 @dataclasses.dataclass
-class WebPushConfig:
-    public_key: str
-    private_key: str
-    subject: str
-
-
-@dataclasses.dataclass
-class NotificationsConfig:
-    # Telegram is not here: it's entered via the dashboard's Settings panel
-    # and stored encrypted in Postgres (see db.get_telegram_credentials),
-    # not read from the environment at startup - same treatment owner-
-    # tracking's Apple password got.
-    webpush: WebPushConfig | None
-
-
-@dataclasses.dataclass
 class Config:
     apple: AppleConfig
     web: WebConfig
     auth: AuthConfig
     database_url: str
     key_encryption_key: str
-    notifications: NotificationsConfig
 
 
 def _env(name: str) -> str | None:
@@ -168,28 +148,10 @@ def load_config() -> Config:
     except ValueError as exc:
         raise ConfigError(f"AIRTAG_KEY_ENCRYPTION_KEY is not a valid Fernet key: {exc}") from exc
 
-    vapid_public = _env("VAPID_PUBLIC_KEY")
-    vapid_private = _env("VAPID_PRIVATE_KEY")
-    vapid_subject = _env("VAPID_SUBJECT")
-    webpush = (
-        WebPushConfig(public_key=vapid_public, private_key=vapid_private, subject=vapid_subject)
-        if vapid_public and vapid_private and vapid_subject
-        else None
-    )
-
-    notifications = NotificationsConfig(webpush=webpush)
-    if not webpush:
-        logger.warning(
-            "VAPID web push is not configured, and Telegram is set up separately "
-            "in the dashboard's Settings panel - movement alerts may only show up "
-            "in the logs and the dashboard's alert list."
-        )
-
     return Config(
         apple=apple,
         web=web,
         auth=auth,
         database_url=database_url,
         key_encryption_key=key_encryption_key,
-        notifications=notifications,
     )

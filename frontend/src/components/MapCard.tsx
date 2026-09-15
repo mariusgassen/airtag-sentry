@@ -6,7 +6,7 @@ import { CircleMarker, MapContainer, TileLayer, Polyline, Marker, Popup, useMap,
 import type { Airtag, OwnerLocation, Report } from '../api'
 import { getAddress } from '../api'
 import { clusterByProximity } from '../clustering'
-import { capitalize, formatClusterRange, formatRelative } from '../format'
+import { capitalize, formatClusterRange, formatDateTime, formatRelative } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { OWNER_TRAIL_COLOR, PIN_POPUP_OFFSET, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
@@ -441,7 +441,7 @@ export function MapCard({
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
             {displayedCluster && displayedCluster.points.length > 1
               ? `${formatClusterRange(displayedCluster.points[0].timestamp, displayedCluster.points[displayedCluster.points.length - 1].timestamp)} · ${displayedCluster.points.length}×`
-              : new Date(resolvedPinReport.timestamp).toLocaleString()}
+              : formatDateTime(resolvedPinReport.timestamp)}
           </InfoRow>
           <AddressLine lat={resolvedPinReport.lat} lon={resolvedPinReport.lon} />
           <a

@@ -8,6 +8,7 @@ import {
   capitalize,
   deviceLabel,
   formatClusterRange,
+  formatDateTime,
   formatDeviceBattery,
   formatRelative,
   isLowBattery,
@@ -406,8 +407,8 @@ function DeviceHistoryRows({
             onClick={() => onSelectLocation(c.anchor.recorded_at)}
             title={
               isStay
-                ? `${new Date(earliest.recorded_at).toLocaleString()} – ${new Date(latest.recorded_at).toLocaleString()}`
-                : new Date(c.anchor.recorded_at).toLocaleString()
+                ? `${formatDateTime(earliest.recorded_at)} – ${formatDateTime(latest.recorded_at)}`
+                : formatDateTime(c.anchor.recorded_at)
             }
             className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
               isSelected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
