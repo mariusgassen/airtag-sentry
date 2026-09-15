@@ -48,6 +48,7 @@ from airtag_sentry.db import (
     delete_ha_api_token,
     delete_mqtt_credentials,
     delete_named_place,
+    delete_place_label_correction,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
@@ -69,6 +70,7 @@ from airtag_sentry.db import (
     set_airtag_key,
     set_ha_api_token_hash,
     set_mqtt_credentials,
+    set_place_label_correction,
     set_telegram_bot_commands,
     set_telegram_credentials,
     update_named_place,
@@ -266,6 +268,12 @@ class NamedPlaceIn(BaseModel):
     lat: float
     lon: float
     radius_meters: float = Field(gt=0)
+
+
+class GeocodeCorrectionIn(BaseModel):
+    lat: float
+    lon: float
+    corrected_name: str
 
 
 class AppleLoginIn(BaseModel):
@@ -707,6 +715,21 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/geocode")
     def geocode_route(lat: float, lon: float):
         return {"address": reverse_geocode(lat, lon).address}
+
+    @app.put("/api/geocode/correction")
+    def set_geocode_correction_route(body: GeocodeCorrectionIn):
+        name = body.corrected_name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="corrected_name must not be empty.")
+        with get_conn(cfg.database_url) as conn:
+            set_place_label_correction(conn, body.lat, body.lon, name)
+        return {"ok": True}
+
+    @app.delete("/api/geocode/correction")
+    def delete_geocode_correction_route(lat: float, lon: float):
+        with get_conn(cfg.database_url) as conn:
+            delete_place_label_correction(conn, lat, lon)
+        return {"ok": True}
 
     @app.get("/api/status")
     def get_status(airtag_id: str | None = None):

@@ -617,3 +617,43 @@ def test_delete_place_route(client, monkeypatch):
 
     assert resp.status_code == 200
     assert deleted_ids == [1]
+
+
+def test_set_geocode_correction_rejects_empty_name(client, monkeypatch):
+    _login(client, monkeypatch)
+
+    resp = client.put("/api/geocode/correction", json={"lat": 0, "lon": 0, "corrected_name": "  "})
+
+    assert resp.status_code == 400
+
+
+def test_set_geocode_correction_route(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    calls = []
+    monkeypatch.setattr(
+        app_module,
+        "set_place_label_correction",
+        lambda _conn, lat, lon, corrected_name: calls.append((lat, lon, corrected_name)),
+    )
+
+    resp = client.put(
+        "/api/geocode/correction", json={"lat": 49.87, "lon": 8.65, "corrected_name": "My Store"}
+    )
+
+    assert resp.status_code == 200
+    assert calls == [(49.87, 8.65, "My Store")]
+
+
+def test_delete_geocode_correction_route(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    calls = []
+    monkeypatch.setattr(
+        app_module, "delete_place_label_correction", lambda _conn, lat, lon: calls.append((lat, lon))
+    )
+
+    resp = client.delete("/api/geocode/correction?lat=49.87&lon=8.65")
+
+    assert resp.status_code == 200
+    assert calls == [(49.87, 8.65)]
