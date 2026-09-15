@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { OwnerDevice, OwnerLocation } from '../api'
 import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
-import { airtagColor, PALETTE } from '../airtagColor'
+import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
 import { clusterByProximity } from '../clustering'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import {
@@ -271,8 +271,8 @@ function DeviceAppearanceForm({ device, onDone }: { device: OwnerDevice; onDone:
           disabled={saving}
           aria-label="Automatisch"
           title="Automatisch"
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-60 ${device.icon === null ? ringClass : ''}`}
-          style={{ backgroundColor: effectiveColor }}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:opacity-60 ${device.icon === null ? ringClass : ''}`}
+          style={{ backgroundColor: effectiveColor, color: glyphColor() }}
         >
           <PersonIcon className="h-6 w-6" />
         </button>
@@ -286,8 +286,8 @@ function DeviceAppearanceForm({ device, onDone }: { device: OwnerDevice; onDone:
               disabled={saving}
               aria-label={DEVICE_ICON_LABELS[name]}
               title={DEVICE_ICON_LABELS[name]}
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-60 ${device.icon === name ? ringClass : ''}`}
-              style={{ backgroundColor: effectiveColor }}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:opacity-60 ${device.icon === name ? ringClass : ''}`}
+              style={{ backgroundColor: effectiveColor, color: glyphColor() }}
             >
               <Glyph className="h-6 w-6" />
             </button>

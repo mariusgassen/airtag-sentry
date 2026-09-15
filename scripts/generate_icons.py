@@ -11,7 +11,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-OUT_DIR = Path(__file__).resolve().parent.parent / "airtag_sentry" / "web" / "static" / "icons"
+# frontend/public/ is Vite's publicDir - it gets copied verbatim into
+# airtag_sentry/web/static/ (gitignored build output) on every `vite build`,
+# so these PNGs are the actual tracked source, not that build directory.
+OUT_DIR = Path(__file__).resolve().parent.parent / "frontend" / "public" / "icons"
 FAVICON_OUT = Path(__file__).resolve().parent.parent / "frontend" / "public" / "favicon.ico"
 BG = (10, 132, 255)  # matches the app's --accent (index.css)
 FG = (255, 255, 255)
