@@ -138,6 +138,13 @@ class OwnerLocation:
     # device that didn't report battery this poll.
     battery_level: float | None = None
     battery_status: str | None = None
+    # Whether *this* poll's own Apple response actually included a battery
+    # reading - false means battery_level/battery_status above were carried
+    # forward from a previous row (or, with no previous reading either, are
+    # just None) by record_owner_device_location's gap-fill. Lets a later
+    # feature (e.g. a battery-over-time chart) distinguish a real reading
+    # from a filled gap instead of seeing an unbroken line of values.
+    battery_reported: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -761,7 +768,10 @@ def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocati
     just because one poll's fix didn't include a fresh reading, so carry the
     most recent known battery_level/battery_status forward onto this new
     location instead of blanking out the dashboard's battery display until
-    the next successful reading."""
+    the next successful reading - battery_reported records whether *this*
+    row's value is a fresh reading or an inherited one, so the raw history
+    isn't lost to the display-friendly carry-forward (see OwnerLocation)."""
+    battery_reported = location.battery_level is not None
     battery_level = location.battery_level
     battery_status = location.battery_status
     if battery_level is None:
@@ -779,9 +789,9 @@ def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocati
         cur.execute(
             """
             INSERT INTO owner_device_locations
-                (device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status
+                (device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status, battery_reported)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status, battery_reported
             """,
             (
                 location.device_id,
@@ -791,6 +801,7 @@ def record_owner_device_location(conn: psycopg.Connection, location: OwnerLocati
                 location.horizontal_accuracy,
                 battery_level,
                 battery_status,
+                battery_reported,
             ),
         )
         row = cur.fetchone()
@@ -805,7 +816,7 @@ def latest_owner_device_locations(conn: psycopg.Connection) -> list[OwnerLocatio
             """
             SELECT DISTINCT ON (odl.device_id)
                 odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
-                odl.battery_level, odl.battery_status
+                odl.battery_level, odl.battery_status, odl.battery_reported
             FROM owner_device_locations odl
             JOIN owner_devices od ON od.id = odl.device_id
             WHERE od.enabled
@@ -830,7 +841,7 @@ def primary_owner_device_location_near(conn: psycopg.Connection, timestamp: dt.d
         cur.execute(
             """
             SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
-                odl.battery_level, odl.battery_status
+                odl.battery_level, odl.battery_status, odl.battery_reported
             FROM owner_device_locations odl
             JOIN owner_devices od ON od.id = odl.device_id
             WHERE od.is_primary
@@ -847,7 +858,8 @@ def fetch_owner_device_location_history(
 ) -> list[OwnerLocation]:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status "
+            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status, "
+            "battery_reported "
             "FROM owner_device_locations WHERE device_id = %s "
             "ORDER BY recorded_at DESC LIMIT %s",
             (device_id, limit),

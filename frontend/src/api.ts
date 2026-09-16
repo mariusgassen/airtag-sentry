@@ -77,6 +77,13 @@ export interface OwnerLocation {
   // "Unplugged" string - see format.ts's formatDeviceBattery.
   battery_level: number | null
   battery_status: string | null
+  // Whether *this* fix's own Apple response actually included a battery
+  // reading - false means battery_level/battery_status above were carried
+  // forward from a previous fix (or, with none yet, are just null) by
+  // db.py's record_owner_device_location. Lets the history list show which
+  // readings are real vs. inherited, for later visualization (a
+  // battery-over-time chart shouldn't treat a filled gap as a real sample).
+  battery_reported: boolean
 }
 
 export interface AppleTwoFactorMethod {
