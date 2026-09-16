@@ -35,6 +35,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
 from airtag_sentry.geocode import get_or_fetch_geocode, search_address
 from airtag_sentry.config import Config, load_config
+from airtag_sentry.notifiers import build_notifiers
 from airtag_sentry.db import (
     AppSettings,
     NamedPlace,
@@ -1271,6 +1272,26 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             delete_mqtt_credentials(conn)
         return {"ok": True}
+
+    @app.post("/api/notifications/test")
+    def notifications_test():
+        """Sends a real message through every currently configured alert
+        channel (Telegram, Web Push - see notifiers/build_notifiers) so the
+        Settings panel can offer a "send test notification" button instead of
+        the user having to wait for a real movement alert to find out whether
+        their setup actually delivers."""
+        with get_conn(cfg.database_url) as conn:
+            notifiers = build_notifiers(cfg, conn)
+        results = []
+        for notifier in notifiers:
+            channel = type(notifier).__name__.removesuffix("Notifier").lower()
+            try:
+                notifier.send("AirTagSentry", "Testbenachrichtigung – dein Setup funktioniert.")
+                results.append({"channel": channel, "ok": True})
+            except Exception as exc:
+                logger.exception("Test notification failed for channel %s", channel)
+                results.append({"channel": channel, "ok": False, "error": str(exc)})
+        return {"results": results}
 
     @app.get("/api/ha/token/status")
     def ha_token_status():
