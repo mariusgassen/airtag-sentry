@@ -2,13 +2,33 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type L from 'leaflet'
 import { DomEvent } from 'leaflet'
-import { CircleMarker, MapContainer, TileLayer, Polyline, Marker, Popup, useMap, useMapEvent } from 'react-leaflet'
-import type { Airtag, OwnerLocation, Report } from '../api'
+import {
+  Circle,
+  CircleMarker,
+  MapContainer,
+  TileLayer,
+  Polyline,
+  Marker,
+  Popup,
+  Tooltip,
+  useMap,
+  useMapEvent,
+} from 'react-leaflet'
+import type { Airtag, OwnerLocation, Place, Report, ReportStay } from '../api'
 import { getAddress } from '../api'
-import { clusterByProximity } from '../clustering'
 import { capitalize, formatClusterRange, formatRelative } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
-import { OWNER_TRAIL_COLOR, PIN_POPUP_OFFSET, airtagPinIcon, currentLocationIcon, deviceColor } from '../mapIcons'
+import { useCurrentPosition } from '../hooks/useCurrentPosition'
+import {
+  OWNER_TRAIL_COLOR,
+  PIN_POPUP_OFFSET,
+  PLACE_CIRCLE_COLOR,
+  SIZE,
+  airtagPinIcon,
+  currentLocationIcon,
+  deviceColor,
+  stayMarkerRadius,
+} from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
@@ -74,24 +94,6 @@ export function InvalidateSizeOnResize() {
     return () => observer.disconnect()
   }, [map])
   return null
-}
-
-/** Browser geolocation, requested once on mount. Used only as a fallback view
- * for a brand-new AirTag with no reports yet - never overrides real device
- * positions. */
-function useCurrentPosition() {
-  const [position, setPosition] = useState<[number, number] | null>(null)
-
-  useEffect(() => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setPosition([pos.coords.latitude, pos.coords.longitude]),
-      () => setPosition(null),
-      { enableHighAccuracy: false, timeout: 10_000 },
-    )
-  }, [])
-
-  return position
 }
 
 /** Pans (without changing zoom) to whichever position is currently
@@ -165,12 +167,14 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
   displayedIndex,
   color,
   getKey,
+  getRadius,
   onSelect,
 }: {
   points: T[]
   displayedIndex: number
   color: string
   getKey: (point: T, index: number) => string | number
+  getRadius?: (point: T) => number
   onSelect?: (point: T) => void
 }) {
   return (
@@ -180,7 +184,7 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
           <CircleMarker
             key={getKey(point, i)}
             center={[point.lat, point.lon]}
-            radius={6}
+            radius={getRadius ? getRadius(point) : 6}
             pathOptions={{ color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.9, opacity: 0.9 }}
             eventHandlers={
               onSelect
@@ -200,6 +204,25 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
           />
         ),
       )}
+    </>
+  )
+}
+
+/** Read-only translucent geofence overlays - the editable version (drag to
+ * move/resize) only exists in SettingsPlaces.tsx's editor. Exported for
+ * DeviceMapCard.tsx, which shares this same rendering (see CLAUDE.md's
+ * AirTag/device parity constraint). */
+export function PlaceCircles({ places }: { places: { id: number; name: string; lat: number; lon: number; radius_meters: number }[] }) {
+  return (
+    <>
+      {places.map((p) => (
+        <Circle
+          key={p.id}
+          center={[p.lat, p.lon]}
+          radius={p.radius_meters}
+          pathOptions={{ color: PLACE_CIRCLE_COLOR, weight: 2, fillColor: PLACE_CIRCLE_COLOR, fillOpacity: 0.1 }}
+        />
+      ))}
     </>
   )
 }
@@ -231,10 +254,14 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
 export function SelectedPin({
   position,
   icon,
+  label,
   children,
 }: {
   position: [number, number]
   icon: L.DivIcon
+  // Permanent on-map name (e.g. a matched geofence's name) - shown above the
+  // pin without needing a click, unlike the rest of the popup content.
+  label?: string | null
   children: ReactNode
 }) {
   const map = useMap()
@@ -254,7 +281,15 @@ export function SelectedPin({
             popupRef.current?.openOn(map)
           },
         }}
-      />
+      >
+        {label && (
+          <Tooltip permanent direction="top" offset={[0, -SIZE]} className="!border-none !bg-transparent !shadow-none !p-0">
+            <span className="rounded-full bg-[var(--surface)] px-2 py-0.5 text-[0.7rem] font-medium text-[var(--text)] shadow">
+              {label}
+            </span>
+          </Tooltip>
+        )}
+      </Marker>
       {/* autoPan off: centerMarkerOnClick above already centers this pin
           explicitly on click. */}
       <Popup ref={popupRef} position={position} offset={PIN_POPUP_OFFSET} autoPan={false}>
@@ -312,8 +347,9 @@ export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) 
 
 export function MapCard({
   reports,
+  stays,
   airtag,
-  clusterRadiusMeters,
+  places = [],
   ownerLocations = [],
   ownerLocationHistories = {},
   onSelectDevice,
@@ -322,27 +358,16 @@ export function MapCard({
   onMapClick,
 }: {
   reports: Report[]
+  // Server-computed (see stays.py / GET /api/reports) - already deduped,
+  // labeled (geofence/correction/POI/address priority), and time-ranged.
+  stays: ReportStay[]
   airtag: Airtag
-  // "Same spot" radius for collapsing consecutive reports into one stay - see
-  // clustering.ts and AppSettings.history_cluster_radius_meters.
-  clusterRadiusMeters: number
-  // Current position of every *enabled* owner device (see OwnerDevicesPanel.tsx).
+  places?: Place[]
   ownerLocations?: OwnerLocation[]
-  // History of every *enabled* device, keyed by device_id - each drawn as its
-  // own dashed trail, matching the route the AirTag itself gets.
   ownerLocationHistories?: Record<string, OwnerLocation[]>
   onSelectDevice?: (id: string) => void
-  // The report shown as the AirTag's marker/popup - null falls back to the
-  // latest one. Selecting a history-list row or stepping older/newer in the
-  // mobile title bar (see App.tsx) both flow through this same prop.
   selectedReportId?: number | null
-  // Fired when one of the trail's subtle history-point dots is clicked -
-  // same selection App.tsx wires up for the sidebar history list, so picking
-  // a point on the map behaves identically (centers on it, minimizes the
-  // sheet on mobile).
   onSelectReport?: (id: number) => void
-  // Fired when the map background (not a marker/popup) is tapped - lets the
-  // caller back out to the overview (see App.tsx).
   onMapClick?: () => void
 }) {
   // Memoized: reports itself is a stable reference across pure-selection
@@ -352,47 +377,18 @@ export function MapCard({
   // overriding PanToSelection's explicit centering on every older/newer
   // step or history-list pick.
   const positions = useMemo<[number, number][]>(() => reports.map((r) => [r.lat, r.lon]), [reports])
-  // Collapses consecutive same-spot reports into "stays" - see clustering.ts.
-  // The trail (Polyline above) still draws every raw report; only the
-  // per-point dots/popup below collapse.
-  const clusters = useMemo(
-    () => clusterByProximity(reports, (r) => [r.lat, r.lon], clusterRadiusMeters),
-    [reports, clusterRadiusMeters],
-  )
-  const clusterByReportId = useMemo(() => {
-    const map = new Map<number, (typeof clusters)[number]>()
-    for (const c of clusters) for (const p of c.points) map.set(p.id, c)
-    return map
-  }, [clusters])
-  const selectedIndex = selectedReportId != null ? reports.findIndex((r) => r.id === selectedReportId) : -1
-  const displayedIndex = selectedIndex >= 0 ? selectedIndex : reports.length - 1
-  // Undefined when there are no reports at all - only read once positions
-  // is confirmed non-empty below, but the hook call itself (Rules of Hooks)
-  // has to run unconditionally either way.
-  const displayed = reports[displayedIndex] as Report | undefined
-  // Whichever stay `displayed` belongs to (even when it isn't that stay's own
-  // anchor, e.g. the "no explicit selection -> latest report" fallback above
-  // can land on a later point in a still-ongoing stay) - drives the marker's
-  // actual position (the anchor's, so it doesn't jitter within the stay's
-  // radius) and the popup's single-timestamp-vs-range content below.
-  const displayedCluster = useMemo(
-    () => (displayed ? clusterByReportId.get(displayed.id) : undefined),
-    [clusterByReportId, displayed],
-  )
-  const pinReport = useMemo(() => displayedCluster?.anchor ?? displayed, [displayedCluster, displayed])
+  const selectedIndex = selectedReportId != null ? stays.findIndex((s) => s.anchor_id === selectedReportId) : -1
+  const displayedIndex = selectedIndex >= 0 ? selectedIndex : stays.length - 1
+  const displayed = stays[displayedIndex] as ReportStay | undefined
   // Memoized: identical lat/lon must keep the same array reference across
   // renders, since it's also the standalone Popup's `position` prop below -
   // react-leaflet fully unbinds/rebinds that popup whenever the reference
   // changes (see the Popup's own comment), so a fresh array every render
   // would reopen it constantly instead of only on a real position change.
   const displayedPosition = useMemo<[number, number]>(
-    () => [pinReport?.lat ?? 0, pinReport?.lon ?? 0],
-    [pinReport?.lat, pinReport?.lon],
+    () => [displayed?.lat ?? 0, displayed?.lon ?? 0],
+    [displayed?.lat, displayed?.lon],
   )
-  // The pin's own animated glide toward displayedPosition (see
-  // useAnimatedLatLng) - PanToSelection below still targets the raw,
-  // un-animated displayedPosition directly, so the camera's own (already
-  // animated) pan isn't fighting a second, independent easing on top of it.
   const animatedPosition = useAnimatedLatLng(displayedPosition)
 
   if (positions.length === 0 || !displayed) {
@@ -400,13 +396,7 @@ export function MapCard({
   }
 
   const last = positions[positions.length - 1]
-  // This AirTag's own chosen (or hash-derived) color - matches its pin badge
-  // so the route it's drawn once selected reads as visually "its own" rather
-  // than a generic accent blue (see mapIcons.ts's deviceColor).
   const trailColor = deviceColor(airtag)
-  // pinReport is only possibly undefined pre-guard (see its own comment
-  // above) - `displayed` is guaranteed defined here, so this always resolves.
-  const resolvedPinReport = pinReport ?? displayed
 
   return (
     <MapContainer center={last} zoom={15} className="h-full w-full">
@@ -415,12 +405,14 @@ export function MapCard({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
+      <PlaceCircles places={places} />
       <HistoryPoints
-        points={clusters.map((c) => c.anchor)}
-        displayedIndex={displayedCluster ? clusters.indexOf(displayedCluster) : -1}
+        points={stays}
+        displayedIndex={displayedIndex}
         color={trailColor}
-        getKey={(r) => r.id}
-        onSelect={onSelectReport ? (r) => onSelectReport(r.id) : undefined}
+        getKey={(s) => s.anchor_id}
+        getRadius={(s) => stayMarkerRadius(s.count)}
+        onSelect={onSelectReport ? (s) => onSelectReport(s.anchor_id) : undefined}
       />
       {Object.entries(ownerLocationHistories).map(([deviceId, history]) => {
         const ownerPositions: [number, number][] = history.map((l) => [l.lat, l.lon])
@@ -433,17 +425,19 @@ export function MapCard({
           />
         )
       })}
-      <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)}>
+      <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)} label={displayed.label}>
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">
             {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
           </p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-            {displayedCluster && displayedCluster.points.length > 1
-              ? `${formatClusterRange(displayedCluster.points[0].timestamp, displayedCluster.points[displayedCluster.points.length - 1].timestamp)} · ${displayedCluster.points.length}×`
-              : new Date(resolvedPinReport.timestamp).toLocaleString()}
+            {displayed.count > 1
+              ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
+              : new Date(displayed.start).toLocaleString()}
           </InfoRow>
-          <AddressLine lat={resolvedPinReport.lat} lon={resolvedPinReport.lon} />
+          {displayed.label && (
+            <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>{displayed.label}</InfoRow>
+          )}
           <a
             href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
             target="_blank"
@@ -462,8 +456,6 @@ export function MapCard({
           icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
           eventHandlers={{ click: centerMarkerOnClick }}
         >
-          {/* autoPan off: centerMarkerOnClick above already centers this
-              pin explicitly on click. */}
           <Popup autoPan={false}>
             <div className={POPUP_WIDTH_CLASS}>
               <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>

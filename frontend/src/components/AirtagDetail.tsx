@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
-import type { Airtag, Report, Status } from '../api'
+import type { Airtag, ReportStay, Status } from '../api'
 import {
   deleteAirtag,
   deleteAirtagKey,
@@ -10,17 +10,10 @@ import {
   setAirtagKeyJson,
 } from '../api'
 import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
-import { clusterByProximity } from '../clustering'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import {
-  capitalize,
-  formatAirtagBattery,
-  formatAlertReason,
-  formatClusterRange,
-  formatRelative,
-  isLowBattery,
-} from '../format'
+import { formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
+import { StayRow } from './StayRow'
 import {
   AirtagGlyph,
   ChevronDownIcon,
@@ -36,16 +29,14 @@ import {
 interface Props {
   airtag: Airtag
   status: Status | null
-  reports: Report[]
-  // "Same spot" radius for collapsing consecutive reports into one stay in
-  // the history list below - see clustering.ts and
-  // AppSettings.history_cluster_radius_meters.
-  historyClusterRadiusMeters: number
+  // Server-computed (see stays.py / GET /api/reports).
+  stays: ReportStay[]
   selectedReportId: number | null
   onSelectReport: (id: number) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
   onDeleted: () => void | Promise<void>
+  onCorrected: () => void | Promise<void>
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -173,13 +164,13 @@ export function Row({
 export function AirtagDetail({
   airtag,
   status,
-  reports,
-  historyClusterRadiusMeters,
+  stays,
   selectedReportId,
   onSelectReport,
   onBack,
   onChanged,
   onDeleted,
+  onCorrected,
   stepOlder,
   stepNewer,
   stepPosition,
@@ -297,7 +288,7 @@ export function AirtagDetail({
               label="Verlauf"
               trailing={
                 <span className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-                  {reports.length}
+                  {stays.length}
                   <ChevronRightIcon className={`h-4 w-4 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
                 </span>
               }
@@ -306,10 +297,10 @@ export function AirtagDetail({
             />
             {historyOpen && (
               <HistoryList
-                reports={reports}
-                clusterRadiusMeters={historyClusterRadiusMeters}
+                stays={stays}
                 selectedReportId={selectedReportId}
                 onSelectReport={onSelectReport}
+                onCorrected={onCorrected}
               />
             )}
           </Section>
@@ -557,28 +548,19 @@ function KeyForm({ airtag, onDone }: { airtag: Airtag; onDone: () => void | Prom
 }
 
 function HistoryList({
-  reports,
-  clusterRadiusMeters,
+  stays,
   selectedReportId,
   onSelectReport,
+  onCorrected,
 }: {
-  reports: Report[]
-  clusterRadiusMeters: number
+  stays: ReportStay[]
   selectedReportId: number | null
   onSelectReport: (id: number) => void
+  onCorrected: () => void | Promise<void>
 }) {
-  // Collapses consecutive same-spot reports into one "stay" row - see
-  // clustering.ts. Newest first for display - reports (and so clusters)
-  // arrive oldest-first from the backend (chronological, for trail drawing).
-  const rows = useMemo(() => {
-    const clusters = clusterByProximity(reports, (r) => [r.lat, r.lon], clusterRadiusMeters)
-    return [...clusters].reverse()
-  }, [reports, clusterRadiusMeters])
-  // Keyed by anchor report id (every row - single-point or a multi-point
-  // stay - selects via its anchor's id, see clustering.ts) so the row for
-  // whatever's currently selected can be scrolled into view below even when
-  // the selection changed via the map or the stepper, not just a click
-  // inside this list.
+  // Newest first for display - stays arrive in the same oldest-first order
+  // as the underlying reports (see stays.py).
+  const rows = [...stays].reverse()
   const rowRefs = useRef(new Map<number, HTMLButtonElement>())
   useEffect(() => {
     if (selectedReportId == null) return
@@ -594,51 +576,20 @@ function HistoryList({
   }
   return (
     <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
-      {rows.map((c, i) => {
-        const isStay = c.points.length > 1
-        // reports (and so c.points) are oldest-first, so the earliest point
-        // in a stay is the first one encountered, the latest the last.
-        const earliest = c.points[0]
-        const latest = c.points[c.points.length - 1]
-        const isSelected = c.points.some((p) => p.id === selectedReportId)
-        return (
-          <button
-            type="button"
-            key={c.anchor.id}
-            ref={(el) => {
-              if (el) rowRefs.current.set(c.anchor.id, el)
-              else rowRefs.current.delete(c.anchor.id)
-            }}
-            onClick={() => onSelectReport(c.anchor.id)}
-            title={
-              isStay
-                ? `${new Date(earliest.timestamp).toLocaleString()} – ${new Date(latest.timestamp).toLocaleString()}`
-                : new Date(c.anchor.timestamp).toLocaleString()
-            }
-            className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${i > 0 ? 'border-t border-[var(--divider)]' : ''} ${
-              isSelected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
-            }`}
-          >
-            <span>
-              {isStay ? formatClusterRange(earliest.timestamp, latest.timestamp) : capitalize(formatRelative(c.anchor.timestamp))}
-            </span>
-            <span className="text-[var(--text-secondary)]">
-              {isStay && `${c.points.length}× · `}
-              {c.anchor.lat.toFixed(4)}, {c.anchor.lon.toFixed(4)}
-              {' · '}
-              {/* Recorded straight off this report's own status byte (see
-                  tracker._battery_level) - always present for a real poll,
-                  null only for a row from before the battery_level column
-                  existed, so "keine Angabe" is shown explicitly rather than
-                  silently omitted (for later visualization, see
-                  DeviceHistoryRows' identical battery_reported treatment -
-                  AirTag reports have no equivalent gap-fill to flag since
-                  they're never carried forward). */}
-              {c.anchor.battery_level ? formatAirtagBattery(c.anchor.battery_level) : 'keine Angabe'}
-            </span>
-          </button>
-        )
-      })}
+      {rows.map((s, i) => (
+        <StayRow
+          key={s.anchor_id}
+          rowRef={(el) => {
+            if (el) rowRefs.current.set(s.anchor_id, el)
+            else rowRefs.current.delete(s.anchor_id)
+          }}
+          stay={s}
+          bordered={i > 0}
+          selected={s.anchor_id === selectedReportId}
+          onSelect={() => onSelectReport(s.anchor_id)}
+          onCorrected={onCorrected}
+        />
+      ))}
     </div>
   )
 }

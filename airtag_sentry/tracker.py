@@ -26,6 +26,7 @@ from airtag_sentry.db import (
     fetch_reports_before,
     get_airtag_key,
     get_conn,
+    get_geocoded_point,
     get_settings,
     insert_reports,
     list_airtags,
@@ -33,6 +34,8 @@ from airtag_sentry.db import (
     primary_owner_device_location_near,
     record_alert,
     record_owner_device_location,
+    round_coord,
+    store_geocoded_point,
 )
 from airtag_sentry.geocode import format_location_line, reverse_geocode
 from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
@@ -86,6 +89,29 @@ def _load_key(cfg: Config, conn, airtag_id: str):
     return KeyPair.from_b64(plaintext)
 
 
+def _geocode_new_points(conn, points: list[tuple[float, float]]) -> None:
+    """Best-effort: geocodes any of `points` not already in geocoded_points,
+    deduping by the same ~1m rounding the cache uses so a stay's several
+    pings only trigger one real Nominatim call. Runs on the background
+    scheduler thread, never blocking the web app - a failed lookup just
+    leaves that coordinate ungeocoded until it's seen again."""
+    seen: set[tuple[float, float]] = set()
+    for lat, lon in points:
+        key = round_coord(lat, lon)
+        if key in seen:
+            continue
+        seen.add(key)
+        if get_geocoded_point(conn, lat, lon) is not None:
+            continue
+        try:
+            result = reverse_geocode(lat, lon)
+        except Exception:
+            logger.exception("Reverse geocoding failed for (%s, %s).", lat, lon)
+            continue
+        if result.address is not None or result.poi_name is not None:
+            store_geocoded_point(conn, lat, lon, result.address, result.poi_name)
+
+
 def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublisher | None) -> None:
     """Best-effort refresh of every enabled owner device's location. Never allowed
     to break AirTag polling - a failure here just means this poll's away-correlation
@@ -118,6 +144,7 @@ def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublishe
                 )
             except Exception:
                 logger.exception("Failed to publish owner device '%s' to Home Assistant.", location.device_id)
+    _geocode_new_points(conn, [(loc.lat, loc.lon) for loc in locations])
 
 
 def _owner_location_for_away_check(
@@ -250,56 +277,57 @@ def _poll_airtag(
             airtag.id,
             len(newly_inserted),
         )
-        return
-
-    movement_cfg = MovementConfig(
-        distance_threshold_meters=settings.movement_distance_threshold_meters,
-        stillstand_hours=settings.movement_stillstand_hours,
-        stillstand_movement_meters=settings.movement_stillstand_movement_meters,
-        alert_on_backfill=settings.movement_alert_on_backfill,
-        away_distance_threshold_meters=settings.movement_away_distance_meters,
-        owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
-    )
-    for report in newly_inserted:
-        prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
-        alert = evaluate_movement(report, prior_reports, movement_cfg)
-        if alert is None:
-            continue
-
-        record_alert(
-            conn,
-            DbAlert(
-                airtag_id=airtag.id,
-                reason=alert.reason,
-                distance_meters=alert.distance_meters,
-                report_id=report.id,
-            ),
+    else:
+        movement_cfg = MovementConfig(
+            distance_threshold_meters=settings.movement_distance_threshold_meters,
+            stillstand_hours=settings.movement_stillstand_hours,
+            stillstand_movement_meters=settings.movement_stillstand_movement_meters,
+            alert_on_backfill=settings.movement_alert_on_backfill,
+            away_distance_threshold_meters=settings.movement_away_distance_meters,
+            owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
         )
-        address = reverse_geocode(report.lat, report.lon)
-        if _should_notify(settings, alert.reason):
-            message = (
-                f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
-                f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
-            )
-            notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+        for report in newly_inserted:
+            prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
+            alert = evaluate_movement(report, prior_reports, movement_cfg)
+            if alert is None:
+                continue
 
-        owner_location = _owner_location_for_away_check(
-            cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes
-        )
-        away_distance = evaluate_away(report, owner_location, movement_cfg)
-        if away_distance is not None:
             record_alert(
                 conn,
                 DbAlert(
                     airtag_id=airtag.id,
-                    reason="moved_without_owner",
-                    distance_meters=away_distance,
+                    reason=alert.reason,
+                    distance_meters=alert.distance_meters,
                     report_id=report.id,
                 ),
             )
-            if _should_notify(settings, "moved_without_owner"):
-                away_message = (
-                    f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
+            address = reverse_geocode(report.lat, report.lon).address
+            if _should_notify(settings, alert.reason):
+                message = (
+                    f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
                     f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
                 )
-                notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)
+                notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+
+            owner_location = _owner_location_for_away_check(
+                cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes
+            )
+            away_distance = evaluate_away(report, owner_location, movement_cfg)
+            if away_distance is not None:
+                record_alert(
+                    conn,
+                    DbAlert(
+                        airtag_id=airtag.id,
+                        reason="moved_without_owner",
+                        distance_meters=away_distance,
+                        report_id=report.id,
+                    ),
+                )
+                if _should_notify(settings, "moved_without_owner"):
+                    away_message = (
+                        f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
+                        f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
+                    )
+                    notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)
+
+    _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted])

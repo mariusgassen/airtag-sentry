@@ -27,7 +27,7 @@ from airtag_sentry.db import (
     list_airtags,
     list_owner_devices,
 )
-from airtag_sentry.geocode import format_location_line, reverse_geocode
+from airtag_sentry.geocode import format_location_line, get_or_fetch_geocode
 
 logger = logging.getLogger(__name__)
 
@@ -220,12 +220,12 @@ def _format_device_battery(level: float, status: str | None) -> str:
 
 
 def _format_location_text(
-    name: str, lat: float, lon: float, timestamp: dt.datetime, battery: str | None, tz: dt.tzinfo
+    conn, name: str, lat: float, lon: float, timestamp: dt.datetime, battery: str | None, tz: dt.tzinfo
 ) -> str:
     lines = [name]
     if battery is not None:
         lines.append(f"Batterie: {battery}")
-    address = reverse_geocode(lat, lon)
+    address = get_or_fetch_geocode(conn, lat, lon).address
     lines.append(format_location_line(lat, lon, timestamp, address, tz))
     return "\n".join(lines)
 
@@ -239,7 +239,7 @@ def _format_location(item: _WhereItem, conn, tz: dt.tzinfo) -> str:
             return f"{name}: noch kein Standort bekannt."
         location = history[0]  # newest-first, unlike fetch_reports
         battery = _format_device_battery(location.battery_level, location.battery_status) if location.battery_level is not None else None
-        return _format_location_text(name, location.lat, location.lon, location.recorded_at, battery, tz)
+        return _format_location_text(conn, name, location.lat, location.lon, location.recorded_at, battery, tz)
 
     airtag = obj
     reports: list[Report] = fetch_reports(conn, airtag.id, limit=1)
@@ -247,7 +247,7 @@ def _format_location(item: _WhereItem, conn, tz: dt.tzinfo) -> str:
         return f"{airtag.name}: noch kein Standort bekannt."
     report = reports[-1]
     battery = _format_airtag_battery(report.battery_level) if report.battery_level else None
-    return _format_location_text(airtag.name, report.lat, report.lon, report.timestamp, battery, tz)
+    return _format_location_text(conn, airtag.name, report.lat, report.lon, report.timestamp, battery, tz)
 
 
 def _handle_callback_query(conn, bot_token: str, chat_id: str, callback_query: dict, tz: dt.tzinfo) -> None:

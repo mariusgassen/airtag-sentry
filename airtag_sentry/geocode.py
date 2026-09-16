@@ -1,17 +1,31 @@
 """Reverse geocoding for report/location markers, via OpenStreetMap's
 Nominatim - the same OSM data already backing the map tiles, so no separate
 API key/account is needed. Best-effort only: a failed or rate-limited lookup
-returns None rather than raising, since this is a "nice to have" address
-label for a marker that already has its lat/lon, never load-bearing.
+returns an empty GeocodeResult rather than raising, since this is a "nice to
+have" label for a marker that already has its lat/lon, never load-bearing.
+
+Results are persisted by callers via db.py's geocoded_points table (the
+poller, see tracker.py) rather than cached here - this module now only ever
+makes the HTTP call, rate-limited. get_or_fetch_geocode() below is the
+cache-aware entry point every *request-time* caller (the /api/geocode route,
+the Telegram bot) should use instead of calling reverse_geocode() directly,
+so those paths get the same persisted cache tracker.py's poller already
+benefits from - both for latency (skip the live Nominatim round-trip
+entirely on a cache hit) and consistency (Nominatim only; the geofence/
+correction priority chain lives in stays.py and is layered on top by web/app.py).
 """
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import threading
 import time
 
+import psycopg
 import requests
+
+from airtag_sentry.db import get_geocoded_point, store_geocoded_point
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 # Nominatim's usage policy caps unauthenticated public use at 1 request/sec
@@ -21,27 +35,17 @@ _USER_AGENT = "AirTagSentry (self-hosted dashboard, reverse-geocode)"
 
 _lock = threading.Lock()
 _last_call = 0.0
-# Small in-process cache, not persisted across restarts - reverse geocoding
-# is a display nicety, not data worth a migration/table for.
-_cache: dict[tuple[float, float], str | None] = {}
-_CACHE_MAX = 500
 
 
-def _cache_key(lat: float, lon: float) -> tuple[float, float]:
-    # ~1m precision, so AirTag fixes a few meters apart share one lookup/
-    # cache entry and one street-level address.
-    return (round(lat, 5), round(lon, 5))
+@dataclasses.dataclass(frozen=True)
+class GeocodeResult:
+    address: str | None  # Nominatim's display_name - the full formatted address.
+    poi_name: str | None  # Nominatim's name - only present for a named POI (shop, amenity, ...).
 
 
-def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> str | None:
-    key = _cache_key(lat, lon)
-    if key in _cache:
-        return _cache[key]
-
+def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> GeocodeResult:
     global _last_call
     with _lock:
-        if key in _cache:  # re-check: another thread may have filled it while we waited on the lock
-            return _cache[key]
         wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call)
         if wait > 0:
             time.sleep(wait)
@@ -54,14 +58,11 @@ def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> str | None:
             )
             _last_call = time.monotonic()
             resp.raise_for_status()
-            address = resp.json().get("display_name")
+            body = resp.json()
         except (requests.RequestException, ValueError):
-            address = None
+            return GeocodeResult(address=None, poi_name=None)
 
-        if len(_cache) >= _CACHE_MAX:
-            _cache.clear()
-        _cache[key] = address
-        return address
+        return GeocodeResult(address=body.get("display_name"), poi_name=body.get("name"))
 
 
 def format_location_line(
@@ -70,8 +71,8 @@ def format_location_line(
     """Timestamp + optional reverse-geocoded address + a Google Maps link, one
     per line - the shared "where/when" tail for anything telling a human
     about a location (telegram_bot.py's /where reply, tracker.py's movement
-    alerts). Callers fetch `address` themselves via reverse_geocode() so this
-    stays a pure formatter.
+    alerts). Callers fetch `address` themselves (via get_or_fetch_geocode())
+    so this stays a pure formatter.
 
     `timestamp` comes from Postgres as a UTC-aware datetime (TIMESTAMPTZ) -
     always convert it to the caller's `tz` (Config.display_timezone) before
@@ -81,3 +82,20 @@ def format_location_line(
         lines.append(address)
     lines.append(f"https://maps.google.com/?q={lat},{lon}")
     return "\n".join(lines)
+
+
+def get_or_fetch_geocode(conn: psycopg.Connection, lat: float, lon: float) -> GeocodeResult:
+    """Cache-aware wrapper for request-time geocode lookups (the /api/geocode
+    route, the Telegram bot) - mirrors tracker.py's _geocode_new_points'
+    "only cache a successful lookup" behavior, just for a single point rather
+    than a batch. Checks the geocoded_points table first so a coordinate the
+    poller (or an earlier request) already resolved never triggers another
+    live, rate-limited Nominatim call."""
+    cached = get_geocoded_point(conn, lat, lon)
+    if cached is not None:
+        return GeocodeResult(address=cached.address, poi_name=cached.poi_name)
+
+    result = reverse_geocode(lat, lon)
+    if result.address is not None or result.poi_name is not None:
+        store_geocoded_point(conn, lat, lon, result.address, result.poi_name)
+    return result
