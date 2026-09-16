@@ -90,10 +90,13 @@ Telegram's `/where` now shows battery too (`telegram_bot.py`'s
 `_format_location_text`, reusing `geocode.py`'s reverse geocoder for a
 human-readable address alongside the maps link).
 
-Not yet done, left as a fast-follow: map popups (`MapCard.tsx`/
-`DeviceMapCard.tsx`) don't show battery yet, and there's no low-battery
-alerting (a dying AirTag/phone silently going quiet is still just "no new
-reports", not a distinct alert reason).
+Map popups (`MapCard.tsx`'s AirTag pin and its other-owner-devices markers,
+`DeviceMapCard.tsx`'s pin) now show it too, via a shared `BatteryRow` -
+same low-battery red-text treatment as the detail headers.
+
+Not yet done, left as a fast-follow: no low-battery alerting (a dying
+AirTag/phone silently going quiet is still just "no new reports", not a
+distinct alert reason).
 
 ## 14. Home Assistant integration — done
 

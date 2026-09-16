@@ -16,7 +16,14 @@ import {
 } from 'react-leaflet'
 import type { Airtag, OwnerLocation, Place, Report, ReportStay } from '../api'
 import { getAddress } from '../api'
-import { capitalize, formatClusterRange, formatRelative } from '../format'
+import {
+  capitalize,
+  formatAirtagBattery,
+  formatClusterRange,
+  formatDeviceBattery,
+  formatRelative,
+  isLowBattery,
+} from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { useCurrentPosition } from '../hooks/useCurrentPosition'
 import {
@@ -30,7 +37,7 @@ import {
   stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
-import { ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon } from './icons'
+import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon } from './icons'
 
 /** Callback for "Ort hier hinzufügen" (see AddPlaceButton) - jumps to
  * Settings -> Orte and opens the place editor pre-seeded at this exact
@@ -160,6 +167,37 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   return (
     <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>
       <span>{address}</span>
+    </InfoRow>
+  )
+}
+
+/** Battery reading for a marker popup, same info StayRow.tsx's history list
+ * and AirtagDetail.tsx/DeviceDetail.tsx's headers already show - the popup
+ * was the one place left without it (tasks/roadmap.md #9). Renders nothing
+ * for `null` (no reading yet). Which formatter/label applies is inferred
+ * from `level`'s type, same as StayRow.tsx: a string is an AirTag's
+ * qualitative full/medium/low/very_low, a number is a device's 0.0-1.0
+ * fraction. Exported for DeviceMapCard.tsx, which shares this same popup
+ * content (see CLAUDE.md's AirTag/device parity constraint). */
+export function BatteryRow({
+  level,
+  status,
+  reported = true,
+}: {
+  level: string | number | null
+  status?: string | null
+  reported?: boolean
+}) {
+  if (level == null) return null
+  return (
+    <InfoRow icon={<BatteryIcon className="h-3.5 w-3.5" />}>
+      <span
+        className={isLowBattery(level) ? 'text-[var(--destructive)]' : undefined}
+        title={reported ? undefined : 'Kein frischer Batteriewert bei diesem Fix - letzter bekannter Stand übernommen'}
+      >
+        {typeof level === 'string' ? formatAirtagBattery(level) : formatDeviceBattery(level, status ?? null)}
+        {!reported && '*'}
+      </span>
     </InfoRow>
   )
 }
@@ -487,6 +525,7 @@ export function MapCard({
               same kind of "position" depending on which one happened to
               have a cached label yet. */}
           {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+          <BatteryRow level={displayed.battery_level} />
           <div className="mt-2 flex flex-wrap gap-2">
             <a
               href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
@@ -520,6 +559,7 @@ export function MapCard({
                 {capitalize(formatRelative(loc.recorded_at))}
               </InfoRow>
               <AddressLine lat={loc.lat} lon={loc.lon} />
+              <BatteryRow level={loc.battery_level} status={loc.battery_status} reported={loc.battery_reported} />
               <div className="mt-2 flex flex-wrap gap-2">
                 {onSelectDevice && (
                   <button
