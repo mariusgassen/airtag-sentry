@@ -591,7 +591,24 @@ export default function App() {
       <div className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-end md:pointer-events-auto md:static md:h-full md:w-[360px] md:shrink-0 md:border-r md:border-[var(--divider)]">
         <div
           ref={sheetRef}
-          className="sheet pointer-events-auto flex flex-col overflow-hidden rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
+          // overflow-clip, not overflow-hidden: this box was only ever meant
+          // to visually clip its content to the rounded top corners, never
+          // to scroll - but `hidden` still creates a scrollport that's
+          // programmatically scrollable (scrollTop) even with no visible
+          // scrollbar. AirtagDetail/DeviceDetail's history-row
+          // scrollIntoView({ block: 'nearest' }) (fired on every
+          // older/newer caret step, including while this sheet sits
+          // minimized and its content is merely invisible, not unmounted)
+          // walks *every* scrollable ancestor looking for room, and ends up
+          // nudging this one by a few px when the nested list's own scroll
+          // isn't enough - invisibly clipping the grab handle (this box's
+          // first child) out the top since it never scrolls back on its
+          // own. `clip` removes the scrollport entirely per the CSS
+          // Overflow spec, so it's never a scrollIntoView candidate in the
+          // first place - confirmed live: after the escape, this element's
+          // own scrollTop read a nonzero value despite no user-facing
+          // scrollbar ever having existed for it.
+          className="sheet pointer-events-auto flex flex-col overflow-clip rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
           data-state={sheetState}
         >
           <button
