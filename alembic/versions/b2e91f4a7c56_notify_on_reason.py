@@ -1,7 +1,7 @@
 """per-reason notification toggles
 
 Revision ID: b2e91f4a7c56
-Revises: f8a3c1d92e57
+Revises: 10ec7bc0de8c
 Create Date: 2026-09-16T08:00:00.000000
 
 Splits "was this recorded as an alert" from "should this send a
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'b2e91f4a7c56'
-down_revision: Union[str, Sequence[str], None] = 'f8a3c1d92e57'
+down_revision: Union[str, Sequence[str], None] = '10ec7bc0de8c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
