@@ -8,6 +8,7 @@ import { mapsUrl } from '../maps'
 import {
   AddPlaceButton,
   AddressLine,
+  BatteryRow,
   FitBounds,
   HistoryPoints,
   InfoRow,
@@ -99,6 +100,7 @@ export function DeviceMapCard({
               precomputed label yet, so this and the AirTag popup never show
               different kinds of info for the same "position" concept. */}
           {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+          <BatteryRow level={displayed.battery_level} status={displayed.battery_status} reported={displayed.battery_reported} />
           <div className="mt-2 flex flex-wrap gap-2">
             <a
               href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}

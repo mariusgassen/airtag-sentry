@@ -110,6 +110,16 @@ export function ClockIcon({ className }: IconProps) {
   )
 }
 
+export function BatteryIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect x="2.5" y="7" width="16" height="10" rx="2.2" stroke="currentColor" strokeWidth={1.8} />
+      <path d="M20.5 10v4" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+      <rect x="5" y="9.5" width="7" height="5" rx="0.8" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function MapPinIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className}>
