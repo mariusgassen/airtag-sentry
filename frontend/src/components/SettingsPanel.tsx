@@ -186,6 +186,8 @@ export function SettingsPanel({ pushStatus, pushBusy, onEnablePush, onDisablePus
             pushBusy={pushBusy}
             onEnablePush={onEnablePush}
             onDisablePush={onDisablePush}
+            settings={settings}
+            update={update}
           />
         </div>
       </div>

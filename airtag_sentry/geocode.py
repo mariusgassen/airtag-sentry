@@ -64,13 +64,19 @@ def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> str | None:
         return address
 
 
-def format_location_line(lat: float, lon: float, timestamp: dt.datetime, address: str | None) -> str:
+def format_location_line(
+    lat: float, lon: float, timestamp: dt.datetime, address: str | None, tz: dt.tzinfo
+) -> str:
     """Timestamp + optional reverse-geocoded address + a Google Maps link, one
     per line - the shared "where/when" tail for anything telling a human
     about a location (telegram_bot.py's /where reply, tracker.py's movement
     alerts). Callers fetch `address` themselves via reverse_geocode() so this
-    stays a pure formatter."""
-    lines = [timestamp.strftime("%d.%m.%Y %H:%M")]
+    stays a pure formatter.
+
+    `timestamp` comes from Postgres as a UTC-aware datetime (TIMESTAMPTZ) -
+    always convert it to the caller's `tz` (Config.display_timezone) before
+    formatting, or the printed clock time is UTC mislabeled as local."""
+    lines = [timestamp.astimezone(tz).strftime("%d.%m.%Y %H:%M")]
     if address:
         lines.append(address)
     lines.append(f"https://maps.google.com/?q={lat},{lon}")

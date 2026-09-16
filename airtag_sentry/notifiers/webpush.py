@@ -20,6 +20,17 @@ class WebPushNotifier:
         payload = json.dumps({"title": title, "message": message})
         with get_conn(self._database_url) as conn:
             subscriptions = list_push_subscriptions(conn)
+            if not subscriptions:
+                # Otherwise a movement alert with zero push subscribers leaves
+                # no trace at all - no success, no failure, nothing - which
+                # is indistinguishable in the logs from web push never having
+                # been attempted. This is the first thing to check if push
+                # "seems enabled" in the dashboard but nothing ever arrives:
+                # the toggle only reflects the browser's own subscription
+                # state, not whether /api/push/subscribe's POST ever actually
+                # reached and was persisted by the server.
+                logger.info("No push subscriptions to notify.")
+                return
             for sub in subscriptions:
                 subscription_info = {
                     "endpoint": sub.endpoint,
@@ -32,6 +43,7 @@ class WebPushNotifier:
                         vapid_private_key=self._cfg.private_key,
                         vapid_claims={"sub": self._cfg.subject},
                     )
+                    logger.info("Web push delivered to %s", sub.endpoint)
                 except WebPushException as exc:
                     status = exc.response.status_code if exc.response is not None else None
                     if status in (404, 410):

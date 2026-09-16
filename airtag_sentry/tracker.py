@@ -4,6 +4,7 @@ movement check -> notify -> publish to Home Assistant.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import threading
@@ -19,6 +20,7 @@ from airtag_sentry.db import (
 from airtag_sentry.db import (
     AirtagRecord,
     AppSettings,
+    OwnerLocation,
     Report,
     count_reports,
     fetch_reports_before,
@@ -55,6 +57,20 @@ _ALERT_TITLES = {
     "stillstand_movement": "Bewegung nach Stillstand",
     "moved_without_owner": "Bewegung ohne dich",
 }
+
+# Which AppSettings switch gates a notification for each alert reason (see
+# Settings ⚙️ -> Benachrichtigungen). record_alert() below is never gated by
+# these - an alert is always recorded (so Verlauf/alert history stays
+# complete) whether or not it also sends a Telegram/push notification.
+_NOTIFY_SETTINGS_FIELD = {
+    "distance_threshold": "notify_on_distance_threshold",
+    "stillstand_movement": "notify_on_stillstand_movement",
+    "moved_without_owner": "notify_on_moved_without_owner",
+}
+
+
+def _should_notify(settings: AppSettings, reason: str) -> bool:
+    return getattr(settings, _NOTIFY_SETTINGS_FIELD[reason])
 
 
 def _load_key(cfg: Config, conn, airtag_id: str):
@@ -102,6 +118,32 @@ def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublishe
                 )
             except Exception:
                 logger.exception("Failed to publish owner device '%s' to Home Assistant.", location.device_id)
+
+
+def _owner_location_for_away_check(
+    cfg: Config, conn, near_timestamp: dt.datetime, max_age_minutes: float
+) -> OwnerLocation | None:
+    """The primary owner device's reading closest to `near_timestamp`, doing one
+    on-demand live Apple fetch first if what's already recorded is missing or
+    too old to trust - rather than silently accepting stale data and letting
+    evaluate_away() abstain. _update_owner_devices() already refreshes this
+    once per poll cycle, but that snapshot can still be older than
+    `max_age_minutes` by the time a particular AirTag's movement alert is
+    being evaluated (Apple round trips take real wall-clock time); this only
+    runs when a movement alert actually fired, so it's a rare extra Apple
+    call, not one per report."""
+    location = primary_owner_device_location_near(conn, near_timestamp)
+    if location is not None and abs(near_timestamp - location.recorded_at) <= dt.timedelta(minutes=max_age_minutes):
+        return location
+
+    try:
+        fresh_locations = fetch_owner_device_locations(cfg, conn)
+    except Exception:
+        logger.exception("On-demand owner-location refresh failed during away-correlation.")
+        return location  # fall back to whatever was already recorded, stale or not
+    for fresh_location in fresh_locations:
+        record_owner_device_location(conn, fresh_location)
+    return primary_owner_device_location_near(conn, near_timestamp)
 
 
 # Guards against two poll_once() calls racing each other - the scheduled
@@ -234,15 +276,17 @@ def _poll_airtag(
             ),
         )
         address = reverse_geocode(report.lat, report.lon)
-        message = (
-            f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
-            f"{format_location_line(report.lat, report.lon, report.timestamp, address)}"
-        )
-        notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+        if _should_notify(settings, alert.reason):
+            message = (
+                f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
+                f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
+            )
+            notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
 
-        away_distance = evaluate_away(
-            report, primary_owner_device_location_near(conn, report.timestamp), movement_cfg
+        owner_location = _owner_location_for_away_check(
+            cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes
         )
+        away_distance = evaluate_away(report, owner_location, movement_cfg)
         if away_distance is not None:
             record_alert(
                 conn,
@@ -253,8 +297,9 @@ def _poll_airtag(
                     report_id=report.id,
                 ),
             )
-            away_message = (
-                f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
-                f"{format_location_line(report.lat, report.lon, report.timestamp, address)}"
-            )
-            notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)
+            if _should_notify(settings, "moved_without_owner"):
+                away_message = (
+                    f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
+                    f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
+                )
+                notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)

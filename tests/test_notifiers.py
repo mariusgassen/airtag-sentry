@@ -58,6 +58,26 @@ def test_webpush_notifier_prunes_expired_subscription(
     mock_remove.assert_called_once_with(mock_get_conn.return_value.__enter__.return_value, "https://push.example/gone")
 
 
+@patch("airtag_sentry.notifiers.webpush.webpush")
+@patch("airtag_sentry.notifiers.webpush.list_push_subscriptions")
+@patch("airtag_sentry.notifiers.webpush.get_conn")
+def test_webpush_notifier_logs_when_there_are_no_subscriptions(mock_get_conn, mock_list_subs, mock_webpush, caplog):
+    """Regression guard for a real diagnosis: a movement alert with zero push
+    subscribers used to leave no trace at all in the logs - indistinguishable
+    from web push never having been attempted, which is exactly what made a
+    "push seems enabled but nothing ever arrives" report unanswerable without
+    DB access. This must log something instead of silently no-op-ing."""
+    mock_get_conn.return_value.__enter__.return_value = MagicMock()
+    mock_list_subs.return_value = []
+    cfg = WebPushConfig(public_key="pub", private_key="priv", subject="mailto:me@example.com")
+
+    with caplog.at_level("INFO"):
+        WebPushNotifier("postgresql://unused", cfg).send("Titel", "Nachricht")
+
+    mock_webpush.assert_not_called()
+    assert "No push subscriptions to notify" in caplog.text
+
+
 def _fake_publisher():
     with patch("airtag_sentry.notifiers.homeassistant.mqtt.Client") as mock_client_cls:
         publisher = HomeAssistantPublisher(
