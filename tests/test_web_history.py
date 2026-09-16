@@ -1,6 +1,7 @@
 import contextlib
 import datetime as dt
 import os
+import shutil
 import time
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
@@ -28,6 +29,22 @@ from airtag_sentry.web import app as app_module
 TEST_DATABASE_URL = os.environ.setdefault(
     "TEST_DATABASE_URL", "postgresql://airtag:airtag@localhost:5432/airtag_sentry_test"
 )
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _static_dir():
+    """create_app() mounts StaticFiles(STATIC_DIR) unconditionally; the frontend
+    build normally provides it. Stand in a placeholder when it's absent so this
+    module doesn't require a frontend build just to test the history routes -
+    same approach as test_web_auth.py's identical fixture (duplicated rather
+    than shared: tests/ has no conftest.py/__init__.py, see _login's docstring)."""
+    created = not app_module.STATIC_DIR.exists()
+    if created:
+        app_module.STATIC_DIR.mkdir(parents=True)
+        (app_module.STATIC_DIR / "index.html").write_text("<html></html>")
+    yield
+    if created:
+        shutil.rmtree(app_module.STATIC_DIR)
 
 
 @pytest.fixture()
