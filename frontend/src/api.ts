@@ -141,9 +141,21 @@ export class ApiError extends Error {}
 // said no" (a normal ApiError) from "the server isn't answering at all".
 const REQUEST_TIMEOUT_MS = 10_000
 
-async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+// poll-now (below) runs a live, synchronous Apple poll server-side (all
+// AirTags plus every enabled owner device) instead of a plain DB read, so it
+// routinely takes longer than REQUEST_TIMEOUT_MS under perfectly normal
+// conditions. Using the default timeout for it used to abort the request
+// client-side while the server was still busy with that same poll, and
+// App.tsx's handleManualRefresh immediately followed up with a fullRefresh()
+// that then raced the still-running poll and occasionally timed out too -
+// surfacing the offline banner on a manual refresh even though the server
+// was reachable the whole time, something the passive background tick never
+// triggers since it never calls poll-now.
+const POLL_NOW_TIMEOUT_MS = 60_000
+
+async function apiFetch(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
   let res: Response
   try {
     res = await fetch(path, {
@@ -179,7 +191,7 @@ export async function ping(): Promise<void> {
  * POST /api/poll-now. Callers should re-fetch the usual data endpoints
  * afterwards to pick up whatever this just wrote. */
 export async function pollNow(): Promise<void> {
-  await apiFetch('/api/poll-now', { method: 'POST' })
+  await apiFetch('/api/poll-now', { method: 'POST' }, POLL_NOW_TIMEOUT_MS)
 }
 
 export async function getAirtags(): Promise<Airtag[]> {
@@ -482,6 +494,16 @@ export async function setMqttSettings(
 
 export async function deleteMqttSettings(): Promise<void> {
   await apiFetch('/api/notifications/mqtt', { method: 'DELETE' })
+}
+
+export interface NotificationTestResult {
+  channel: string
+  ok: boolean
+  error?: string
+}
+
+export async function testNotifications(): Promise<{ results: NotificationTestResult[] }> {
+  return (await apiFetch('/api/notifications/test', { method: 'POST' })).json()
 }
 
 export interface HaTokenStatus {

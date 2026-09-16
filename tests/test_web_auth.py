@@ -288,6 +288,60 @@ def test_poll_now_route_surfaces_a_poll_failure(client, monkeypatch):
     assert "Apple session expired" in resp.json()["detail"]
 
 
+def test_notifications_test_route_requires_a_session(client):
+    resp = client.post("/api/notifications/test")
+    assert resp.status_code == 401
+
+
+def test_notifications_test_route_reports_no_channels_when_none_configured(client, monkeypatch):
+    _login(client, monkeypatch)
+    # Every other test in this module avoids a real DB round-trip by
+    # monkeypatching get_conn - the cfg fixture's DATABASE_URL isn't a real,
+    # reachable database in CI.
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(app_module, "build_notifiers", lambda cfg, conn: [])
+
+    resp = client.post("/api/notifications/test")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"results": []}
+
+
+def test_notifications_test_route_sends_through_each_configured_channel(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+
+    class _FakeNotifier:
+        def __init__(self, should_fail):
+            self._should_fail = should_fail
+
+        def send(self, title, message):
+            if self._should_fail:
+                raise RuntimeError("delivery failed")
+
+    class WorkingNotifier(_FakeNotifier):
+        def __init__(self):
+            super().__init__(should_fail=False)
+
+    class BrokenNotifier(_FakeNotifier):
+        def __init__(self):
+            super().__init__(should_fail=True)
+
+    monkeypatch.setattr(
+        app_module, "build_notifiers", lambda cfg, conn: [WorkingNotifier(), BrokenNotifier()]
+    )
+
+    resp = client.post("/api/notifications/test")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "results": [
+            {"channel": "working", "ok": True},
+            {"channel": "broken", "ok": False, "error": "delivery failed"},
+        ]
+    }
+
+
 def test_fingerprinted_asset_is_cached_immutably(client, monkeypatch):
     # Vite fingerprints everything under /assets/ with a content hash, so a
     # given filename's content never changes - safe to cache forever.
