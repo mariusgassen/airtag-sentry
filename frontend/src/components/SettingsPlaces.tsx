@@ -30,9 +30,15 @@ interface Props {
   onChanged: () => void | Promise<void>
   seed?: PlaceSeed | null
   onSeedConsumed?: () => void
+  // Mobile's sheet (App.tsx) has a minimized/default/expanded height - the
+  // editor's map + address search + Name/Radius fields don't fit in
+  // 'default' (half-height), so entering the editor asks for 'expanded'
+  // the same way picking a history point asks for 'minimized'
+  // (App.tsx's handleSelectReport).
+  onRequestExpand?: () => void
 }
 
-export function SettingsPlaces({ places, onChanged, seed = null, onSeedConsumed }: Props) {
+export function SettingsPlaces({ places, onChanged, seed = null, onSeedConsumed, onRequestExpand }: Props) {
   const [editing, setEditing] = useState<Place | 'new' | null>(null)
 
   // A seed arriving (from a map popup) always opens straight into a new
@@ -40,6 +46,13 @@ export function SettingsPlaces({ places, onChanged, seed = null, onSeedConsumed 
   useEffect(() => {
     if (seed) setEditing('new')
   }, [seed])
+
+  // Covers every way into the editor (a seed, "Ort hinzufügen", or picking
+  // an existing place) in one place, rather than repeating the call at each
+  // of those three call sites.
+  useEffect(() => {
+    if (editing !== null) onRequestExpand?.()
+  }, [editing, onRequestExpand])
 
   if (editing !== null) {
     return (
