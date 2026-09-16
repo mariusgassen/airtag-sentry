@@ -729,6 +729,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                         "lon": c.anchor.lon,
                         "label": _stay_label(conn, place, c.anchor.lat, c.anchor.lon),
                         "place_id": place.id if place else None,
+                        "battery_level": c.anchor.battery_level,
                     }
                 )
         return {
@@ -1006,6 +1007,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                         "lon": c.anchor.lon,
                         "label": _stay_label(conn, place, c.anchor.lat, c.anchor.lon),
                         "place_id": place.id if place else None,
+                        "battery_level": c.anchor.battery_level,
+                        "battery_status": c.anchor.battery_status,
+                        "battery_reported": c.anchor.battery_reported,
                     }
                 )
         return {

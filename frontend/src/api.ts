@@ -27,6 +27,7 @@ export interface ReportStay {
   lon: number
   label: string | null
   place_id: number | null
+  battery_level: string | null
 }
 
 export interface ReportHistory {
@@ -111,6 +112,9 @@ export interface LocationStay {
   lon: number
   label: string | null
   place_id: number | null
+  battery_level: number | null
+  battery_status: string | null
+  battery_reported: boolean
 }
 
 export interface LocationHistory {
