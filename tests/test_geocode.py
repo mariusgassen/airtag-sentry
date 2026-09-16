@@ -5,7 +5,13 @@ import psycopg
 import pytest
 
 from airtag_sentry.db import get_conn, get_geocoded_point, store_geocoded_point
-from airtag_sentry.geocode import GeocodeResult, get_or_fetch_geocode, reverse_geocode
+from airtag_sentry.geocode import (
+    GeocodeResult,
+    GeocodeSearchResult,
+    get_or_fetch_geocode,
+    reverse_geocode,
+    search_address,
+)
 from airtag_sentry.migrate import upgrade_to_head
 
 TEST_DATABASE_URL = os.environ.get(
@@ -130,3 +136,44 @@ def test_reverse_geocode_returns_empty_result_on_missing_display_name(monkeypatc
     result = reverse_geocode(49.8728, 8.6512)
 
     assert result == GeocodeResult(address=None, poi_name=None)
+
+
+def test_search_address_returns_matching_results(monkeypatch):
+    mock_response = Mock()
+    mock_response.json.return_value = [
+        {"display_name": "Mornewegstraße 30, Darmstadt, Hessen, 64293, Deutschland", "lat": "49.8728", "lon": "8.6512"},
+        {"display_name": "Mornewegstraße 1, Darmstadt, Hessen, 64293, Deutschland", "lat": "49.87", "lon": "8.65"},
+    ]
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
+
+    result = search_address("Mornewegstraße Darmstadt")
+
+    assert result == [
+        GeocodeSearchResult(
+            display_name="Mornewegstraße 30, Darmstadt, Hessen, 64293, Deutschland", lat=49.8728, lon=8.6512
+        ),
+        GeocodeSearchResult(
+            display_name="Mornewegstraße 1, Darmstadt, Hessen, 64293, Deutschland", lat=49.87, lon=8.65
+        ),
+    ]
+
+
+def test_search_address_returns_empty_list_for_no_matches(monkeypatch):
+    mock_response = Mock()
+    mock_response.json.return_value = []
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
+
+    assert search_address("asdkjaskdjaskjd") == []
+
+
+def test_search_address_returns_empty_list_on_request_failure(monkeypatch):
+    import requests
+
+    def raise_error(*a, **k):
+        raise requests.RequestException("boom")
+
+    monkeypatch.setattr("requests.get", raise_error)
+
+    assert search_address("Darmstadt") == []

@@ -662,3 +662,33 @@ def test_delete_geocode_correction_route(client, monkeypatch):
 
     assert resp.status_code == 200
     assert calls == [(49.87, 8.65)]
+
+
+def test_geocode_search_route(client, monkeypatch):
+    _login(client, monkeypatch)
+    from airtag_sentry.geocode import GeocodeSearchResult
+
+    monkeypatch.setattr(
+        app_module,
+        "search_address",
+        lambda query: [GeocodeSearchResult(display_name=f"Result for {query}", lat=49.87, lon=8.65)],
+    )
+
+    resp = client.get("/api/geocode/search?q=Mornewegstra%C3%9Fe")
+
+    assert resp.status_code == 200
+    assert resp.json() == [{"display_name": "Result for Mornewegstraße", "lat": 49.87, "lon": 8.65}]
+
+
+def test_geocode_search_route_skips_lookup_for_a_short_query(client, monkeypatch):
+    _login(client, monkeypatch)
+
+    def fail_if_called(_query):
+        raise AssertionError("search_address should not be called for a query under MIN length")
+
+    monkeypatch.setattr(app_module, "search_address", fail_if_called)
+
+    resp = client.get("/api/geocode/search?q=ab")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
