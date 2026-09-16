@@ -33,7 +33,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
-from airtag_sentry.geocode import get_or_fetch_geocode
+from airtag_sentry.geocode import get_or_fetch_geocode, search_address
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.db import (
     AppSettings,
@@ -752,6 +752,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def geocode_route(lat: float, lon: float):
         with get_conn(cfg.database_url) as conn:
             return {"address": get_or_fetch_geocode(conn, lat, lon).address}
+
+    @app.get("/api/geocode/search")
+    def geocode_search_route(q: str):
+        """Forward-geocoding for the "Orte" editor's address search (see
+        geocode.py's search_address) - a short/blank query is a no-op rather
+        than a 400, since the frontend calls this as-you-type."""
+        query = q.strip()
+        if len(query) < 3:
+            return []
+        return [dataclasses.asdict(r) for r in search_address(query)]
 
     @app.put("/api/geocode/correction")
     def set_geocode_correction_route(body: GeocodeCorrectionIn):

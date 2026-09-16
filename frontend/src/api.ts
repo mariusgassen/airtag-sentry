@@ -250,6 +250,16 @@ export async function getAddress(lat: number, lon: number): Promise<string | nul
   return data.address
 }
 
+export interface AddressSearchResult {
+  display_name: string
+  lat: number
+  lon: number
+}
+
+export async function searchAddress(query: string): Promise<AddressSearchResult[]> {
+  return (await apiFetch(`/api/geocode/search?q=${encodeURIComponent(query)}`)).json()
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return (await apiFetch('/api/settings')).json()
 }

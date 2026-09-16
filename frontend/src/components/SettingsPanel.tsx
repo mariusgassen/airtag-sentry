@@ -10,6 +10,7 @@ import { Row, Section } from './AirtagDetail'
 import { SettingsAppleAccounts } from './SettingsAppleAccounts'
 import { SettingsNotifications } from './SettingsNotifications'
 import { SettingsPlaces } from './SettingsPlaces'
+import type { PlaceSeed } from './SettingsPlaces'
 import type { FieldKey } from './SettingsTracking'
 import { SettingsTracking } from './SettingsTracking'
 
@@ -122,6 +123,10 @@ interface Props {
   onSettingsChanged: (settings: AppSettings) => void
   places: Place[]
   onPlacesChanged: () => void | Promise<void>
+  // A location seeded from a map popup's "Ort hier hinzufügen" - see
+  // App.tsx's placeSeed/handleAddPlace.
+  placeSeed?: PlaceSeed | null
+  onPlaceSeedConsumed?: () => void
 }
 
 export function SettingsPanel({
@@ -132,6 +137,8 @@ export function SettingsPanel({
   onSettingsChanged,
   places,
   onPlacesChanged,
+  placeSeed = null,
+  onPlaceSeedConsumed,
 }: Props) {
   const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -142,6 +149,13 @@ export function SettingsPanel({
   useEffect(() => {
     getSettings().then(setSettings)
   }, [])
+
+  // A seed arriving means the user just tapped "Ort hier hinzufügen" on the
+  // map (Settings isn't even necessarily open yet) - jump straight past the
+  // root/Orte-list pages into the new place's editor.
+  useEffect(() => {
+    if (placeSeed) setPage('places')
+  }, [placeSeed])
 
   useEffect(() => {
     return () => {
@@ -247,7 +261,12 @@ export function SettingsPanel({
       <div className="flex h-full flex-col">
         <BackHeader title="Orte" onBack={() => setPage('root')} />
         <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
-          <SettingsPlaces places={places} onChanged={onPlacesChanged} />
+          <SettingsPlaces
+            places={places}
+            onChanged={onPlacesChanged}
+            seed={placeSeed}
+            onSeedConsumed={onPlaceSeedConsumed}
+          />
         </div>
       </div>
     )

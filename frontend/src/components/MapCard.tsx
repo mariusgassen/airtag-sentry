@@ -30,7 +30,16 @@ import {
   stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
-import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+import { ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon } from './icons'
+
+/** Callback for "Ort hier hinzufügen" (see AddPlaceButton) - jumps to
+ * Settings -> Orte and opens the place editor pre-seeded at this exact
+ * position, so a geofence can be created from a location already on the
+ * map instead of re-finding it by panning/searching from scratch. Optional
+ * everywhere it's threaded through (App.tsx always supplies it in
+ * practice) so this file's popups still render standalone in isolation
+ * (e.g. Storybook-less manual testing). */
+export type AddPlaceHandler = (lat: number, lon: number, name?: string) => void
 
 // Every marker popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx)
 // shares this shape - a fixed width so the card doesn't reflow oddly between
@@ -152,6 +161,35 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
     <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>
       <span>{address}</span>
     </InfoRow>
+  )
+}
+
+/** "Save this spot as a geofence" popup action - shared by every marker
+ * popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx) so
+ * creating a place from an already-known location is always one tap away,
+ * not just reachable by re-finding the same spot in Settings -> Orte from
+ * scratch. Renders nothing when `onAddPlace` isn't wired up. */
+export function AddPlaceButton({
+  lat,
+  lon,
+  name,
+  onAddPlace,
+}: {
+  lat: number
+  lon: number
+  name?: string | null
+  onAddPlace?: AddPlaceHandler
+}) {
+  if (!onAddPlace) return null
+  return (
+    <button
+      type="button"
+      onClick={() => onAddPlace(lat, lon, name ?? undefined)}
+      className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+    >
+      <PlusIcon className="h-3.5 w-3.5" />
+      Ort hier hinzufügen
+    </button>
   )
 }
 
@@ -299,7 +337,10 @@ export function SelectedPin({
   )
 }
 
-export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) {
+export function NoReportsView({
+  onMapClick,
+  onAddPlace,
+}: { onMapClick?: () => void; onAddPlace?: AddPlaceHandler } = {}) {
   const here = useCurrentPosition()
 
   if (!here) {
@@ -327,15 +368,18 @@ export function NoReportsView({ onMapClick }: { onMapClick?: () => void } = {}) 
           <div className={POPUP_WIDTH_CLASS}>
             <p className="mb-2 text-[0.95rem] font-semibold">Aktueller Standort</p>
             <AddressLine lat={here[0]} lon={here[1]} />
-            <a
-              href={mapsUrl(here[0], here[1], 'Aktueller Standort')}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
-            >
-              <LocationArrowIcon className="h-3.5 w-3.5" />
-              In Karten öffnen
-            </a>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a
+                href={mapsUrl(here[0], here[1], 'Aktueller Standort')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+              >
+                <LocationArrowIcon className="h-3.5 w-3.5" />
+                In Karten öffnen
+              </a>
+              <AddPlaceButton lat={here[0]} lon={here[1]} onAddPlace={onAddPlace} />
+            </div>
           </div>
         </Popup>
       </Marker>
@@ -356,6 +400,7 @@ export function MapCard({
   selectedReportId = null,
   onSelectReport,
   onMapClick,
+  onAddPlace,
 }: {
   reports: Report[]
   // Server-computed (see stays.py / GET /api/reports) - already deduped,
@@ -369,6 +414,7 @@ export function MapCard({
   selectedReportId?: number | null
   onSelectReport?: (id: number) => void
   onMapClick?: () => void
+  onAddPlace?: AddPlaceHandler
 }) {
   // Memoized: reports itself is a stable reference across pure-selection
   // re-renders (App.tsx only replaces it on an actual re-fetch), but
@@ -392,7 +438,7 @@ export function MapCard({
   const animatedPosition = useAnimatedLatLng(displayedPosition)
 
   if (positions.length === 0 || !displayed) {
-    return <NoReportsView onMapClick={onMapClick} />
+    return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
   }
 
   const last = positions[positions.length - 1]
@@ -428,25 +474,36 @@ export function MapCard({
       <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)} label={displayed.label}>
         <div className={POPUP_WIDTH_CLASS}>
           <p className="mb-2 text-[0.95rem] font-semibold">
-            {selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position'}
+            {displayed.label ?? (selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position')}
           </p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
             {displayed.count > 1
               ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
               : new Date(displayed.start).toLocaleString()}
           </InfoRow>
-          {displayed.label && (
-            <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>{displayed.label}</InfoRow>
-          )}
-          <a
-            href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
-          >
-            <LocationArrowIcon className="h-3.5 w-3.5" />
-            In Karten öffnen
-          </a>
+          {/* Only live-fetch a fallback address when the server has no
+              precomputed label (stays.py's resolve_label) - otherwise this
+              popup and NoReportsView's would show different info for the
+              same kind of "position" depending on which one happened to
+              have a cached label yet. */}
+          {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <a
+              href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+            >
+              <LocationArrowIcon className="h-3.5 w-3.5" />
+              In Karten öffnen
+            </a>
+            <AddPlaceButton
+              lat={displayedPosition[0]}
+              lon={displayedPosition[1]}
+              name={displayed.label}
+              onAddPlace={onAddPlace}
+            />
+          </div>
         </div>
       </SelectedPin>
       {ownerLocations.map((loc) => (
@@ -462,8 +519,9 @@ export function MapCard({
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
                 {capitalize(formatRelative(loc.recorded_at))}
               </InfoRow>
-              {onSelectDevice && (
-                <div className="mt-2 flex flex-wrap gap-2">
+              <AddressLine lat={loc.lat} lon={loc.lon} />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {onSelectDevice && (
                   <button
                     type="button"
                     onClick={() => onSelectDevice(loc.device_id)}
@@ -471,17 +529,18 @@ export function MapCard({
                   >
                     Details anzeigen
                   </button>
-                  <a
-                    href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-                  >
-                    <LocationArrowIcon className="h-3.5 w-3.5" />
-                    In Karten öffnen
-                  </a>
-                </div>
-              )}
+                )}
+                <a
+                  href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+                >
+                  <LocationArrowIcon className="h-3.5 w-3.5" />
+                  In Karten öffnen
+                </a>
+                <AddPlaceButton lat={loc.lat} lon={loc.lon} onAddPlace={onAddPlace} />
+              </div>
             </div>
           </Popup>
         </Marker>

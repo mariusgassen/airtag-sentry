@@ -6,6 +6,8 @@ import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { airtagPinIcon, deviceColor, stayMarkerRadius } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import {
+  AddPlaceButton,
+  AddressLine,
   FitBounds,
   HistoryPoints,
   InfoRow,
@@ -17,7 +19,8 @@ import {
   POPUP_WIDTH_CLASS,
   SelectedPin,
 } from './MapCard'
-import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+import type { AddPlaceHandler } from './MapCard'
+import { ClockIcon, LocationArrowIcon } from './icons'
 
 /** Single-device counterpart to MapCard - one owner device's own location
  * trail, drilled into from ObjectsList (device selected -> DeviceDetail).
@@ -34,6 +37,7 @@ export function DeviceMapCard({
   selectedLocationKey = null,
   onSelectLocation,
   onMapClick,
+  onAddPlace,
 }: {
   device: OwnerDevice
   locations: OwnerLocation[]
@@ -43,6 +47,7 @@ export function DeviceMapCard({
   selectedLocationKey?: string | null
   onSelectLocation?: (recordedAt: string) => void
   onMapClick?: () => void
+  onAddPlace?: AddPlaceHandler
 }) {
   // Memoized - see MapCard.tsx's identical comment on its own `positions`.
   const positions = useMemo<[number, number][]>(() => locations.map((l) => [l.lat, l.lon]), [locations])
@@ -58,7 +63,7 @@ export function DeviceMapCard({
   const animatedPosition = useAnimatedLatLng(displayedPosition)
 
   if (positions.length === 0 || !displayed) {
-    return <NoReportsView onMapClick={onMapClick} />
+    return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
   }
 
   const trailColor = deviceColor(device)
@@ -83,24 +88,34 @@ export function DeviceMapCard({
       />
       <SelectedPin position={animatedPosition} icon={airtagPinIcon(device)} label={displayed.label}>
         <div className={POPUP_WIDTH_CLASS}>
-          <p className="mb-2 text-[0.95rem] font-semibold">{deviceLabel(device)}</p>
+          <p className="mb-2 text-[0.95rem] font-semibold">{displayed.label ?? deviceLabel(device)}</p>
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
             {displayed.count > 1
               ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
               : new Date(displayed.start).toLocaleString()}
           </InfoRow>
-          {displayed.label && (
-            <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>{displayed.label}</InfoRow>
-          )}
-          <a
-            href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 flex items-center justify-center gap-1.5 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)]"
-          >
-            <LocationArrowIcon className="h-3.5 w-3.5" />
-            In Karten öffnen
-          </a>
+          {/* See MapCard.tsx's identical comment on its own SelectedPin
+              popup - only live-fetch a fallback address when there's no
+              precomputed label yet, so this and the AirTag popup never show
+              different kinds of info for the same "position" concept. */}
+          {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <a
+              href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+            >
+              <LocationArrowIcon className="h-3.5 w-3.5" />
+              In Karten öffnen
+            </a>
+            <AddPlaceButton
+              lat={displayedPosition[0]}
+              lon={displayedPosition[1]}
+              name={displayed.label}
+              onAddPlace={onAddPlace}
+            />
+          </div>
         </div>
       </SelectedPin>
       {/* FitBounds then PanToSelection - see MapCard.tsx's identical comment. */}

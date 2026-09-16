@@ -36,6 +36,7 @@ import { ChevronDownIcon, ChevronUpIcon } from './components/icons'
 import { MapCard } from './components/MapCard'
 import { OverviewMap } from './components/OverviewMap'
 import { SettingsPanel } from './components/SettingsPanel'
+import type { PlaceSeed } from './components/SettingsPlaces'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
 import { usePushNotifications } from './hooks/usePushNotifications'
@@ -114,6 +115,11 @@ export default function App() {
   // wherever they're managed) since they label stays on the map/history list
   // app-wide, same reasoning as ownerLocations above.
   const [places, setPlaces] = useState<Place[]>([])
+  // A location picked via a map popup's "Ort hier hinzufügen" (see
+  // MapCard.tsx's AddPlaceButton) - consumed by SettingsPanel/SettingsPlaces
+  // to jump straight into a new place's editor seeded at that spot, then
+  // cleared again so re-opening Orte later doesn't reopen the same seed.
+  const [placeSeed, setPlaceSeed] = useState<PlaceSeed | null>(null)
   // Every *enabled* (tracked) owner device - see ObjectsList.tsx, which is
   // the first place a tracked device becomes visible outside Settings.
   const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
@@ -392,6 +398,14 @@ export default function App() {
     setActiveTab('objects')
   }
 
+  // "Ort hier hinzufügen" from any map popup (MapCard/DeviceMapCard/
+  // OverviewMap) - switches to Settings, where the placeSeed effect below
+  // opens Orte straight into a new place's editor at this exact position.
+  function handleAddPlace(lat: number, lon: number, name?: string) {
+    setPlaceSeed({ lat, lon, name })
+    setActiveTab('settings')
+  }
+
   // Picking a history-list entry already re-centers the map on it (see
   // MapCard.tsx/DeviceMapCard.tsx's PanToSelection), but on mobile that pan
   // happened invisibly behind the sheet, which stayed open over the map -
@@ -490,6 +504,7 @@ export default function App() {
             selectedReportId={selectedReportId}
             onSelectReport={handleSelectReport}
             onMapClick={() => setDetail(null)}
+            onAddPlace={handleAddPlace}
           />
         ) : activeTab === 'objects' && detail === 'device' && selectedDevice ? (
           <DeviceMapCard
@@ -500,6 +515,7 @@ export default function App() {
             selectedLocationKey={selectedDeviceLocationKey}
             onSelectLocation={handleSelectDeviceLocation}
             onMapClick={() => setDetail(null)}
+            onAddPlace={handleAddPlace}
           />
         ) : (
           <OverviewMap
@@ -509,6 +525,7 @@ export default function App() {
             ownerLocations={ownerLocations}
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
+            onAddPlace={handleAddPlace}
           />
         )}
       </div>
@@ -678,6 +695,8 @@ export default function App() {
                 onSettingsChanged={setSettings}
                 places={places}
                 onPlacesChanged={refreshPlaces}
+                placeSeed={placeSeed}
+                onPlaceSeedConsumed={() => setPlaceSeed(null)}
               />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail

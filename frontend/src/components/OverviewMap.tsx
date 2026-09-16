@@ -3,7 +3,16 @@ import type { Airtag, OwnerLocation, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { OWNER_TRAIL_COLOR, airtagPinIcon } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
-import { FitBounds, InfoRow, InvalidateSizeOnResize, NoReportsView, POPUP_WIDTH_CLASS } from './MapCard'
+import {
+  AddPlaceButton,
+  AddressLine,
+  FitBounds,
+  InfoRow,
+  InvalidateSizeOnResize,
+  NoReportsView,
+  POPUP_WIDTH_CLASS,
+} from './MapCard'
+import type { AddPlaceHandler } from './MapCard'
 import { ClockIcon, LocationArrowIcon } from './icons'
 
 interface Props {
@@ -16,6 +25,7 @@ interface Props {
   // own dashed trail, matching the route AirTags already get.
   ownerLocationHistories?: Record<string, OwnerLocation[]>
   onSelectDevice?: (id: string) => void
+  onAddPlace?: AddPlaceHandler
 }
 
 /** Main map view for the list/settings screens - every AirTag's last known
@@ -28,6 +38,7 @@ export function OverviewMap({
   ownerLocations = [],
   ownerLocationHistories = {},
   onSelectDevice,
+  onAddPlace,
 }: Props) {
   const located = airtags
     .map((airtag) => ({ airtag, lastReport: statuses[airtag.id]?.last_report ?? null }))
@@ -39,7 +50,7 @@ export function OverviewMap({
   // (or before any AirTag has reported yet) - the overview map should still
   // render once there's at least one AirTag *or* device position.
   if (located.length === 0 && ownerLocations.length === 0) {
-    return <NoReportsView />
+    return <NoReportsView onAddPlace={onAddPlace} />
   }
 
   const positions: [number, number][] = [
@@ -68,6 +79,7 @@ export function OverviewMap({
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
                 {capitalize(formatRelative(lastReport.timestamp))}
               </InfoRow>
+              <AddressLine lat={lastReport.lat} lon={lastReport.lon} />
               <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -85,6 +97,7 @@ export function OverviewMap({
                   <LocationArrowIcon className="h-3.5 w-3.5" />
                   In Karten öffnen
                 </a>
+                <AddPlaceButton lat={lastReport.lat} lon={lastReport.lon} onAddPlace={onAddPlace} />
               </div>
             </div>
           </Popup>
@@ -116,8 +129,9 @@ export function OverviewMap({
               <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
                 {capitalize(formatRelative(loc.recorded_at))}
               </InfoRow>
-              {onSelectDevice && (
-                <div className="mt-2 flex flex-wrap gap-2">
+              <AddressLine lat={loc.lat} lon={loc.lon} />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {onSelectDevice && (
                   <button
                     type="button"
                     onClick={() => onSelectDevice(loc.device_id)}
@@ -125,17 +139,18 @@ export function OverviewMap({
                   >
                     Details anzeigen
                   </button>
-                  <a
-                    href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-                  >
-                    <LocationArrowIcon className="h-3.5 w-3.5" />
-                    In Karten öffnen
-                  </a>
-                </div>
-              )}
+                )}
+                <a
+                  href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+                >
+                  <LocationArrowIcon className="h-3.5 w-3.5" />
+                  In Karten öffnen
+                </a>
+                <AddPlaceButton lat={loc.lat} lon={loc.lon} onAddPlace={onAddPlace} />
+              </div>
             </div>
           </Popup>
         </Marker>

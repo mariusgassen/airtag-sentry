@@ -21,17 +21,20 @@ import dataclasses
 import datetime as dt
 import threading
 import time
+from typing import Any
 
 import psycopg
 import requests
 
 from airtag_sentry.db import get_geocoded_point, store_geocoded_point
 
-_NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+_NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+_NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 # Nominatim's usage policy caps unauthenticated public use at 1 request/sec
 # and requires an identifying User-Agent.
 _MIN_INTERVAL_SECONDS = 1.0
 _USER_AGENT = "AirTagSentry (self-hosted dashboard, reverse-geocode)"
+_SEARCH_RESULT_LIMIT = 5
 
 _lock = threading.Lock()
 _last_call = 0.0
@@ -43,26 +46,56 @@ class GeocodeResult:
     poi_name: str | None  # Nominatim's name - only present for a named POI (shop, amenity, ...).
 
 
-def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> GeocodeResult:
+@dataclasses.dataclass(frozen=True)
+class GeocodeSearchResult:
+    display_name: str
+    lat: float
+    lon: float
+
+
+def _rate_limited_get(url: str, params: dict[str, Any], timeout: float) -> Any | None:
+    """Shared rate limiter for both Nominatim endpoints - they're the same
+    host under the same 1 request/sec usage-policy cap, so reverse and
+    forward lookups queue behind one shared `_last_call`/`_lock` rather than
+    each getting their own budget."""
     global _last_call
     with _lock:
         wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call)
         if wait > 0:
             time.sleep(wait)
         try:
-            resp = requests.get(
-                _NOMINATIM_URL,
-                params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18},
-                headers={"User-Agent": _USER_AGENT},
-                timeout=timeout,
-            )
+            resp = requests.get(url, params=params, headers={"User-Agent": _USER_AGENT}, timeout=timeout)
             _last_call = time.monotonic()
             resp.raise_for_status()
-            body = resp.json()
+            return resp.json()
         except (requests.RequestException, ValueError):
-            return GeocodeResult(address=None, poi_name=None)
+            return None
 
-        return GeocodeResult(address=body.get("display_name"), poi_name=body.get("name"))
+
+def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> GeocodeResult:
+    body = _rate_limited_get(
+        _NOMINATIM_REVERSE_URL, {"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18}, timeout
+    )
+    if body is None:
+        return GeocodeResult(address=None, poi_name=None)
+    return GeocodeResult(address=body.get("display_name"), poi_name=body.get("name"))
+
+
+def search_address(query: str, timeout: float = 5.0) -> list[GeocodeSearchResult]:
+    """Forward geocoding for the "Ort hinzufügen" address search (dashboard
+    only, see CLAUDE.md's UI-first constraint) - lets a user find a geofence
+    center by typing an address instead of only panning the map or relying
+    on the browser's current position. Best-effort like reverse_geocode: a
+    failed or rate-limited lookup returns an empty list rather than raising."""
+    body = _rate_limited_get(
+        _NOMINATIM_SEARCH_URL, {"format": "jsonv2", "q": query, "limit": _SEARCH_RESULT_LIMIT}, timeout
+    )
+    if not body:
+        return []
+    return [
+        GeocodeSearchResult(display_name=item["display_name"], lat=float(item["lat"]), lon=float(item["lon"]))
+        for item in body
+    ]
 
 
 def format_location_line(
