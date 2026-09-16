@@ -165,3 +165,31 @@ def test_owner_device_history_route_returns_raw_points_and_a_labeled_stay(client
     assert len(body["raw"]) == 1
     assert body["stays"][0]["label"] == "Home"
     assert body["stays"][0]["anchor_recorded_at"] == "2026-01-01T12:00:00+00:00"
+
+
+def test_owner_device_history_route_maps_start_and_end_to_earliest_and_latest(client, conn, monkeypatch):
+    """Regression test: owner-device locations arrive newest-first (unlike
+    AirTag reports, oldest-first - see CLAUDE.md), so a stay's start/end
+    mapping is reversed relative to the AirTag-side route. A single-point
+    stay can't distinguish a correct reversal from an accidental one (both
+    collapse to the same timestamp), so this uses three distinct times -
+    mirrors test_reports_route_returns_raw_points_and_a_labeled_stay's
+    two-point proof on the AirTag side."""
+    _login(client, monkeypatch)
+    upsert_owner_devices(conn, [{"id": "d1", "name": "iPhone", "device_type": "iPhone"}], dt.datetime.now(dt.timezone.utc))
+    for hour, minute in [(12, 0), (12, 30), (13, 0)]:
+        record_owner_device_location(
+            conn,
+            OwnerLocation(
+                id=None, device_id="d1", recorded_at=dt.datetime(2026, 1, 1, hour, minute, tzinfo=dt.timezone.utc),
+                lat=49.8728, lon=8.6512, horizontal_accuracy=5.0,
+            ),
+        )
+
+    resp = client.get("/api/owner-devices/history?device_id=d1")
+
+    assert resp.status_code == 200
+    stay = resp.json()["stays"][0]
+    assert stay["count"] == 3
+    assert stay["start"] == "2026-01-01T12:00:00+00:00"
+    assert stay["end"] == "2026-01-01T13:00:00+00:00"
