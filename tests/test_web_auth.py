@@ -295,6 +295,11 @@ def test_notifications_test_route_requires_a_session(client):
 
 def test_notifications_test_route_reports_no_channels_when_none_configured(client, monkeypatch):
     _login(client, monkeypatch)
+    # Every other test in this module avoids a real DB round-trip by
+    # monkeypatching get_conn - the cfg fixture's DATABASE_URL isn't a real,
+    # reachable database in CI.
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+    monkeypatch.setattr(app_module, "build_notifiers", lambda cfg, conn: [])
 
     resp = client.post("/api/notifications/test")
 
@@ -304,6 +309,7 @@ def test_notifications_test_route_reports_no_channels_when_none_configured(clien
 
 def test_notifications_test_route_sends_through_each_configured_channel(client, monkeypatch):
     _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
 
     class _FakeNotifier:
         def __init__(self, should_fail):
