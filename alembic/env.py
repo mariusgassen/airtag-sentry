@@ -14,8 +14,21 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+#
+# disable_existing_loggers=False is required here: fileConfig()'s default of
+# True disables every logger that already exists at this point and isn't
+# explicitly listed in alembic.ini's [loggers] (root/sqlalchemy/alembic only)
+# - and by the time this runs, every airtag_sentry.* module logger already
+# exists, because migrate.upgrade_to_head() (which loads this file) is only
+# ever called from cli.py *after* it has already imported tracker.py/
+# web/app.py and everything they pull in. Without this, every application
+# log line (this notifier included) silently disappears for the rest of the
+# process's life the moment migrations run at startup - confirmed the hard
+# way: a caplog-based test here passed locally (no DB, so this file's
+# fileConfig() call never ran) and failed in CI (a real Postgres runs the
+# full migration suite first), which is exactly this bug catching itself.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # No ORM models in this project (db.py is plain psycopg3) - Alembic is used
 # purely for migration bookkeeping, so there's no metadata to autogenerate from.
