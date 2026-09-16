@@ -697,6 +697,7 @@ export default function App() {
                 onPlacesChanged={refreshPlaces}
                 placeSeed={placeSeed}
                 onPlaceSeedConsumed={() => setPlaceSeed(null)}
+                onRequestExpand={() => setSheetState('expanded')}
               />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail

@@ -127,6 +127,8 @@ interface Props {
   // App.tsx's placeSeed/handleAddPlace.
   placeSeed?: PlaceSeed | null
   onPlaceSeedConsumed?: () => void
+  // Forwarded to SettingsPlaces - see its own onRequestExpand comment.
+  onRequestExpand?: () => void
 }
 
 export function SettingsPanel({
@@ -139,6 +141,7 @@ export function SettingsPanel({
   onPlacesChanged,
   placeSeed = null,
   onPlaceSeedConsumed,
+  onRequestExpand,
 }: Props) {
   const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -266,6 +269,7 @@ export function SettingsPanel({
             onChanged={onPlacesChanged}
             seed={placeSeed}
             onSeedConsumed={onPlaceSeedConsumed}
+            onRequestExpand={onRequestExpand}
           />
         </div>
       </div>
