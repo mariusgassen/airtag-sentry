@@ -1,4 +1,4 @@
-import { CARTO_API_KEY } from './mapTiles'
+import { CARTO_API_KEY, cartoTilesEnabled } from './mapTiles'
 
 /** Single CARTO Voyager (or, with no API key configured yet - see
  * mapTiles.ts - plain OSM) raster tile covering a point, for a small
@@ -16,7 +16,7 @@ export function staticMapTileUrl(lat: number, lon: number, zoom = 15): string {
   const y = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n)
   // Subdomain fixed at "a" - varying it (a/b/c, as the live map does for
   // parallel loading) isn't worth the complexity for single lazy thumbnails.
-  return CARTO_API_KEY
-    ? `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${x}/${y}.png?api_key=${CARTO_API_KEY}`
+  return cartoTilesEnabled()
+    ? `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${x}/${y}.png?key=${CARTO_API_KEY}`
     : `https://a.tile.openstreetmap.org/${zoom}/${x}/${y}.png`
 }

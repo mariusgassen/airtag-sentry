@@ -14,7 +14,7 @@ import type {
   TimelineVisit,
 } from './api'
 import { setColorPalette } from './airtagColor'
-import { setCartoApiKey } from './mapTiles'
+import { setCartoApiKey, setMapTileProvider } from './mapTiles'
 import {
   createAirtag,
   getAirtags,
@@ -118,6 +118,7 @@ export default function App() {
   // `palette` prop through the whole tree just to reach a handful of leaf
   // color lookups.
   if (settings) setColorPalette(settings.color_palette)
+  if (settings) setMapTileProvider(settings.map_tile_provider)
   // Same live-module-variable pattern as color_palette above, for CARTO's
   // basemap-tiles API key (mapTiles.ts) - see AppTileLayer/SettingsPlaces.tsx.
   const [cartoApiKey, setCartoApiKeyState] = useState<string | null>(null)

@@ -205,6 +205,11 @@ class AppSettings:
     owner_location_max_age_minutes: float
     history_cluster_radius_meters: float
     color_palette: str
+    # 'auto' (default): CARTO Voyager/Dark Matter tiles when an API key is
+    # configured (see carto_settings/mapTiles.ts), else plain OSM. 'osm':
+    # always plain OSM, even with a key configured - for anyone who'd rather
+    # not use the CARTO style.
+    map_tile_provider: str
     # Whether each alert reason (see tracker.py's _ALERT_TITLES) sends a
     # Telegram/push notification at all - independent of which notifier
     # channels are configured. An alert is always recorded (record_alert)
@@ -653,6 +658,7 @@ _SETTINGS_COLUMNS = (
     "owner_location_max_age_minutes",
     "history_cluster_radius_meters",
     "color_palette",
+    "map_tile_provider",
     "notify_on_distance_threshold",
     "notify_on_stillstand_movement",
     "notify_on_moved_without_owner",
@@ -680,6 +686,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 owner_location_max_age_minutes = %s,
                 history_cluster_radius_meters = %s,
                 color_palette = %s,
+                map_tile_provider = %s,
                 notify_on_distance_threshold = %s,
                 notify_on_stillstand_movement = %s,
                 notify_on_moved_without_owner = %s,
@@ -696,6 +703,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.owner_location_max_age_minutes,
                 settings.history_cluster_radius_meters,
                 settings.color_palette,
+                settings.map_tile_provider,
                 settings.notify_on_distance_threshold,
                 settings.notify_on_stillstand_movement,
                 settings.notify_on_moved_without_owner,
