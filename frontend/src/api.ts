@@ -256,6 +256,15 @@ export async function deleteAirtag(id: string): Promise<void> {
   await apiFetch(`/api/airtags/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+/** Sets ObjectsList.tsx's AirTag display order - mirrors reorderOwnerDevices/
+ * db.py's set_airtags_order. Send the whole current list on every reorder. */
+export async function reorderAirtags(airtagIds: string[]): Promise<void> {
+  await apiFetch('/api/airtags/order', {
+    method: 'PUT',
+    body: JSON.stringify({ airtag_ids: airtagIds }),
+  })
+}
+
 export async function setAirtagAppearance(
   id: string,
   icon: string | null,

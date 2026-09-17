@@ -74,6 +74,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_key,
+    set_airtags_order,
     set_carto_credentials,
     set_ha_api_token_hash,
     set_mqtt_credentials,
@@ -255,6 +256,12 @@ class AirtagIn(BaseModel):
 class AirtagAppearanceIn(BaseModel):
     icon: str | None = None
     color: str | None = None
+
+
+class AirtagOrderIn(BaseModel):
+    # Every AirTag's id, in the desired display order - see set_airtags_order.
+    # Mirrors OwnerDeviceOrderIn.
+    airtag_ids: list[str]
 
 
 class SettingsIn(BaseModel):
@@ -686,6 +693,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             _resolve_airtag_id(conn, airtag_id)
             record = set_airtag_appearance(conn, airtag_id, body.icon, body.color)
         return {"id": record.id, "icon": record.icon, "color": record.color}
+
+    @app.put("/api/airtags/order")
+    def set_airtags_order_route(body: AirtagOrderIn):
+        """Lets ObjectsList.tsx's AirTag list be manually reordered - mirrors
+        PUT /api/owner-devices/order / set_airtags_order."""
+        with get_conn(cfg.database_url) as conn:
+            set_airtags_order(conn, body.airtag_ids)
+        return {"ok": True}
 
     @app.delete("/api/airtags/{airtag_id}")
     def delete_airtag_route(airtag_id: str):

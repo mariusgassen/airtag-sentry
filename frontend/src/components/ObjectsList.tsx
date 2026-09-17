@@ -12,6 +12,10 @@ interface Props {
   currentId: string | null
   onSelectAirtag: (id: string) => void
   onCreate: (name: string) => Promise<void>
+  // Swaps `id` with its neighbor in `airtags` and persists the result (see
+  // App.tsx's handleReorderAirtag / PUT /api/airtags/order). Mirrors
+  // onReorderDevice below - see CLAUDE.md's AirTag/owner-device parity rule.
+  onReorderAirtag: (id: string, direction: 'up' | 'down') => void
   // Only rendered when the owner-tracking Apple account (see
   // owner_tracking.py / Settings -> Apple-Konten) is connected.
   ownerConnected: boolean
@@ -47,6 +51,7 @@ export function ObjectsList({
   currentId,
   onSelectAirtag,
   onCreate,
+  onReorderAirtag,
   ownerConnected,
   devices,
   deviceLocations,
@@ -242,6 +247,36 @@ export function ObjectsList({
                     <span className="block truncate text-[0.95rem] font-medium">{a.name}</span>
                     <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">{subtitle}</span>
                   </span>
+                  {airtags.length > 1 && (
+                    <span className="flex shrink-0 flex-col">
+                      <button
+                        type="button"
+                        aria-label="Nach oben verschieben"
+                        title="Nach oben verschieben"
+                        disabled={i === 0}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onReorderAirtag(a.id, 'up')
+                        }}
+                        className="text-[var(--text-secondary)] disabled:opacity-20"
+                      >
+                        <ChevronUpIcon className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Nach unten verschieben"
+                        title="Nach unten verschieben"
+                        disabled={i === airtags.length - 1}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onReorderAirtag(a.id, 'down')
+                        }}
+                        className="text-[var(--text-secondary)] disabled:opacity-20"
+                      >
+                        <ChevronDownIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  )}
                   <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
                 </button>
               )

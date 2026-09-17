@@ -30,6 +30,7 @@ import {
   getTimeline,
   ping,
   pollNow,
+  reorderAirtags,
   reorderOwnerDevices,
 } from './api'
 import { deviceLabel } from './format'
@@ -534,6 +535,23 @@ export default function App() {
     }
   }
 
+  // ObjectsList's up/down reorder buttons for AirTags - mirrors
+  // handleReorderDevice/reorderOwnerDevices above (CLAUDE.md's AirTag/owner-
+  // device parity rule).
+  async function handleReorderAirtag(id: string, direction: 'up' | 'down') {
+    const index = airtags.findIndex((a) => a.id === id)
+    const swapWith = direction === 'up' ? index - 1 : index + 1
+    if (index < 0 || swapWith < 0 || swapWith >= airtags.length) return
+    const reordered = [...airtags]
+    ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
+    setAirtags(reordered)
+    try {
+      await reorderAirtags(reordered.map((a) => a.id))
+    } finally {
+      await refreshAirtags()
+    }
+  }
+
   // "Ort hier hinzufügen" from any map popup (MapCard/DeviceMapCard/
   // OverviewMap) - switches to Settings, where the placeSeed effect below
   // opens Orte straight into a new place's editor at this exact position.
@@ -960,6 +978,7 @@ export default function App() {
                 currentId={currentId}
                 onSelectAirtag={handleSelect}
                 onCreate={handleCreate}
+                onReorderAirtag={handleReorderAirtag}
                 ownerConnected={ownerConnected}
                 devices={ownerDevices}
                 deviceLocations={deviceLocationsById}
