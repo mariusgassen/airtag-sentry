@@ -21,6 +21,11 @@ const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: 'dark', label: 'Dunkel' },
 ]
 
+const MAP_TILE_PROVIDER_OPTIONS: { value: AppSettings['map_tile_provider']; label: string }[] = [
+  { value: 'auto', label: 'Automatisch' },
+  { value: 'osm', label: 'Nur OpenStreetMap' },
+]
+
 function ThemeField() {
   const { theme, setTheme } = useTheme()
   return (
@@ -59,6 +64,39 @@ function PaletteField({
       <span className="flex-1 text-[0.95rem]">Farbpalette</span>
       <div className="inline-flex shrink-0 rounded-lg bg-[var(--surface-2)] p-0.5">
         {COLOR_PALETTE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={`rounded-md px-2.5 py-1 text-[0.78rem] ${
+              value === opt.value ? 'bg-[var(--surface)]' : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** Whether the map uses CARTO's styled tiles (when a key is connected in the
+ * Kartenanbieter panel below) or is forced to plain OpenStreetMap regardless -
+ * see mapTiles.ts's cartoTilesEnabled(). 'auto' is the default/original behavior;
+ * 'osm' is an opt-out for anyone who'd rather not use the CARTO style even
+ * with a key configured. */
+function MapTileProviderField({
+  value,
+  onChange,
+}: {
+  value: AppSettings['map_tile_provider']
+  onChange: (next: AppSettings['map_tile_provider']) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <span className="flex-1 text-[0.95rem]">Kartenstil</span>
+      <div className="inline-flex shrink-0 rounded-lg bg-[var(--surface-2)] p-0.5">
+        {MAP_TILE_PROVIDER_OPTIONS.map((opt) => (
           <button
             key={opt.value}
             type="button"
@@ -296,6 +334,12 @@ export function SettingsPanel({
               <PaletteField
                 value={settings.color_palette}
                 onChange={(color_palette) => update({ color_palette }, { immediate: true })}
+              />
+            )}
+            {settings && (
+              <MapTileProviderField
+                value={settings.map_tile_provider}
+                onChange={(map_tile_provider) => update({ map_tile_provider }, { immediate: true })}
               />
             )}
           </Section>

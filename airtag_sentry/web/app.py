@@ -116,6 +116,7 @@ AIRTAG_ICON_CHOICES = {
 }
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _COLOR_PALETTE_CHOICES = {"vivid", "pastel", "pastel_white"}
+_MAP_TILE_PROVIDER_CHOICES = {"auto", "osm"}
 
 
 class _CacheControlledStaticFiles(StaticFiles):
@@ -265,6 +266,7 @@ class SettingsIn(BaseModel):
     owner_location_max_age_minutes: float = Field(gt=0)
     history_cluster_radius_meters: float = Field(gt=0)
     color_palette: str
+    map_tile_provider: str
     notify_on_distance_threshold: bool
     notify_on_stillstand_movement: bool
     notify_on_moved_without_owner: bool
@@ -842,6 +844,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def update_settings_route(body: SettingsIn):
         if body.color_palette not in _COLOR_PALETTE_CHOICES:
             raise HTTPException(status_code=400, detail=f"Invalid color_palette: {body.color_palette!r}")
+        if body.map_tile_provider not in _MAP_TILE_PROVIDER_CHOICES:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid map_tile_provider: {body.map_tile_provider!r}"
+            )
         with get_conn(cfg.database_url) as conn:
             settings = update_settings(conn, AppSettings(**body.model_dump()))
         return dataclasses.asdict(settings)

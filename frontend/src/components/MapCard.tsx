@@ -40,7 +40,7 @@ import {
   stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
-import { CARTO_API_KEY } from '../mapTiles'
+import { CARTO_API_KEY, cartoTilesEnabled } from '../mapTiles'
 import { useColorScheme } from '../theme'
 import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
 
@@ -76,7 +76,7 @@ const DARK_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; <a href="http
  * this same tile choice. */
 export function AppTileLayer() {
   const scheme = useColorScheme()
-  if (!CARTO_API_KEY) {
+  if (!cartoTilesEnabled()) {
     return <TileLayer attribution={PLAIN_OSM_ATTRIBUTION} url={PLAIN_OSM_TILE_URL} />
   }
   return scheme === 'dark' ? (
