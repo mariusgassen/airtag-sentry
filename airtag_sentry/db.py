@@ -148,6 +148,11 @@ class OwnerLocation:
 
 
 @dataclasses.dataclass(frozen=True)
+class CartoCredentials:
+    api_key_encrypted: str
+
+
+@dataclasses.dataclass(frozen=True)
 class MqttCredentials:
     host: str
     port: int
@@ -531,6 +536,34 @@ def set_telegram_bot_commands(conn: psycopg.Connection, enabled: bool, webhook_s
             """,
             (enabled, webhook_secret),
         )
+    conn.commit()
+
+
+def set_carto_credentials(conn: psycopg.Connection, api_key_encrypted: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO carto_settings (id, api_key_encrypted, updated_at)
+            VALUES (1, %s, now())
+            ON CONFLICT (id) DO UPDATE
+                SET api_key_encrypted = EXCLUDED.api_key_encrypted,
+                    updated_at = now()
+            """,
+            (api_key_encrypted,),
+        )
+    conn.commit()
+
+
+def get_carto_credentials(conn: psycopg.Connection) -> CartoCredentials | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT api_key_encrypted FROM carto_settings WHERE id = 1")
+        row = cur.fetchone()
+        return CartoCredentials(*row) if row else None
+
+
+def delete_carto_credentials(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM carto_settings WHERE id = 1")
     conn.commit()
 
 

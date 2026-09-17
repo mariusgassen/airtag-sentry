@@ -241,6 +241,17 @@ Treat the VAPID keypair like the encryption key above — generate it once and
 back it up. Every device's push subscription is tied to the public key that
 was active when it subscribed, so devices re-subscribe after a key change.
 
+## Map tiles
+
+The map (Leaflet) uses plain OpenStreetMap tiles by default - no setup
+needed. For a more polished look (CARTO's Voyager/Dark Matter basemaps,
+matching light/dark mode), connect a free [CARTO API
+key](https://carto.com/basemaps/apikey/) from the dashboard's Settings ⚙️ →
+**Darstellung** → **Kartenanbieter**. It's encrypted at rest the same way as
+the Telegram bot token/MQTT password - CARTO's raster tiles now require a
+key (free up to a generous fair-use limit) or requests get a watermarked
+tile back.
+
 ## Movement detection
 
 Two alert conditions, both based on the Haversine distance between

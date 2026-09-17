@@ -14,9 +14,11 @@ import type {
   TimelineVisit,
 } from './api'
 import { setColorPalette } from './airtagColor'
+import { setCartoApiKey } from './mapTiles'
 import {
   createAirtag,
   getAirtags,
+  getCartoStatus,
   getOwnerAppleStatus,
   getOwnerDeviceHistory,
   getOwnerDeviceLocations,
@@ -115,6 +117,10 @@ export default function App() {
   // `palette` prop through the whole tree just to reach a handful of leaf
   // color lookups.
   if (settings) setColorPalette(settings.color_palette)
+  // Same live-module-variable pattern as color_palette above, for CARTO's
+  // basemap-tiles API key (mapTiles.ts) - see AppTileLayer/SettingsPlaces.tsx.
+  const [cartoApiKey, setCartoApiKeyState] = useState<string | null>(null)
+  setCartoApiKey(cartoApiKey)
   // Named geofences (Settings -> Orte) - fetched here (not just inside
   // wherever they're managed) since they label stays on the map/history list
   // app-wide, same reasoning as ownerLocations above.
@@ -206,6 +212,16 @@ export default function App() {
   useEffect(() => {
     refreshSettings()
   }, [refreshSettings])
+
+  const refreshCartoApiKey = useCallback(async () => {
+    await getCartoStatus()
+      .then((s) => setCartoApiKeyState(s.api_key))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshCartoApiKey()
+  }, [refreshCartoApiKey])
 
   // Devices, their live locations, and their histories all come from the
   // same enabled/disabled registry, so they're refreshed together - a
@@ -818,6 +834,7 @@ export default function App() {
                 onEnablePush={push.enable}
                 onDisablePush={push.disable}
                 onSettingsChanged={setSettings}
+                onCartoApiKeyChanged={setCartoApiKeyState}
                 places={places}
                 onPlacesChanged={refreshPlaces}
                 placeSeed={placeSeed}
