@@ -122,6 +122,44 @@ export interface LocationHistory {
   stays: LocationStay[]
 }
 
+export interface TimelineVisit {
+  object_type: 'airtag' | 'device'
+  object_id: string
+  object_name: string
+  object_icon: string | null
+  object_color: string | null
+  // Only set for object_type 'device' (an Apple device_type like "iPhone"/
+  // "Mac") - DeviceAvatar needs it to guess a default icon; null for airtags.
+  object_device_type: string | null
+  // Exactly one of these is set, matching object_type - lets a click on this
+  // visit deep-link into the same selectedReportId/selectedLocationKey
+  // navigation AirtagDetail/DeviceDetail already use (see MapCard.tsx).
+  anchor_id: number | null
+  anchor_recorded_at: string | null
+  start: string
+  end: string
+  count: number
+  lat: number
+  lon: number
+  label: string | null
+  // Raw Nominatim fields behind `label` (see stays.py's resolve_label) -
+  // shown as a subtitle so a visit reads like Google Timeline's "place name
+  // + address" pair even when there's no geofence/correction for it yet.
+  address: string | null
+  poi_name: string | null
+  place_id: number | null
+}
+
+export interface Timeline {
+  visits: TimelineVisit[]
+}
+
+/** Every tracked AirTag's and enabled owner device's stays, merged
+ * newest-first - see GET /api/timeline. */
+export async function getTimeline(): Promise<Timeline> {
+  return (await apiFetch('/api/timeline')).json()
+}
+
 export interface AppleTwoFactorMethod {
   index: number
   kind: 'trusted_device' | 'sms' | 'unknown'

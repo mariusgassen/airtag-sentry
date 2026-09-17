@@ -19,6 +19,7 @@ from airtag_sentry.db import (
     get_conn,
     insert_reports,
     record_owner_device_location,
+    set_owner_device_enabled,
     set_place_label_correction,
     store_geocoded_point,
     upsert_owner_devices,
@@ -210,3 +211,68 @@ def test_owner_device_history_route_maps_start_and_end_to_earliest_and_latest(cl
     assert stay["count"] == 3
     assert stay["start"] == "2026-01-01T12:00:00+00:00"
     assert stay["end"] == "2026-01-01T13:00:00+00:00"
+
+
+def test_timeline_route_merges_airtag_and_owner_device_visits_newest_first(client, conn, monkeypatch):
+    _login(client, monkeypatch)
+    insert_reports(
+        conn,
+        [
+            Report(
+                id=None, airtag_id="bike", timestamp=dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc),
+                lat=49.8728, lon=8.6512, accuracy=5.0, confidence=3, battery_level="full",
+            )
+        ],
+    )
+    create_named_place(conn, "Home", 49.8728, 8.6512, 50.0)
+    upsert_owner_devices(conn, [{"id": "d1", "name": "iPhone", "device_type": "iPhone"}], dt.datetime.now(dt.timezone.utc))
+    set_owner_device_enabled(conn, "d1", True)
+    record_owner_device_location(
+        conn,
+        OwnerLocation(
+            id=None, device_id="d1", recorded_at=dt.datetime(2026, 1, 1, 15, 0, tzinfo=dt.timezone.utc),
+            lat=49.9, lon=8.7, horizontal_accuracy=5.0,
+        ),
+    )
+    store_geocoded_point(conn, 49.9, 8.7, "12 Main St", "REWE")
+
+    resp = client.get("/api/timeline")
+
+    assert resp.status_code == 200
+    visits = resp.json()["visits"]
+    assert len(visits) == 2
+    # Newest first: the owner device's 15:00 visit before the AirTag's 09:00 one.
+    assert visits[0]["object_type"] == "device"
+    assert visits[0]["object_id"] == "d1"
+    assert visits[0]["object_name"] == "iPhone"
+    assert visits[0]["label"] == "REWE"
+    assert visits[0]["address"] == "12 Main St"
+    assert visits[0]["poi_name"] == "REWE"
+    assert visits[0]["anchor_id"] is None
+    assert visits[0]["anchor_recorded_at"] == "2026-01-01T15:00:00+00:00"
+    assert visits[1]["object_type"] == "airtag"
+    assert visits[1]["object_id"] == "bike"
+    assert visits[1]["label"] == "Home"
+    assert visits[1]["place_id"] is not None
+    assert visits[1]["anchor_id"] is not None
+    assert visits[1]["anchor_recorded_at"] is None
+
+
+def test_timeline_route_excludes_disabled_owner_devices(client, conn, monkeypatch):
+    """A device newly discovered by owner_tracking.upsert_owner_devices starts
+    disabled (see its docstring: "discovering a device never opts it into
+    tracking on its own") - the timeline should never surface its history."""
+    _login(client, monkeypatch)
+    upsert_owner_devices(conn, [{"id": "d1", "name": "iPhone", "device_type": "iPhone"}], dt.datetime.now(dt.timezone.utc))
+    record_owner_device_location(
+        conn,
+        OwnerLocation(
+            id=None, device_id="d1", recorded_at=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc),
+            lat=49.9, lon=8.7, horizontal_accuracy=5.0,
+        ),
+    )
+
+    resp = client.get("/api/timeline")
+
+    assert resp.status_code == 200
+    assert resp.json()["visits"] == []

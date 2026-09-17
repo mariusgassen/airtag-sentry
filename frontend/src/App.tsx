@@ -11,6 +11,7 @@ import type {
   Report,
   ReportStay,
   Status,
+  TimelineVisit,
 } from './api'
 import { setColorPalette } from './airtagColor'
 import {
@@ -24,6 +25,7 @@ import {
   getReports,
   getSettings,
   getStatus,
+  getTimeline,
   ping,
   pollNow,
 } from './api'
@@ -39,6 +41,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import type { PlaceSeed } from './components/SettingsPlaces'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
+import { TimelinePage } from './components/TimelinePage'
 import { usePushNotifications } from './hooks/usePushNotifications'
 
 // 'default' is the normal half-height sheet; 'expanded' is near-fullscreen
@@ -115,6 +118,10 @@ export default function App() {
   // wherever they're managed) since they label stays on the map/history list
   // app-wide, same reasoning as ownerLocations above.
   const [places, setPlaces] = useState<Place[]>([])
+  // Cross-object "Zeitachse" feed (see GET /api/timeline) - fetched
+  // independently of the objects/detail selection state below, since it
+  // spans every AirTag/device at once rather than following `currentId`.
+  const [timeline, setTimeline] = useState<TimelineVisit[]>([])
   // A location picked via a map popup's "Ort hier hinzufügen" (see
   // MapCard.tsx's AddPlaceButton) - consumed by SettingsPanel/SettingsPlaces
   // to jump straight into a new place's editor seeded at that spot, then
@@ -235,6 +242,15 @@ export default function App() {
     currentIdRef.current = currentId
   }, [currentId])
 
+  // Normally an airtag switch (handleSelect) has no report to pre-select -
+  // the effect below resets to null. handleSelectVisit (Zeitachse ->
+  // AirtagDetail deep link) needs to land on one specific stay instead, but
+  // that selection happens in the same event handler as the currentId
+  // change that would otherwise reset it right back to null once this
+  // effect re-runs after commit - stash it here so the effect applies it
+  // instead of unconditionally clearing it.
+  const pendingReportIdRef = useRef<number | null>(null)
+
   const refreshReports = useCallback(async () => {
     const id = currentId
     if (!id) {
@@ -250,7 +266,8 @@ export default function App() {
   }, [currentId])
 
   useEffect(() => {
-    setSelectedReportId(null)
+    setSelectedReportId(pendingReportIdRef.current)
+    pendingReportIdRef.current = null
     refreshReports()
   }, [currentId, refreshReports])
 
@@ -263,6 +280,16 @@ export default function App() {
   useEffect(() => {
     refreshPlaces()
   }, [refreshPlaces])
+
+  const refreshTimeline = useCallback(async () => {
+    await getTimeline()
+      .then((t) => setTimeline(t.visits))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshTimeline()
+  }, [refreshTimeline])
 
   // Re-fetches every endpoint the app depends on, and reports back whether
   // the server was actually reachable - refreshAirtags/refreshReports below
@@ -278,11 +305,20 @@ export default function App() {
       refreshReports(),
       refreshSettings(),
       refreshPlaces(),
+      refreshTimeline(),
     ])
     const reachable = results.every((r) => r.status === 'fulfilled')
     setOffline(!reachable)
     return reachable
-  }, [refreshAirtags, refreshOwnerConnected, refreshOwnerDevices, refreshReports, refreshSettings, refreshPlaces])
+  }, [
+    refreshAirtags,
+    refreshOwnerConnected,
+    refreshOwnerDevices,
+    refreshReports,
+    refreshSettings,
+    refreshPlaces,
+    refreshTimeline,
+  ])
 
   // Background auto-refresh: re-fetch everything periodically, plus
   // immediately whenever the tab/app regains visibility (switching back
@@ -420,6 +456,23 @@ export default function App() {
   function handleSelectDeviceLocation(recordedAt: string) {
     setSelectedDeviceLocationKey(recordedAt)
     setSheetState('minimized')
+  }
+
+  // Zeitachse (TimelinePage) row tap - deep-links into that visit's own
+  // object exactly like picking it from ObjectsList, but additionally
+  // pre-selects the specific stay (anchor_id/anchor_recorded_at, see
+  // GET /api/timeline) so the map/history land on that visit instead of
+  // just the object's latest one. See pendingReportIdRef's comment for why
+  // the AirTag side needs the extra ref.
+  function handleSelectVisit(visit: TimelineVisit) {
+    if (visit.object_type === 'airtag') {
+      pendingReportIdRef.current = visit.anchor_id
+      handleSelect(visit.object_id)
+      if (visit.anchor_id != null) handleSelectReport(visit.anchor_id)
+    } else {
+      handleSelectDevice(visit.object_id)
+      if (visit.anchor_recorded_at != null) handleSelectDeviceLocation(visit.anchor_recorded_at)
+    }
   }
 
   async function handleCreate(name: string) {
@@ -686,7 +739,9 @@ export default function App() {
               the detail views' "< AirTags"/"< Objekte" back button - peeked
               out below the handle instead of the map being fully clear. */}
           <div className={`min-h-0 flex-1 ${sheetState === 'minimized' ? 'max-md:invisible' : ''}`}>
-            {activeTab === 'settings' ? (
+            {activeTab === 'timeline' ? (
+              <TimelinePage visits={timeline} onSelectVisit={handleSelectVisit} />
+            ) : activeTab === 'settings' ? (
               <SettingsPanel
                 pushStatus={push.status}
                 pushBusy={push.busy}

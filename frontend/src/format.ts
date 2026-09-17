@@ -32,6 +32,19 @@ export function formatClusterRange(earliestIso: string, latestIso: string): stri
   return `${dateTime(earliest)} – ${dateTime(latest)}`
 }
 
+/** Day heading for a date-grouped list (TimelinePage's "Google Timeline"
+ * style feed) - "Heute"/"Gestern" for the two most recent days, otherwise a
+ * full weekday + date so a scroll further back still reads unambiguously. */
+export function formatDayHeading(iso: string): string {
+  const date = new Date(iso)
+  const today = new Date()
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diffDays = Math.round((startOfDay(today) - startOfDay(date)) / 86_400_000)
+  if (diffDays === 0) return 'Heute'
+  if (diffDays === 1) return 'Gestern'
+  return date.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 /** Human-readable labels for Alert.reason values from the backend
  * (airtag_sentry/movement.py / tracker.py). */
 export const ALERT_REASON_LABELS: Record<string, string> = {
