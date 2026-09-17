@@ -829,8 +829,6 @@ export default function App() {
                 airtag={currentAirtag}
                 status={statuses[currentAirtag.id] ?? null}
                 stays={reportStays}
-                selectedReportId={selectedReportId}
-                onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
                 stepOlder={stepOlder}
                 stepNewer={stepNewer}
@@ -842,21 +840,25 @@ export default function App() {
                   await refreshAirtags()
                   setDetail(null)
                 }}
-                onCorrected={refreshReports}
+                onViewTimeline={() => {
+                  handleTimelineFilterChange({ type: 'airtag', id: currentAirtag.id })
+                  setActiveTab('timeline')
+                }}
               />
             ) : detail === 'device' && selectedDevice ? (
               <DeviceDetail
                 device={selectedDevice}
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 stays={ownerLocationStays[selectedDevice.id] ?? null}
-                selectedLocationKey={selectedDeviceLocationKey}
-                onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}
                 stepOlder={stepOlder}
                 stepNewer={stepNewer}
                 stepPosition={stepPosition}
                 onChanged={refreshOwnerDevices}
-                onCorrected={refreshOwnerDevices}
+                onViewTimeline={() => {
+                  handleTimelineFilterChange({ type: 'device', id: selectedDevice.id })
+                  setActiveTab('timeline')
+                }}
               />
             ) : (
               <ObjectsList

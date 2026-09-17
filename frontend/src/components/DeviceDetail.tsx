@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type { LocationStay, OwnerDevice, OwnerLocation } from '../api'
 import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
 import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
@@ -6,29 +6,23 @@ import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '.
 import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
 import { HistoryStepper, Row, Section } from './AirtagDetail'
-import { StayRow } from './StayRow'
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  PaletteIcon,
-  PencilIcon,
-  PersonIcon,
-  SpeakerIcon,
-  StarIcon,
-} from './icons'
+import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, PaletteIcon, PencilIcon, PersonIcon, SpeakerIcon, StarIcon } from './icons'
 
 interface Props {
   device: OwnerDevice
   location: OwnerLocation | null
-  // Server-computed (see stays.py / GET /api/owner-devices/history). null
-  // while still loading (see App.tsx's `?? null`), distinct from `[]` (no
-  // history yet) - DeviceHistoryList shows "Lädt…" only for the former.
+  // Server-computed (see stays.py / GET /api/owner-devices/history) - only
+  // its count is shown here now; the list itself lives in the Zeitachse tab
+  // (see onViewTimeline) so there's one place that renders a history list,
+  // not two. null while still loading (see App.tsx's `?? null`), distinct
+  // from `[]` (no history yet).
   stays: LocationStay[] | null
-  selectedLocationKey: string | null
-  onSelectLocation: (recordedAt: string) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
-  onCorrected: () => void | Promise<void>
+  // Switches App.tsx to the Zeitachse tab, filtered to just this device (see
+  // handleTimelineFilterChange) - replaces what used to be an inline,
+  // collapsible history list duplicating that tab's own feed.
+  onViewTimeline: () => void
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -43,19 +37,15 @@ export function DeviceDetail({
   device,
   location,
   stays,
-  selectedLocationKey,
-  onSelectLocation,
   onBack,
   onChanged,
-  onCorrected,
+  onViewTimeline,
   stepOlder,
   stepNewer,
   stepPosition,
 }: Props) {
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
-  // Open by default - see AirtagDetail.tsx's identical comment.
-  const [historyOpen, setHistoryOpen] = useState(true)
   const [soundState, setSoundState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [soundError, setSoundError] = useState<string | null>(null)
 
@@ -174,25 +164,17 @@ export function DeviceDetail({
 
           <Section>
             <Row
-              icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
-              label="Verlauf"
+              icon={<ClockIcon className="h-5 w-5" />}
+              label="Zeitachse"
               trailing={
                 <span className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                   {stays?.length ?? ''}
-                  <ChevronRightIcon className={`h-4 w-4 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
+                  <ChevronRightIcon className="h-4 w-4" />
                 </span>
               }
-              onClick={() => setHistoryOpen((v) => !v)}
+              onClick={onViewTimeline}
               bordered={false}
             />
-            {historyOpen && (
-              <DeviceHistoryList
-                stays={stays}
-                selectedLocationKey={selectedLocationKey}
-                onSelectLocation={onSelectLocation}
-                onCorrected={onCorrected}
-              />
-            )}
           </Section>
         </div>
       </div>
@@ -315,80 +297,6 @@ function DeviceAppearanceForm({ device, onDone }: { device: OwnerDevice; onDone:
           />
         ))}
       </div>
-    </div>
-  )
-}
-
-function DeviceHistoryList({
-  stays,
-  selectedLocationKey,
-  onSelectLocation,
-  onCorrected,
-}: {
-  stays: LocationStay[] | null
-  selectedLocationKey: string | null
-  onSelectLocation: (recordedAt: string) => void
-  onCorrected: () => void | Promise<void>
-}) {
-  if (stays === null) {
-    return (
-      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
-        Lädt…
-      </div>
-    )
-  }
-  if (stays.length === 0) {
-    return (
-      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
-        Noch kein Standortverlauf vorhanden.
-      </div>
-    )
-  }
-  return (
-    <DeviceHistoryRows
-      stays={stays}
-      selectedLocationKey={selectedLocationKey}
-      onSelectLocation={onSelectLocation}
-      onCorrected={onCorrected}
-    />
-  )
-}
-
-function DeviceHistoryRows({
-  stays,
-  selectedLocationKey,
-  onSelectLocation,
-  onCorrected,
-}: {
-  stays: LocationStay[]
-  selectedLocationKey: string | null
-  onSelectLocation: (recordedAt: string) => void
-  onCorrected: () => void | Promise<void>
-}) {
-  const rowRefs = useRef(new Map<string, HTMLButtonElement>())
-  useEffect(() => {
-    if (selectedLocationKey == null) return
-    rowRefs.current.get(selectedLocationKey)?.scrollIntoView({ block: 'nearest' })
-  }, [selectedLocationKey])
-
-  // Already newest-first (see stays.py / GET /api/owner-devices/history) -
-  // no reversal needed here, same as before.
-  return (
-    <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
-      {stays.map((s, i) => (
-        <StayRow
-          key={s.anchor_recorded_at}
-          rowRef={(el) => {
-            if (el) rowRefs.current.set(s.anchor_recorded_at, el)
-            else rowRefs.current.delete(s.anchor_recorded_at)
-          }}
-          stay={s}
-          bordered={i > 0}
-          selected={s.anchor_recorded_at === selectedLocationKey}
-          onSelect={() => onSelectLocation(s.anchor_recorded_at)}
-          onCorrected={onCorrected}
-        />
-      ))}
     </div>
   )
 }

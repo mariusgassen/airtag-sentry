@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, ReportStay, Status } from '../api'
 import {
@@ -13,13 +13,13 @@ import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
-import { StayRow } from './StayRow'
 import {
   AirtagGlyph,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronUpIcon,
+  ClockIcon,
   KeyIcon,
   PaletteIcon,
   PencilIcon,
@@ -29,14 +29,17 @@ import {
 interface Props {
   airtag: Airtag
   status: Status | null
-  // Server-computed (see stays.py / GET /api/reports).
+  // Server-computed (see stays.py / GET /api/reports) - only its count is
+  // shown here now; the list itself lives in the Zeitachse tab (see
+  // onViewTimeline) so there's one place that renders a history list, not two.
   stays: ReportStay[]
-  selectedReportId: number | null
-  onSelectReport: (id: number) => void
   onBack: () => void
   onChanged: () => void | Promise<void>
   onDeleted: () => void | Promise<void>
-  onCorrected: () => void | Promise<void>
+  // Switches App.tsx to the Zeitachse tab, filtered to just this AirTag (see
+  // handleTimelineFilterChange) - replaces what used to be an inline,
+  // collapsible history list duplicating that tab's own feed.
+  onViewTimeline: () => void
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -165,12 +168,10 @@ export function AirtagDetail({
   airtag,
   status,
   stays,
-  selectedReportId,
-  onSelectReport,
   onBack,
   onChanged,
   onDeleted,
-  onCorrected,
+  onViewTimeline,
   stepOlder,
   stepNewer,
   stepPosition,
@@ -178,12 +179,6 @@ export function AirtagDetail({
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
-  // Open by default (not collapsed like the other sections) - history is
-  // the reason most detail-view visits happen at all, so it shouldn't cost
-  // an extra tap every time; each visit is a fresh mount (App.tsx swaps
-  // detail views rather than keeping them alive), so this can't "stay
-  // collapsed from last time" the way it might if state persisted.
-  const [historyOpen, setHistoryOpen] = useState(true)
 
   async function handleDelete() {
     if (
@@ -284,25 +279,17 @@ export function AirtagDetail({
 
           <Section>
             <Row
-              icon={<ChevronRightIcon className="h-5 w-5 rotate-90" />}
-              label="Verlauf"
+              icon={<ClockIcon className="h-5 w-5" />}
+              label="Zeitachse"
               trailing={
                 <span className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                   {stays.length}
-                  <ChevronRightIcon className={`h-4 w-4 transition-transform ${historyOpen ? 'rotate-90' : ''}`} />
+                  <ChevronRightIcon className="h-4 w-4" />
                 </span>
               }
-              onClick={() => setHistoryOpen((v) => !v)}
+              onClick={onViewTimeline}
               bordered={false}
             />
-            {historyOpen && (
-              <HistoryList
-                stays={stays}
-                selectedReportId={selectedReportId}
-                onSelectReport={onSelectReport}
-                onCorrected={onCorrected}
-              />
-            )}
           </Section>
 
           <Section>
@@ -543,53 +530,6 @@ function KeyForm({ airtag, onDone }: { airtag: Airtag; onDone: () => void | Prom
         Extrahieren: <code>python -m findmy decrypt --out-dir data/keys</code> auf dem Mac, auf dem
         das AirTag eingerichtet ist. Details siehe README.
       </p>
-    </div>
-  )
-}
-
-function HistoryList({
-  stays,
-  selectedReportId,
-  onSelectReport,
-  onCorrected,
-}: {
-  stays: ReportStay[]
-  selectedReportId: number | null
-  onSelectReport: (id: number) => void
-  onCorrected: () => void | Promise<void>
-}) {
-  // Newest first for display - stays arrive in the same oldest-first order
-  // as the underlying reports (see stays.py).
-  const rows = [...stays].reverse()
-  const rowRefs = useRef(new Map<number, HTMLButtonElement>())
-  useEffect(() => {
-    if (selectedReportId == null) return
-    rowRefs.current.get(selectedReportId)?.scrollIntoView({ block: 'nearest' })
-  }, [selectedReportId])
-
-  if (rows.length === 0) {
-    return (
-      <div className="border-t border-[var(--divider)] p-4 text-center text-sm text-[var(--text-secondary)]">
-        Noch keine Reports vorhanden.
-      </div>
-    )
-  }
-  return (
-    <div className="max-h-80 overflow-y-auto border-t border-[var(--divider)]">
-      {rows.map((s, i) => (
-        <StayRow
-          key={s.anchor_id}
-          rowRef={(el) => {
-            if (el) rowRefs.current.set(s.anchor_id, el)
-            else rowRefs.current.delete(s.anchor_id)
-          }}
-          stay={s}
-          bordered={i > 0}
-          selected={s.anchor_id === selectedReportId}
-          onSelect={() => onSelectReport(s.anchor_id)}
-          onCorrected={onCorrected}
-        />
-      ))}
     </div>
   )
 }

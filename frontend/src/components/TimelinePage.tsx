@@ -89,8 +89,8 @@ function VisitRow({ visit, onSelect }: { visit: TimelineVisit; onSelect: () => v
           {/* A real, external link (not just this row's own onSelect) - lets
               a visit be opened straight into Maps for directions/street view
               instead of only ever re-centering this app's own map. Nested
-              inside the row's own button, same as StayRow.tsx's correction
-              button - stopPropagation keeps it from also firing onSelect. */}
+              inside the row's own button - stopPropagation keeps it from
+              also firing onSelect. */}
           <button
             type="button"
             aria-label="In Maps öffnen"

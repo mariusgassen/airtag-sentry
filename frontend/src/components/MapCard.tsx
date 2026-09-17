@@ -295,14 +295,14 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
   )
 }
 
-/** Battery reading for a marker popup, same info StayRow.tsx's history list
- * and AirtagDetail.tsx/DeviceDetail.tsx's headers already show - the popup
- * was the one place left without it (tasks/roadmap.md #9). Renders nothing
- * for `null` (no reading yet). Which formatter/label applies is inferred
- * from `level`'s type, same as StayRow.tsx: a string is an AirTag's
- * qualitative full/medium/low/very_low, a number is a device's 0.0-1.0
- * fraction. Exported for DeviceMapCard.tsx, which shares this same popup
- * content (see CLAUDE.md's AirTag/device parity constraint). */
+/** Battery reading for a marker popup, same info AirtagDetail.tsx/
+ * DeviceDetail.tsx's headers already show - the popup was the one place
+ * left without it (tasks/roadmap.md #9). Renders nothing for `null` (no
+ * reading yet). Which formatter/label applies is inferred from `level`'s
+ * type: a string is an AirTag's qualitative full/medium/low/very_low, a
+ * number is a device's 0.0-1.0 fraction. Exported for DeviceMapCard.tsx,
+ * which shares this same popup content (see CLAUDE.md's AirTag/device
+ * parity constraint). */
 export function BatteryRow({
   level,
   status,
