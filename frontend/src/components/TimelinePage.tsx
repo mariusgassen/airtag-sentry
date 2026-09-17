@@ -64,10 +64,16 @@ function VisitRow({ visit, onSelect }: { visit: TimelineVisit; onSelect: () => v
       )}
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
-          <span className="block truncate text-[0.95rem] font-medium">
-            {visit.label ?? `${visit.lat.toFixed(4)}, ${visit.lon.toFixed(4)}`}
-          </span>
-          <span className="shrink-0 text-[0.8rem] text-[var(--text-secondary)]">· {visit.object_name}</span>
+          <span className="block truncate text-[0.95rem] font-medium">{visit.label ?? visit.object_name}</span>
+          {/* Only a real place name needs the object name spelled out
+              separately - an unnamed place has nothing to disambiguate from,
+              so its title is just the object name with no dangling "· " in
+              front of it (raw coordinates aren't a place name worth showing
+              here either; the address line below already covers "where"
+              when one's resolved). */}
+          {visit.label && (
+            <span className="shrink-0 text-[0.8rem] text-[var(--text-secondary)]">· {visit.object_name}</span>
+          )}
         </span>
         {/* The "public info about places" line - the raw geocoded address
             behind the resolved label above, same data stay.label is built
@@ -148,6 +154,15 @@ function FilterChip({
   )
 }
 
+// null = "all available history" - GET /api/timeline's own default (see
+// App.tsx's timelineRangeDays), not just this UI's.
+const RANGE_OPTIONS: { label: string; days: number | null }[] = [
+  { label: 'Alle', days: null },
+  { label: '7 Tage', days: 7 },
+  { label: '30 Tage', days: 30 },
+  { label: '90 Tage', days: 90 },
+]
+
 /** Aggregate, cross-object "Google Timeline" style feed - every AirTag's and
  * every tracked owner device's stays (see GET /api/timeline), grouped by
  * calendar day and shown newest-first, each stop's place info (resolved
@@ -164,6 +179,8 @@ export function TimelinePage({
   filter,
   onFilterChange,
   onSelectVisit,
+  rangeDays,
+  onRangeChange,
 }: {
   visits: TimelineVisit[]
   airtags: Airtag[]
@@ -171,6 +188,11 @@ export function TimelinePage({
   filter: TimelineFilter
   onFilterChange: (filter: TimelineFilter) => void
   onSelectVisit: (visit: TimelineVisit) => void
+  // Already applied server-side (see App.tsx's refreshTimeline) - `visits`
+  // only ever contains this range's data, so no further filtering happens
+  // here; this just drives which chip reads as selected.
+  rangeDays: number | null
+  onRangeChange: (days: number | null) => void
 }) {
   const filtered = filter ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id) : visits
   const groups = groupByDay(filtered)
@@ -203,6 +225,16 @@ export function TimelinePage({
           ))}
         </div>
       )}
+      <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
+        {RANGE_OPTIONS.map((opt) => (
+          <FilterChip
+            key={opt.label}
+            label={opt.label}
+            selected={rangeDays === opt.days}
+            onClick={() => onRangeChange(opt.days)}
+          />
+        ))}
+      </div>
       <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         {groups.length === 0 ? (
           <div className="mx-1 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">

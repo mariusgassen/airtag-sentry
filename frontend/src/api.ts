@@ -155,9 +155,11 @@ export interface Timeline {
 }
 
 /** Every tracked AirTag's and enabled owner device's stays, merged
- * newest-first - see GET /api/timeline. */
-export async function getTimeline(): Promise<Timeline> {
-  return (await apiFetch('/api/timeline')).json()
+ * newest-first - see GET /api/timeline. `days` narrows to the last N days;
+ * omitted means all available history (the default). */
+export async function getTimeline(days?: number | null): Promise<Timeline> {
+  const query = days != null ? `?days=${days}` : ''
+  return (await apiFetch(`/api/timeline${query}`)).json()
 }
 
 export interface AppleTwoFactorMethod {
@@ -348,6 +350,16 @@ export async function setOwnerDevicePrimary(id: string): Promise<OwnerDevice> {
 
 export async function clearOwnerDevicePrimary(): Promise<void> {
   await apiFetch('/api/owner-devices/primary', { method: 'DELETE' })
+}
+
+/** Sets ObjectsList.tsx's device display order - see db.py's
+ * set_owner_devices_order. Send the whole current (enabled-only) list on
+ * every reorder, not just a single move. */
+export async function reorderOwnerDevices(deviceIds: string[]): Promise<void> {
+  await apiFetch('/api/owner-devices/order', {
+    method: 'PUT',
+    body: JSON.stringify({ device_ids: deviceIds }),
+  })
 }
 
 export async function renameOwnerDevice(id: string, displayName: string | null): Promise<OwnerDevice> {

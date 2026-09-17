@@ -4,7 +4,7 @@ import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
 import { capitalize, deviceLabel, formatAirtagBattery, formatDeviceBattery, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
-import { ChevronRightIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
+import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -18,12 +18,17 @@ interface Props {
   // Every *enabled* (tracked) owner device (Settings -> Eigene Geräte) -
   // this list is the first place a tracked device becomes visible, not
   // just the Settings panel it started in (see tasks/todo.md v15).
+  // Already in the user's chosen display order (see db.py's
+  // set_owner_devices_order) - render as given, don't re-sort.
   devices: OwnerDevice[]
   // Latest recorded location per device, keyed by device_id - absent for a
   // device that's never returned a fix yet.
   deviceLocations: Record<string, OwnerLocation>
   selectedDeviceId: string | null
   onSelectDevice: (id: string) => void
+  // Swaps `id` with its neighbor in `devices` and persists the result (see
+  // App.tsx's handleReorderDevice / PUT /api/owner-devices/order).
+  onReorderDevice: (id: string, direction: 'up' | 'down') => void
   // Manual "refresh now" (POST /api/poll-now) - triggers an immediate poll
   // instead of waiting for the scheduled interval, see App.tsx.
   onRefresh: () => void
@@ -47,17 +52,13 @@ export function ObjectsList({
   deviceLocations,
   selectedDeviceId,
   onSelectDevice,
+  onReorderDevice,
   onRefresh,
   refreshing,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
-
-  // The primary device (the one driving "moved without you" away-correlation
-  // and the map's own-location trail) is the one answer to "where am I", so
-  // it belongs first, ahead of every other tracked device.
-  const sortedDevices = [...devices].sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault()
@@ -132,7 +133,7 @@ export function ObjectsList({
               <div
                 className={`overflow-hidden rounded-2xl bg-[var(--surface)] ${refreshing ? 'animate-pulse' : ''}`}
               >
-                {sortedDevices.map((d, i) => {
+                {devices.map((d, i) => {
                   const location = deviceLocations[d.id]
                   const selected = d.id === selectedDeviceId
                   return (
@@ -165,6 +166,41 @@ export function ObjectsList({
                           </span>
                         )}
                       </span>
+                      {/* Reorder controls - only worth showing with something
+                          to reorder against. Nested inside the row's own
+                          button (same pattern as TimelinePage.tsx's "Maps"
+                          link) - stopPropagation keeps a tap here from also
+                          selecting the device. */}
+                      {devices.length > 1 && (
+                        <span className="flex shrink-0 flex-col">
+                          <button
+                            type="button"
+                            aria-label="Nach oben verschieben"
+                            title="Nach oben verschieben"
+                            disabled={i === 0}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onReorderDevice(d.id, 'up')
+                            }}
+                            className="text-[var(--text-secondary)] disabled:opacity-20"
+                          >
+                            <ChevronUpIcon className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Nach unten verschieben"
+                            title="Nach unten verschieben"
+                            disabled={i === devices.length - 1}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onReorderDevice(d.id, 'down')
+                            }}
+                            className="text-[var(--text-secondary)] disabled:opacity-20"
+                          >
+                            <ChevronDownIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      )}
                       <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
                     </button>
                   )

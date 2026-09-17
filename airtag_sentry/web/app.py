@@ -13,6 +13,7 @@ in its threadpool automatically - no async DB driver needed at this scale.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import hashlib
 import json
 import logging
@@ -341,6 +342,14 @@ class OwnerDeviceAppearanceIn(BaseModel):
 
 class OwnerDevicePlaySoundIn(BaseModel):
     device_id: str
+
+
+class OwnerDeviceOrderIn(BaseModel):
+    # Every enabled device's id, in the desired display order - see
+    # set_owner_devices_order. ObjectsList.tsx sends its whole current
+    # (enabled-only) list on every reorder rather than a single move, so the
+    # backend never has to compute position deltas itself.
+    device_ids: list[str]
 
 
 class OwnerFamilyIn(BaseModel):
@@ -935,6 +944,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             owner_tracking.set_device_primary(conn, None)
         return {"ok": True}
 
+    @app.put("/api/owner-devices/order")
+    def set_owner_devices_order_route(body: OwnerDeviceOrderIn):
+        """Lets ObjectsList.tsx's device list be manually reordered - see
+        set_owner_devices_order."""
+        with get_conn(cfg.database_url) as conn:
+            owner_tracking.set_devices_order(conn, body.device_ids)
+        return {"ok": True}
+
     @app.patch("/api/owner-devices/rename")
     def rename_owner_device_route(body: OwnerDeviceRenameIn):
         """Sets the device's display name shown throughout the dashboard/bot -
@@ -1052,21 +1069,31 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         }
 
     @app.get("/api/timeline")
-    def get_timeline(limit_per_object: int = 500):
+    def get_timeline(days: int | None = None):
         """Unified, newest-first feed of every AirTag's and every enabled
         owner device's stays (see stays.py) - the "Google Timeline" style
         view of everywhere the owner (and their tagged things) has been,
         with each stop's public place info (address/POI name) alongside its
         resolved label. Mirrors /api/reports and /api/owner-devices/history's
         per-object clustering rather than re-deriving it, just merged across
-        every tracked object instead of scoped to one airtag_id/device_id."""
+        every tracked object instead of scoped to one airtag_id/device_id.
+
+        `days` narrows to the last N days (TimelinePage.tsx's range chips);
+        omitted/None means all available history, which is the default - this
+        used to always cap at the last 500/200 points per object regardless
+        of `days`, which for a frequently-polling device could be well under
+        a day of real coverage and made "no more history" indistinguishable
+        from "there's more, just not fetched"."""
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days) if days is not None else None
         with get_conn(cfg.database_url) as conn:
             radius = get_settings(conn).history_cluster_radius_meters
             places = list_named_places(conn)
             visits: list[dict[str, Any]] = []
 
             for airtag in list_airtags(conn):
-                reports = fetch_reports(conn, airtag.id, limit=limit_per_object)
+                reports = fetch_reports(conn, airtag.id, limit=None)
+                if since is not None:
+                    reports = [r for r in reports if r.timestamp >= since]
                 for c in cluster_by_proximity(reports, lambda r: (r.lat, r.lon), radius):
                     place = match_place(c.anchor.lat, c.anchor.lon, places)
                     details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
@@ -1096,7 +1123,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             for device in db_list_owner_devices(conn):
                 if not device.enabled:
                     continue
-                locations = fetch_owner_device_location_history(conn, device.id, limit=limit_per_object)
+                locations = fetch_owner_device_location_history(conn, device.id, limit=None)
+                if since is not None:
+                    locations = [l for l in locations if l.recorded_at >= since]
                 for c in cluster_by_proximity(locations, lambda l: (l.lat, l.lon), radius):
                     place = match_place(c.anchor.lat, c.anchor.lon, places)
                     details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
