@@ -3,6 +3,7 @@ import { MapContainer, Polyline } from 'react-leaflet'
 import type { LocationStay, OwnerDevice, OwnerLocation, Place } from '../api'
 import { deviceLabel, formatClusterRange } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
+import { useRoutedTrail } from '../hooks/useRoutedTrail'
 import { airtagPinIcon, deviceColor, stayMarkerRadius } from '../mapIcons'
 import { mapsUrl } from '../maps'
 import {
@@ -66,6 +67,7 @@ export function DeviceMapCard({
     [displayed?.lat, displayed?.lon],
   )
   const animatedPosition = useAnimatedLatLng(displayedPosition)
+  const routedPositions = useRoutedTrail(positions)
 
   if (positions.length === 0 || !displayed) {
     return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
@@ -77,7 +79,7 @@ export function DeviceMapCard({
     <MapContainer center={displayedPosition} zoom={15} className="h-full w-full">
       <AppTileLayer />
       {positions.length > 1 && (
-        <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
+        <Polyline positions={routedPositions} pathOptions={{ color: trailColor, weight: 4 }} />
       )}
       <PlaceCircles places={places} />
       <HistoryPoints

@@ -35,6 +35,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
 from airtag_sentry.geocode import get_or_fetch_geocode, search_address
+from airtag_sentry.routing import route_along_roads
 from airtag_sentry.config import Config, load_config
 from airtag_sentry.notifiers import build_notifiers
 from airtag_sentry.db import (
@@ -291,6 +292,10 @@ class GeocodeCorrectionIn(BaseModel):
     lat: float
     lon: float
     corrected_name: str
+
+
+class RouteIn(BaseModel):
+    points: list[tuple[float, float]]
 
 
 class AppleLoginIn(BaseModel):
@@ -816,6 +821,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             delete_place_label_correction(conn, lat, lon)
         return {"ok": True}
+
+    @app.post("/api/route")
+    def route_route(body: RouteIn):
+        """Road-following geometry for a trail's points (see routing.py) -
+        POST, not GET, since a trail's point list is unbounded-length. Best-
+        effort: `points: None` on any failure, so the frontend falls back to
+        its own straight-line trail rather than erroring."""
+        return {"points": route_along_roads(body.points)}
 
     @app.get("/api/status")
     def get_status(airtag_id: str | None = None):
