@@ -21,6 +21,10 @@ class AirtagRecord:
     name: str
     icon: str | None = None
     color: str | None = None
+    # User-controlled display order in ObjectsList.tsx (see set_airtags_order)
+    # - lower sorts first. Mirrors OwnerDevice.sort_order; compare=False for
+    # the same reason (presentation-only, not part of an AirTag's identity).
+    sort_order: int = dataclasses.field(default=0, compare=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -229,7 +233,11 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
 def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO airtags (id, name) VALUES (%s, %s) RETURNING id, name, icon, color",
+            """
+            INSERT INTO airtags (id, name, sort_order)
+            VALUES (%s, %s, COALESCE((SELECT MAX(sort_order) FROM airtags), -1) + 1)
+            RETURNING id, name, icon, color, sort_order
+            """,
             (airtag_id, name),
         )
         row = cur.fetchone()
@@ -239,19 +247,31 @@ def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> Airtag
 
 def list_airtags(conn: psycopg.Connection) -> list[AirtagRecord]:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, name, icon, color FROM airtags ORDER BY created_at ASC")
+        cur.execute("SELECT id, name, icon, color, sort_order FROM airtags ORDER BY sort_order, created_at ASC")
         return [AirtagRecord(*row) for row in cur.fetchall()]
 
 
 def rename_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord | None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name, icon, color",
+            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name, icon, color, sort_order",
             (name, airtag_id),
         )
         row = cur.fetchone()
     conn.commit()
     return AirtagRecord(*row) if row else None
+
+
+def set_airtags_order(conn: psycopg.Connection, airtag_ids: list[str]) -> None:
+    """Assigns sequential sort_order values (0, 1, 2, ...) to exactly the
+    given ids, in the given order - see PUT /api/airtags/order. Mirrors
+    set_owner_devices_order."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            "UPDATE airtags SET sort_order = %s WHERE id = %s",
+            list(enumerate(airtag_ids)),
+        )
+    conn.commit()
 
 
 def set_airtag_appearance(
@@ -262,7 +282,7 @@ def set_airtag_appearance(
     always submits both current values."""
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE airtags SET icon = %s, color = %s WHERE id = %s RETURNING id, name, icon, color",
+            "UPDATE airtags SET icon = %s, color = %s WHERE id = %s RETURNING id, name, icon, color, sort_order",
             (icon, color, airtag_id),
         )
         row = cur.fetchone()
