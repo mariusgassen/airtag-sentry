@@ -172,6 +172,12 @@ export default function App() {
   // owner devices get the same map navigation features, see CLAUDE.md.
   const [selectedDeviceLocationKey, setSelectedDeviceLocationKey] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
+  // Bumped whenever the Einstellungen tab button is clicked while already
+  // active, so SettingsPanel's own internal page stack (root/notifications/
+  // apple/tracking/places) pops back to root - see handleTabChange and
+  // SettingsPanel's resetSignal prop. Objects/Zeitachse don't need this
+  // since their own "root" state (detail/timelineFilter) already lives here.
+  const [settingsResetSignal, setSettingsResetSignal] = useState(0)
   // Which detail screen (if any) the sheet/map are drilled into - an AirTag's
   // or a tracked device's. Only one of the two `current*Id` values below is
   // ever "the selected one" at a time; this disambiguates which.
@@ -476,6 +482,22 @@ export default function App() {
     if (older) stepOlder = () => setSelectedDeviceLocationKey(older.anchor_recorded_at)
     if (newer) stepNewer = () => setSelectedDeviceLocationKey(newer.anchor_recorded_at)
     if (stays.length > 0) stepPosition = { current: displayedIndex + 1, total: stays.length }
+  }
+
+  // Tab bar tap: switching to a different tab lands wherever that tab's own
+  // state already is (e.g. back on the AirTag detail you left open) - same
+  // as before this change. Tapping the tab that's already active instead
+  // acts as a "back to root" (Find My/most iOS tab bars do the same): pop
+  // Objects' detail view, clear Zeitachse's object filter, or pop
+  // Einstellungen's page stack back to its root list.
+  function handleTabChange(tab: TabKey) {
+    if (tab !== activeTab) {
+      setActiveTab(tab)
+      return
+    }
+    if (tab === 'objects') setDetail(null)
+    else if (tab === 'timeline') setTimelineFilter(null)
+    else if (tab === 'settings') setSettingsResetSignal((s) => s + 1)
   }
 
   function handleSelect(id: string) {
@@ -893,6 +915,7 @@ export default function App() {
                 placeSeed={placeSeed}
                 onPlaceSeedConsumed={() => setPlaceSeed(null)}
                 onRequestExpand={() => setSheetState('expanded')}
+                resetSignal={settingsResetSignal}
               />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail
@@ -949,7 +972,7 @@ export default function App() {
             )}
           </div>
         </div>
-        <TabBar active={activeTab} onChange={setActiveTab} />
+        <TabBar active={activeTab} onChange={handleTabChange} />
       </div>
     </div>
   )
