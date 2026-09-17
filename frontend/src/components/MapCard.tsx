@@ -80,9 +80,9 @@ export function AppTileLayer() {
     return <TileLayer attribution={PLAIN_OSM_ATTRIBUTION} url={PLAIN_OSM_TILE_URL} />
   }
   return scheme === 'dark' ? (
-    <TileLayer attribution={DARK_ATTRIBUTION} url={`${DARK_TILE_URL}?api_key=${CARTO_API_KEY}`} />
+    <TileLayer attribution={DARK_ATTRIBUTION} url={`${DARK_TILE_URL}?key=${CARTO_API_KEY}`} />
   ) : (
-    <TileLayer attribution={LIGHT_ATTRIBUTION} url={`${LIGHT_TILE_URL}?api_key=${CARTO_API_KEY}`} />
+    <TileLayer attribution={LIGHT_ATTRIBUTION} url={`${LIGHT_TILE_URL}?key=${CARTO_API_KEY}`} />
   )
 }
 

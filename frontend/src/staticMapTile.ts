@@ -17,6 +17,6 @@ export function staticMapTileUrl(lat: number, lon: number, zoom = 15): string {
   // Subdomain fixed at "a" - varying it (a/b/c, as the live map does for
   // parallel loading) isn't worth the complexity for single lazy thumbnails.
   return cartoTilesEnabled()
-    ? `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${x}/${y}.png?api_key=${CARTO_API_KEY}`
+    ? `https://a.basemaps.cartocdn.com/rastertiles/voyager/${zoom}/${x}/${y}.png?key=${CARTO_API_KEY}`
     : `https://a.tile.openstreetmap.org/${zoom}/${x}/${y}.png`
 }
