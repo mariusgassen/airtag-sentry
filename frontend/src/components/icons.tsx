@@ -271,6 +271,24 @@ export function HomeAssistantIcon({ className }: IconProps) {
   )
 }
 
+/** A dashed path with a dot at each end - toggles the background
+ * owner-device trail (OwnerTrails in MapCard.tsx). */
+export function RouteIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path
+        d="M5 19c4-1 4-5 8-6s6-1 6-5"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeDasharray="1 3.2"
+      />
+      <circle cx="5" cy="19" r="2" fill="currentColor" />
+      <circle cx="19" cy="8" r="2" fill="currentColor" />
+    </svg>
+  )
+}
+
 /** The AirTag glyph: concentric rings, similar to Find My's item icon. */
 export function AirtagGlyph({ className }: IconProps) {
   return (

@@ -35,11 +35,13 @@ import {
   airtagPinIcon,
   currentLocationIcon,
   deviceColor,
+  hasOwnerTrails,
+  recentOwnerTrailPoints,
   stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
 import { useColorScheme } from '../theme'
-import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon } from './icons'
+import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
 
 /** Callback for "Ort hier hinzufügen" (see AddPlaceButton) - jumps to
  * Settings -> Orte and opens the place editor pre-seeded at this exact
@@ -467,6 +469,69 @@ export function PlaceCircles({ places }: { places: { id: number; name: string; l
   )
 }
 
+/** Background trail for every *other* tracked owner device - drawn behind an
+ * AirTag's own map (MapCard) or the overview map (OverviewMap), not a
+ * device's own detail view (DeviceMapCard already shows its full history via
+ * HistoryPoints/DeviceHistoryList, with no window applied). Off by default
+ * (OwnerTrailToggle) and capped to OWNER_TRAIL_WINDOW_MS - a device's whole
+ * history drawn unprompted on a map meant for something else was unreadable.
+ * Faded per-segment from the oldest point (faint) to the newest (near-solid,
+ * leading into that device's own full marker) rather than one flat line, so
+ * which way the trail runs is visible without needing to click through it.
+ * Exported for OverviewMap.tsx, which shares this same rendering. */
+export function OwnerTrails({
+  histories,
+  visible,
+}: {
+  histories: Record<string, OwnerLocation[]>
+  visible: boolean
+}) {
+  if (!visible) return null
+  return (
+    <>
+      {Object.entries(histories).flatMap(([deviceId, history]) => {
+        const points = recentOwnerTrailPoints(history)
+        if (points.length < 2) return []
+        return points.slice(1).map((point, i) => {
+          const prev = points[i]
+          const age = (i + 1) / (points.length - 1)
+          return (
+            <Polyline
+              key={`${deviceId}-${i}`}
+              positions={[
+                [prev.lat, prev.lon],
+                [point.lat, point.lon],
+              ]}
+              pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6', opacity: 0.12 + age * 0.68 }}
+            />
+          )
+        })
+      })}
+    </>
+  )
+}
+
+/** Off-by-default switch for OwnerTrails - a background trail for devices
+ * other than the one actually being looked at was previously always drawn,
+ * unprompted and unbounded, on every map. Exported for OverviewMap.tsx,
+ * which shares this same control. */
+export function OwnerTrailToggle({ visible, onToggle }: { visible: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`absolute right-2 top-2 z-[500] inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium shadow ${
+        visible
+          ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
+          : 'border-[var(--divider)] bg-[var(--surface)] text-[var(--text-secondary)]'
+      }`}
+    >
+      <RouteIcon className="h-3.5 w-3.5" />
+      Verlauf eigener Geräte
+    </button>
+  )
+}
+
 /** Marker + popup for the map's one "selected" pin - the AirTag/device's own
  * currently displayed position. Not a plain `<Marker><Popup>` pair: a bound
  * Popup only opens on click, and there's no reliable way to force it open
@@ -636,6 +701,7 @@ export function MapCard({
     [displayed?.lat, displayed?.lon],
   )
   const animatedPosition = useAnimatedLatLng(displayedPosition)
+  const [showOwnerTrail, setShowOwnerTrail] = useState(false)
 
   if (positions.length === 0 || !displayed) {
     return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
@@ -645,119 +711,114 @@ export function MapCard({
   const trailColor = deviceColor(airtag)
 
   return (
-    <MapContainer center={last} zoom={15} className="h-full w-full">
-      <AppTileLayer />
-      <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
-      <PlaceCircles places={places} />
-      <HistoryPoints
-        points={stays}
-        displayedIndex={displayedIndex}
-        color={trailColor}
-        getKey={(s) => s.anchor_id}
-        getRadius={(s) => stayMarkerRadius(s.count)}
-        onSelect={onSelectReport ? (s) => onSelectReport(s.anchor_id) : undefined}
-      />
-      {Object.entries(ownerLocationHistories).map(([deviceId, history]) => {
-        const ownerPositions: [number, number][] = history.map((l) => [l.lat, l.lon])
-        if (ownerPositions.length < 2) return null
-        return (
-          <Polyline
-            key={deviceId}
-            positions={ownerPositions}
-            pathOptions={{ color: OWNER_TRAIL_COLOR, weight: 3, dashArray: '6 6' }}
-          />
-        )
-      })}
-      <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)} label={displayed.label}>
-        <div className={POPUP_WIDTH_CLASS}>
-          <p className="mb-2 text-[0.95rem] font-semibold">
-            {displayed.label ?? (selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position')}
-          </p>
-          <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-            {displayed.count > 1
-              ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
-              : new Date(displayed.start).toLocaleString()}
-          </InfoRow>
-          {/* Only live-fetch a fallback address when the server has no
-              precomputed label (stays.py's resolve_label) - otherwise this
-              popup and NoReportsView's would show different info for the
-              same kind of "position" depending on which one happened to
-              have a cached label yet. */}
-          {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
-          <BatteryRow level={displayed.battery_level} />
-          <div className="mt-2 flex flex-wrap gap-2">
-            <a
-              href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-            >
-              <LocationArrowIcon className="h-3.5 w-3.5" />
-              In Karten öffnen
-            </a>
-            <AddPlaceButton
-              lat={displayedPosition[0]}
-              lon={displayedPosition[1]}
-              name={displayed.label}
-              onAddPlace={onAddPlace}
-            />
-          </div>
-        </div>
-      </SelectedPin>
-      {ownerLocations.map((loc) => (
-        <Marker
-          key={loc.device_id}
-          position={[loc.lat, loc.lon]}
-          icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
-          eventHandlers={{ click: centerMarkerOnClick }}
-        >
-          <Popup autoPan={false}>
-            <div className={POPUP_WIDTH_CLASS}>
-              <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
-              <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
-                {capitalize(formatRelative(loc.recorded_at))}
-              </InfoRow>
-              <AddressLine lat={loc.lat} lon={loc.lon} />
-              <BatteryRow level={loc.battery_level} status={loc.battery_status} reported={loc.battery_reported} />
-              <div className="mt-2 flex flex-wrap gap-2">
-                {onSelectDevice && (
-                  <button
-                    type="button"
-                    onClick={() => onSelectDevice(loc.device_id)}
-                    className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
-                  >
-                    Details anzeigen
-                  </button>
-                )}
-                <a
-                  href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-                >
-                  <LocationArrowIcon className="h-3.5 w-3.5" />
-                  In Karten öffnen
-                </a>
-                <AddPlaceButton lat={loc.lat} lon={loc.lon} onAddPlace={onAddPlace} />
-              </div>
+    <div className="relative h-full w-full">
+      <MapContainer center={last} zoom={15} className="h-full w-full">
+        <AppTileLayer />
+        <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
+        <PlaceCircles places={places} />
+        <HistoryPoints
+          points={stays}
+          displayedIndex={displayedIndex}
+          color={trailColor}
+          getKey={(s) => s.anchor_id}
+          getRadius={(s) => stayMarkerRadius(s.count)}
+          onSelect={onSelectReport ? (s) => onSelectReport(s.anchor_id) : undefined}
+        />
+        <OwnerTrails histories={ownerLocationHistories} visible={showOwnerTrail} />
+        <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)} label={displayed.label}>
+          <div className={POPUP_WIDTH_CLASS}>
+            <p className="mb-2 text-[0.95rem] font-semibold">
+              {displayed.label ?? (selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position')}
+            </p>
+            <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+              {displayed.count > 1
+                ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
+                : new Date(displayed.start).toLocaleString()}
+            </InfoRow>
+            {/* Only live-fetch a fallback address when the server has no
+                precomputed label (stays.py's resolve_label) - otherwise this
+                popup and NoReportsView's would show different info for the
+                same kind of "position" depending on which one happened to
+                have a cached label yet. */}
+            {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+            <BatteryRow level={displayed.battery_level} />
+            <div className="mt-2 flex flex-wrap gap-2">
+              <a
+                href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+              >
+                <LocationArrowIcon className="h-3.5 w-3.5" />
+                In Karten öffnen
+              </a>
+              <AddPlaceButton
+                lat={displayedPosition[0]}
+                lon={displayedPosition[1]}
+                name={displayed.label}
+                onAddPlace={onAddPlace}
+              />
             </div>
-          </Popup>
-        </Marker>
-      ))}
-      {/* FitBounds first, PanToSelection second: FitBounds only re-fires on
-          a genuine data change (positions is memoized above) and sets a
-          zoom level that fits the whole trail, but PanToSelection - now
-          unconditional, not just for an explicit history selection - has
-          the final say on centering, so whichever pin is currently
-          highlighted (the latest one by default, same as any explicit
-          selection) is always what the view actually centers on. */}
-      <FitBounds positions={positions} />
-      <PanToSelection position={displayedPosition} />
-      <InvalidateSizeOnResize />
-      <MapClickHandler onMapClick={onMapClick} />
-      <FullscreenControl />
-      <LocateControl />
-      <HeatmapLayer points={stays} />
-    </MapContainer>
+          </div>
+        </SelectedPin>
+        {ownerLocations.map((loc) => (
+          <Marker
+            key={loc.device_id}
+            position={[loc.lat, loc.lon]}
+            icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
+            eventHandlers={{ click: centerMarkerOnClick }}
+          >
+            <Popup autoPan={false}>
+              <div className={POPUP_WIDTH_CLASS}>
+                <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
+                <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
+                  {capitalize(formatRelative(loc.recorded_at))}
+                </InfoRow>
+                <AddressLine lat={loc.lat} lon={loc.lon} />
+                <BatteryRow level={loc.battery_level} status={loc.battery_status} reported={loc.battery_reported} />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {onSelectDevice && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectDevice(loc.device_id)}
+                      className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
+                    >
+                      Details anzeigen
+                    </button>
+                  )}
+                  <a
+                    href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+                  >
+                    <LocationArrowIcon className="h-3.5 w-3.5" />
+                    In Karten öffnen
+                  </a>
+                  <AddPlaceButton lat={loc.lat} lon={loc.lon} onAddPlace={onAddPlace} />
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+        {/* FitBounds first, PanToSelection second: FitBounds only re-fires on
+            a genuine data change (positions is memoized above) and sets a
+            zoom level that fits the whole trail, but PanToSelection - now
+            unconditional, not just for an explicit history selection - has
+            the final say on centering, so whichever pin is currently
+            highlighted (the latest one by default, same as any explicit
+            selection) is always what the view actually centers on. */}
+        <FitBounds positions={positions} />
+        <PanToSelection position={displayedPosition} />
+        <InvalidateSizeOnResize />
+        <MapClickHandler onMapClick={onMapClick} />
+        <FullscreenControl />
+        <LocateControl />
+        <HeatmapLayer points={stays} />
+      </MapContainer>
+      {hasOwnerTrails(ownerLocationHistories) && (
+        <OwnerTrailToggle visible={showOwnerTrail} onToggle={() => setShowOwnerTrail((v) => !v)} />
+      )}
+    </div>
   )
 }

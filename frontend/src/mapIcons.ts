@@ -1,4 +1,5 @@
 import L from 'leaflet'
+import type { OwnerLocation } from './api'
 import { airtagColor, glyphColor } from './airtagColor'
 import type { DeviceIconName } from './deviceIcons'
 
@@ -174,9 +175,34 @@ export const currentLocationIcon: L.DivIcon = L.divIcon({
  * `var(--accent)` since Leaflet sets it as a plain SVG `stroke` attribute,
  * not a CSS property, so a custom property wouldn't resolve there. Matches
  * the dark-theme accent (index.css) that currentLocationIcon's dot already
- * uses; dashed in Polyline usage to stay visually distinct from the
- * AirTag route's solid line despite the similar blue. */
+ * uses. */
 export const OWNER_TRAIL_COLOR = '#0a84ff'
+
+/** How far back the background owner-device trail (OwnerTrails, drawn behind
+ * an AirTag's own map / the overview map - not a device's own detail view,
+ * which already shows its full history via HistoryPoints/DeviceHistoryList)
+ * reaches. Unbounded was unreadable - a device's entire history (up to 200
+ * raw fixes) drawn at once on a map meant for a *different* AirTag/device. */
+export const OWNER_TRAIL_WINDOW_MS = 24 * 60 * 60 * 1000
+
+// history is newest-first (fetch_owner_device_location_history, see
+// CLAUDE.md) - keeps only the last OWNER_TRAIL_WINDOW_MS and flips to
+// oldest-first, so callers can fade a trail in from the past toward "now".
+// Exported for MapCard.tsx's OwnerTrails/OwnerTrailToggle.
+export function recentOwnerTrailPoints(history: OwnerLocation[]): OwnerLocation[] {
+  const cutoff = Date.now() - OWNER_TRAIL_WINDOW_MS
+  return history
+    .filter((l) => new Date(l.recorded_at).getTime() >= cutoff)
+    .slice()
+    .reverse()
+}
+
+/** Whether OwnerTrails (MapCard.tsx) has anything to draw for any device -
+ * used to hide OwnerTrailToggle entirely rather than show a control for an
+ * empty trail. */
+export function hasOwnerTrails(histories: Record<string, OwnerLocation[]>): boolean {
+  return Object.values(histories).some((h) => recentOwnerTrailPoints(h).length >= 2)
+}
 
 /** Translucent geofence circle color (PlaceCircles, MapCard.tsx/
  * DeviceMapCard.tsx) - a distinct green so a user-defined place never reads
