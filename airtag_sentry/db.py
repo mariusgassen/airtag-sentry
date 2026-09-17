@@ -956,6 +956,29 @@ def primary_owner_device_location_near(conn: psycopg.Connection, timestamp: dt.d
         return OwnerLocation(*row) if row else None
 
 
+def primary_owner_device_latest_location(conn: psycopg.Connection) -> OwnerLocation | None:
+    """The primary device's single most recent reading - unlike
+    `primary_owner_device_location_near`, this ignores any target timestamp
+    and always returns the freshest one on record. Used to check whether the
+    owner has already reunited with a tag by the time a "moved without you"
+    alert is about to be sent, even though the alert's own away-correlation
+    correctly used the reading closest to the triggering report's timestamp.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
+                odl.battery_level, odl.battery_status, odl.battery_reported
+            FROM owner_device_locations odl
+            JOIN owner_devices od ON od.id = odl.device_id
+            WHERE od.is_primary
+            ORDER BY odl.recorded_at DESC LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        return OwnerLocation(*row) if row else None
+
+
 def fetch_owner_device_location_history(
     conn: psycopg.Connection, device_id: str, limit: int | None = 200
 ) -> list[OwnerLocation]:
