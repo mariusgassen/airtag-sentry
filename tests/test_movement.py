@@ -1,7 +1,13 @@
 import datetime as dt
 
 from airtag_sentry.db import OwnerLocation, Report
-from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement, haversine_distance
+from airtag_sentry.movement import (
+    MovementConfig,
+    evaluate_away,
+    evaluate_movement,
+    haversine_distance,
+    owner_already_reunited,
+)
 
 CFG = MovementConfig(
     distance_threshold_meters=100,
@@ -163,3 +169,20 @@ def test_distance_threshold_alert_still_fires_for_real_move_despite_accuracy():
     alert = evaluate_movement(new, prior, CFG)
     assert alert is not None
     assert alert.reason == "distance_threshold"
+
+
+def test_owner_already_reunited_false_without_current_owner_location():
+    new = _report(0, 52.5, 13.4)
+    assert owner_already_reunited(new, None, CFG) is False
+
+
+def test_owner_already_reunited_true_when_current_owner_location_is_near():
+    new = _report(0, 52.5, 13.4)
+    current = _owner_location(0, 52.50005, 13.40005)  # a few meters away, now
+    assert owner_already_reunited(new, current, CFG) is True
+
+
+def test_owner_already_reunited_false_when_current_owner_location_still_far():
+    new = _report(0, 52.5, 13.4)
+    current = _owner_location(0, 52.51, 13.4)  # still ~1.1km away, now
+    assert owner_already_reunited(new, current, CFG) is False

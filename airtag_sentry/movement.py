@@ -129,3 +129,29 @@ def evaluate_away(
     )
     distance = _accuracy_adjusted_distance(raw_distance, new_report.accuracy, owner_location.horizontal_accuracy)
     return distance if distance > cfg.away_distance_threshold_meters else None
+
+
+def owner_already_reunited(
+    new_report: Report, current_owner_location: OwnerLocation | None, cfg: MovementConfig
+) -> bool:
+    """Whether the owner's *current* location - not time-matched to
+    `new_report` the way `evaluate_away`'s comparison is - is already back
+    near where `new_report` places the tag.
+
+    AirTag reports arrive via Apple's crowd-sourced network and owner-device
+    polls both carry real wall-clock delay, so by the time a "moved without
+    you" alert is actually about to be sent, the owner may have already
+    reunited with the tag even though the alert was correctly true at the
+    report's own timestamp. Only meaningful to call after `evaluate_away`
+    has already flagged `new_report` - this doesn't reconsider whether the
+    tag moved, only whether notifying about it is still useful.
+    """
+    if current_owner_location is None:
+        return False
+    raw_distance = haversine_distance(
+        new_report.lat, new_report.lon, current_owner_location.lat, current_owner_location.lon
+    )
+    distance = _accuracy_adjusted_distance(
+        raw_distance, new_report.accuracy, current_owner_location.horizontal_accuracy
+    )
+    return distance <= cfg.away_distance_threshold_meters

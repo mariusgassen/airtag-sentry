@@ -31,6 +31,7 @@ from airtag_sentry.db import (
     insert_reports,
     list_airtags,
     list_owner_devices,
+    primary_owner_device_latest_location,
     primary_owner_device_location_near,
     record_alert,
     record_owner_device_location,
@@ -38,7 +39,7 @@ from airtag_sentry.db import (
     store_geocoded_point,
 )
 from airtag_sentry.geocode import format_location_line, reverse_geocode
-from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement
+from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement, owner_already_reunited
 from airtag_sentry.notifiers import build_notifiers, notify_all
 from airtag_sentry.notifiers.homeassistant import HomeAssistantPublisher, build_ha_publisher
 from airtag_sentry.owner_tracking import fetch_owner_device_locations
@@ -323,7 +324,9 @@ def _poll_airtag(
                         report_id=report.id,
                     ),
                 )
-                if _should_notify(settings, "moved_without_owner"):
+                if _should_notify(settings, "moved_without_owner") and not owner_already_reunited(
+                    report, primary_owner_device_latest_location(conn), movement_cfg
+                ):
                     away_message = (
                         f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
                         f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
