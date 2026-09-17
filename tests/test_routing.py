@@ -66,5 +66,40 @@ def test_route_along_roads_returns_none_for_a_single_point():
 
 
 def test_route_along_roads_returns_none_for_too_many_points():
-    points = [(49.8728 + i * 0.0001, 8.6512) for i in range(101)]
+    # 0.001 degrees latitude is ~111m apart - well above _DEDUPE_MIN_DISTANCE_METERS,
+    # so this stays 101 distinct points after dedup, over the cap.
+    points = [(49.8728 + i * 0.001, 8.6512) for i in range(101)]
     assert route_along_roads(points) is None
+
+
+def test_route_along_roads_dedupes_near_duplicate_consecutive_points(monkeypatch):
+    # An owner device sitting still gets a new near-identical location row
+    # every poll (see routing.py's _DEDUPE_MIN_DISTANCE_METERS comment) - a
+    # long run of them shouldn't by itself blow past _MAX_POINTS and fall
+    # back to a straight line.
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "code": "Ok",
+        "routes": [{"geometry": {"coordinates": [[8.6512, 49.8728], [8.6530, 49.8735]]}}],
+    }
+    mock_response.raise_for_status = Mock()
+    captured_urls = []
+
+    def fake_get(url, **kwargs):
+        captured_urls.append(url)
+        return mock_response
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    # 200 identical-location polls (a device sitting still), plus one real move.
+    stationary = [(49.8728, 8.6512)] * 200
+    result = route_along_roads([*stationary, (49.8735, 8.6530)])
+
+    assert result == [(49.8728, 8.6512), (49.8735, 8.6530)]
+    # Only the first stationary point and the real move should have made it
+    # into the OSRM request.
+    assert captured_urls[0].count(";") == 1
+
+
+def test_route_along_roads_returns_none_when_dedup_leaves_a_single_point():
+    assert route_along_roads([(49.8728, 8.6512), (49.8728, 8.6512)]) is None
