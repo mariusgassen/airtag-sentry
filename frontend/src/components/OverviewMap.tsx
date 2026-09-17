@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { MapContainer, Marker, Popup } from 'react-leaflet'
-import type { Airtag, OwnerLocation, Status } from '../api'
+import type { Airtag, OwnerLocation, Place, Status } from '../api'
 import { capitalize, formatRelative } from '../format'
 import { airtagPinIcon, hasOwnerTrails } from '../mapIcons'
-import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { centerMarkerOnClick, isWithinPlace } from '../maps'
 import {
   AddPlaceButton,
   AddressLine,
@@ -14,12 +14,14 @@ import {
   InvalidateSizeOnResize,
   LocateControl,
   NoReportsView,
+  OpenInMapsButton,
   OwnerTrailToggle,
   OwnerTrails,
+  PopupHeader,
   POPUP_WIDTH_CLASS,
 } from './MapCard'
 import type { AddPlaceHandler } from './MapCard'
-import { ClockIcon, LocationArrowIcon } from './icons'
+import { ClockIcon } from './icons'
 import { MarkerClusterGroup } from './MarkerClusterGroup'
 
 interface Props {
@@ -33,6 +35,7 @@ interface Props {
   ownerLocationHistories?: Record<string, OwnerLocation[]>
   onSelectDevice?: (id: string) => void
   onAddPlace?: AddPlaceHandler
+  places?: Place[]
 }
 
 /** Main map view for the list/settings screens - every AirTag's last known
@@ -46,6 +49,7 @@ export function OverviewMap({
   ownerLocationHistories = {},
   onSelectDevice,
   onAddPlace,
+  places = [],
 }: Props) {
   const [showOwnerTrail, setShowOwnerTrail] = useState(false)
   const located = airtags
@@ -58,7 +62,7 @@ export function OverviewMap({
   // (or before any AirTag has reported yet) - the overview map should still
   // render once there's at least one AirTag *or* device position.
   if (located.length === 0 && ownerLocations.length === 0) {
-    return <NoReportsView onAddPlace={onAddPlace} />
+    return <NoReportsView onAddPlace={onAddPlace} places={places} />
   }
 
   const positions: [number, number][] = [
@@ -83,30 +87,31 @@ export function OverviewMap({
                   pin explicitly on click. */}
               <Popup autoPan={false}>
                 <div className={POPUP_WIDTH_CLASS}>
-                  <p className="mb-2 text-[0.95rem] font-semibold">{airtag.name}</p>
+                  <PopupHeader
+                    title={airtag.name}
+                    actions={
+                      <>
+                        <OpenInMapsButton lat={lastReport.lat} lon={lastReport.lon} name={airtag.name} />
+                        <AddPlaceButton
+                          lat={lastReport.lat}
+                          lon={lastReport.lon}
+                          onAddPlace={onAddPlace}
+                          withinPlace={isWithinPlace(lastReport.lat, lastReport.lon, places)}
+                        />
+                      </>
+                    }
+                  />
                   <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
                     {capitalize(formatRelative(lastReport.timestamp))}
                   </InfoRow>
                   <AddressLine lat={lastReport.lat} lon={lastReport.lon} />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onSelect(airtag.id)}
-                      className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
-                    >
-                      Details anzeigen
-                    </button>
-                    <a
-                      href={mapsUrl(lastReport.lat, lastReport.lon, airtag.name)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-                    >
-                      <LocationArrowIcon className="h-3.5 w-3.5" />
-                      In Karten öffnen
-                    </a>
-                    <AddPlaceButton lat={lastReport.lat} lon={lastReport.lon} onAddPlace={onAddPlace} />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(airtag.id)}
+                    className="mt-2 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
+                  >
+                    Details anzeigen
+                  </button>
                 </div>
               </Popup>
             </Marker>
@@ -122,32 +127,33 @@ export function OverviewMap({
                   pin explicitly on click. */}
               <Popup autoPan={false}>
                 <div className={POPUP_WIDTH_CLASS}>
-                  <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
+                  <PopupHeader
+                    title={loc.name ?? 'Gerät'}
+                    actions={
+                      <>
+                        <OpenInMapsButton lat={loc.lat} lon={loc.lon} name={loc.name ?? 'Gerät'} />
+                        <AddPlaceButton
+                          lat={loc.lat}
+                          lon={loc.lon}
+                          onAddPlace={onAddPlace}
+                          withinPlace={isWithinPlace(loc.lat, loc.lon, places)}
+                        />
+                      </>
+                    }
+                  />
                   <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
                     {capitalize(formatRelative(loc.recorded_at))}
                   </InfoRow>
                   <AddressLine lat={loc.lat} lon={loc.lon} />
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {onSelectDevice && (
-                      <button
-                        type="button"
-                        onClick={() => onSelectDevice(loc.device_id)}
-                        className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
-                      >
-                        Details anzeigen
-                      </button>
-                    )}
-                    <a
-                      href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+                  {onSelectDevice && (
+                    <button
+                      type="button"
+                      onClick={() => onSelectDevice(loc.device_id)}
+                      className="mt-2 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
                     >
-                      <LocationArrowIcon className="h-3.5 w-3.5" />
-                      In Karten öffnen
-                    </a>
-                    <AddPlaceButton lat={loc.lat} lon={loc.lon} onAddPlace={onAddPlace} />
-                  </div>
+                      Details anzeigen
+                    </button>
+                  )}
                 </div>
               </Popup>
             </Marker>
