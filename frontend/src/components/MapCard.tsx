@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type L from 'leaflet'
+import L from 'leaflet'
 import { DomEvent } from 'leaflet'
+import 'leaflet.heat'
 import {
   Circle,
   CircleMarker,
@@ -39,6 +40,7 @@ import {
   stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { useColorScheme } from '../theme'
 import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
 
 /** Callback for "Ort hier hinzufügen" (see AddPlaceButton) - jumps to
@@ -54,6 +56,27 @@ export type AddPlaceHandler = (lat: number, lon: number, name?: string) => void
 // shares this shape - a fixed width so the card doesn't reflow oddly between
 // a short ("Letzte Position" only) and a long (address + prev/next) variant.
 export const POPUP_WIDTH_CLASS = 'w-60'
+
+const LIGHT_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+const LIGHT_ATTRIBUTION = '&copy; OpenStreetMap contributors'
+// CARTO's free dark basemap - same OSM data, no API key required, just a
+// second tile URL/attribution.
+const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+const DARK_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+
+/** Tile layer for every map view in the app - swaps to CARTO's dark basemap
+ * when the app is in dark mode (theme.ts's data-theme), so the map matches
+ * the rest of the UI at night; light mode keeps the original OSM tiles
+ * unchanged. Exported for DeviceMapCard.tsx/OverviewMap.tsx, which share
+ * this same tile choice. */
+export function AppTileLayer() {
+  const scheme = useColorScheme()
+  return scheme === 'dark' ? (
+    <TileLayer attribution={DARK_ATTRIBUTION} url={DARK_TILE_URL} />
+  ) : (
+    <TileLayer attribution={LIGHT_ATTRIBUTION} url={LIGHT_TILE_URL} />
+  )
+}
 
 /** One icon-prefixed line of secondary popup info (timestamp, address, relative
  * time) - shared so every popup's metadata reads the same way. */
@@ -112,6 +135,105 @@ export function InvalidateSizeOnResize() {
     return () => observer.disconnect()
   }, [map])
   return null
+}
+
+const EXPAND_SVG =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M9 4H4v5M15 4h5v5M4 15v5h5M20 15v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const COMPRESS_SVG =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+/** Creates a bare `leaflet-bar` control button, wired to a single click
+ * handler - the DOM scaffolding FullscreenControl and LocateControl each
+ * need, since react-leaflet has no control primitive of its own (custom
+ * controls are plain imperative Leaflet, same as EditableCircle.tsx's
+ * imperative Circle). */
+function controlButton(label: string, onClick: (e: Event) => void): HTMLAnchorElement {
+  const button = L.DomUtil.create('a') as HTMLAnchorElement
+  button.href = '#'
+  button.setAttribute('role', 'button')
+  button.setAttribute('aria-label', label)
+  button.title = label
+  button.style.cssText = 'display:flex;align-items:center;justify-content:center;color:#333'
+  L.DomEvent.on(button, 'click', (e) => {
+    L.DomEvent.preventDefault(e)
+    onClick(e)
+  })
+  return button
+}
+
+function addControlButton(map: L.Map, button: HTMLAnchorElement): L.Control {
+  const control = new L.Control({ position: 'topright' })
+  control.onAdd = () => {
+    const wrapper = L.DomUtil.create('div', 'leaflet-bar leaflet-control')
+    wrapper.appendChild(button)
+    L.DomEvent.disableClickPropagation(wrapper)
+    return wrapper
+  }
+  control.addTo(map)
+  return control
+}
+
+/** Toggles the map container in/out of the browser's Fullscreen API - handy
+ * on mobile, where the map card sits cramped next to detail panels. Just the
+ * browser's own Fullscreen API behind a Leaflet control, no plugin needed.
+ * Renders nothing (and never enters fullscreen) when the browser doesn't
+ * support it (`document.fullscreenEnabled` false - some embedded/older
+ * WebViews). Exported for DeviceMapCard.tsx/OverviewMap.tsx, which share
+ * this same control. */
+export function FullscreenControl() {
+  const map = useMap()
+  useEffect(() => {
+    if (!document.fullscreenEnabled) return
+    const container = map.getContainer()
+    const button = controlButton('Vollbild', () => {
+      if (document.fullscreenElement === container) document.exitFullscreen()
+      else container.requestFullscreen().catch(() => {})
+    })
+    button.innerHTML = EXPAND_SVG
+    function sync() {
+      button.innerHTML = document.fullscreenElement === container ? COMPRESS_SVG : EXPAND_SVG
+    }
+    document.addEventListener('fullscreenchange', sync)
+    const control = addControlButton(map, button)
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+      control.remove()
+    }
+  }, [map])
+  return null
+}
+
+const LOCATE_SVG =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+
+/** "Locate me" control - centers/zooms the map on the browser's current GPS
+ * position via Leaflet's own built-in `map.locate()` (no plugin needed), and
+ * drops the same "you are here" pin (currentLocationIcon) NoReportsView's
+ * fallback view uses. Useful for comparing your own position to the tracked
+ * AirTag/device. Exported for DeviceMapCard.tsx/OverviewMap.tsx, which share
+ * this same control. */
+export function LocateControl() {
+  const map = useMap()
+  const [here, setHere] = useState<[number, number] | null>(null)
+
+  useEffect(() => {
+    const button = controlButton('Meinen Standort finden', () =>
+      map.locate({ setView: true, maxZoom: 16, enableHighAccuracy: false }),
+    )
+    button.innerHTML = LOCATE_SVG
+    function onFound(e: L.LocationEvent) {
+      setHere([e.latlng.lat, e.latlng.lng])
+    }
+    map.on('locationfound', onFound)
+    const control = addControlButton(map, button)
+    return () => {
+      map.off('locationfound', onFound)
+      control.remove()
+    }
+  }, [map])
+
+  if (!here) return null
+  return <Marker position={here} icon={currentLocationIcon} eventHandlers={{ click: centerMarkerOnClick }} />
 }
 
 /** Pans (without changing zoom) to whichever position is currently
@@ -286,6 +408,48 @@ export function HistoryPoints<T extends { lat: number; lon: number }>({
   )
 }
 
+const HEATMAP_ICON_SVG =
+  '<svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M12 3c-1.5 3-4.5 5-4.5 8.5A4.5 4.5 0 0 0 12 16a4.5 4.5 0 0 0 4.5-4.5c0-1-.3-1.8-.8-2.6-.3 1.4-1.2 2.1-1.9 2.1.6-2-.3-4-1.8-6Z" fill="currentColor"/><path d="M12 16v5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+
+/** Toggle-able density heatmap of stay points (leaflet.heat), weighted by
+ * how many reports/fixes make up each stay - shows "where does this thing
+ * usually sit" at a glance, alongside (not instead of) the individual
+ * HistoryPoints dots, which stay clickable for picking a specific stay. Off
+ * by default (a Leaflet control button turns it on) so it doesn't visually
+ * compete with the trail/dots on first load. Exported for DeviceMapCard.tsx,
+ * which shares this same overlay (see CLAUDE.md's AirTag/device parity
+ * constraint). */
+export function HeatmapLayer<T extends { lat: number; lon: number; count: number }>({ points }: { points: T[] }) {
+  const map = useMap()
+  const [visible, setVisible] = useState(false)
+  const buttonRef = useRef<HTMLAnchorElement | null>(null)
+
+  useEffect(() => {
+    const button = controlButton('Häufigkeitskarte', () => setVisible((v) => !v))
+    button.innerHTML = HEATMAP_ICON_SVG
+    buttonRef.current = button
+    const control = addControlButton(map, button)
+    return () => {
+      buttonRef.current = null
+      control.remove()
+    }
+  }, [map])
+
+  useEffect(() => {
+    if (buttonRef.current) buttonRef.current.style.background = visible ? 'var(--accent)' : ''
+    if (!visible) return
+    const layer = L.heatLayer(
+      points.map((p) => [p.lat, p.lon, p.count]),
+      { radius: 28, blur: 22, maxZoom: 17 },
+    ).addTo(map)
+    return () => {
+      layer.remove()
+    }
+  }, [map, visible, points])
+
+  return null
+}
+
 /** Read-only translucent geofence overlays - the editable version (drag to
  * move/resize) only exists in SettingsPlaces.tsx's editor. Exported for
  * DeviceMapCard.tsx, which shares this same rendering (see CLAUDE.md's
@@ -456,10 +620,7 @@ export function NoReportsView({
 
   return (
     <MapContainer center={here} zoom={14} className="h-full w-full">
-      <TileLayer
-        attribution="&copy; OpenStreetMap contributors"
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <AppTileLayer />
       <Marker position={here} icon={currentLocationIcon} eventHandlers={{ click: centerMarkerOnClick }}>
         {/* autoPan off: centerMarkerOnClick above already centers this pin
             explicitly on click. Same info shape as every other pin's popup
@@ -488,6 +649,7 @@ export function NoReportsView({
       </Marker>
       <MapClickHandler onMapClick={onMapClick} />
       <InvalidateSizeOnResize />
+      <FullscreenControl />
     </MapContainer>
   )
 }
@@ -551,10 +713,7 @@ export function MapCard({
   return (
     <div className="relative h-full w-full">
       <MapContainer center={last} zoom={15} className="h-full w-full">
-        <TileLayer
-          attribution="&copy; OpenStreetMap contributors"
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        <AppTileLayer />
         <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
         <PlaceCircles places={places} />
         <HistoryPoints
@@ -653,6 +812,9 @@ export function MapCard({
         <PanToSelection position={displayedPosition} />
         <InvalidateSizeOnResize />
         <MapClickHandler onMapClick={onMapClick} />
+        <FullscreenControl />
+        <LocateControl />
+        <HeatmapLayer points={stays} />
       </MapContainer>
       {hasOwnerTrails(ownerLocationHistories) && (
         <OwnerTrailToggle visible={showOwnerTrail} onToggle={() => setShowOwnerTrail((v) => !v)} />

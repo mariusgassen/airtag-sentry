@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { MapContainer, TileLayer, Polyline } from 'react-leaflet'
+import { MapContainer, Polyline } from 'react-leaflet'
 import type { LocationStay, OwnerDevice, OwnerLocation, Place } from '../api'
 import { deviceLabel, formatClusterRange } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
@@ -8,11 +8,15 @@ import { mapsUrl } from '../maps'
 import {
   AddPlaceButton,
   AddressLine,
+  AppTileLayer,
   BatteryRow,
   FitBounds,
+  FullscreenControl,
+  HeatmapLayer,
   HistoryPoints,
   InfoRow,
   InvalidateSizeOnResize,
+  LocateControl,
   MapClickHandler,
   NoReportsView,
   PanToSelection,
@@ -71,10 +75,7 @@ export function DeviceMapCard({
 
   return (
     <MapContainer center={displayedPosition} zoom={15} className="h-full w-full">
-      <TileLayer
-        attribution="&copy; OpenStreetMap contributors"
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      <AppTileLayer />
       {positions.length > 1 && (
         <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
       )}
@@ -125,6 +126,9 @@ export function DeviceMapCard({
       <PanToSelection position={displayedPosition} />
       <InvalidateSizeOnResize />
       <MapClickHandler onMapClick={onMapClick} />
+      <FullscreenControl />
+      <LocateControl />
+      <HeatmapLayer points={stays} />
     </MapContainer>
   )
 }
