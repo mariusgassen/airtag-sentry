@@ -155,12 +155,19 @@ function FilterChip({
 }
 
 // null = "all available history" - GET /api/timeline's own default (see
-// App.tsx's timelineRangeDays), not just this UI's.
-const RANGE_OPTIONS: { label: string; days: number | null }[] = [
-  { label: 'Alle', days: null },
-  { label: '7 Tage', days: 7 },
-  { label: '30 Tage', days: 30 },
-  { label: '90 Tage', days: 90 },
+// App.tsx's timelineRangeDays); 'today' is client-side only (see below) -
+// the backend only understands a day-count lookback, which for "today"
+// would mean a rolling 24h window in the *server's* UTC clock rather than
+// the viewer's own local calendar day, silently clipping or including the
+// wrong hours depending on timezone and time of day.
+export type TimelineRange = number | null | 'today'
+
+const RANGE_OPTIONS: { label: string; value: TimelineRange }[] = [
+  { label: 'Alle', value: null },
+  { label: 'Heute', value: 'today' },
+  { label: '7 Tage', value: 7 },
+  { label: '30 Tage', value: 30 },
+  { label: '90 Tage', value: 90 },
 ]
 
 /** Aggregate, cross-object "Google Timeline" style feed - every AirTag's and
@@ -188,14 +195,18 @@ export function TimelinePage({
   filter: TimelineFilter
   onFilterChange: (filter: TimelineFilter) => void
   onSelectVisit: (visit: TimelineVisit) => void
-  // Already applied server-side (see App.tsx's refreshTimeline) - `visits`
-  // only ever contains this range's data, so no further filtering happens
-  // here; this just drives which chip reads as selected.
-  rangeDays: number | null
-  onRangeChange: (days: number | null) => void
+  // A numeric/null range is already applied server-side (see App.tsx's
+  // refreshTimeline) - `visits` contains that range's data already. 'today'
+  // is applied here instead (see TimelineRange's comment), on top of
+  // whatever range was fetched (always "all" when 'today' is selected - see
+  // App.tsx).
+  rangeDays: TimelineRange
+  onRangeChange: (range: TimelineRange) => void
 }) {
   const filtered = filter ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id) : visits
-  const groups = groupByDay(filtered)
+  const rangeFiltered =
+    rangeDays === 'today' ? filtered.filter((v) => formatDayHeading(v.start) === 'Heute') : filtered
+  const groups = groupByDay(rangeFiltered)
 
   return (
     <div className="flex h-full flex-col">
@@ -205,15 +216,11 @@ export function TimelinePage({
       {(airtags.length > 0 || devices.length > 0) && (
         <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
           <FilterChip label="Alle" selected={filter === null} onClick={() => onFilterChange(null)} />
-          {airtags.map((a) => (
-            <FilterChip
-              key={a.id}
-              label={a.name}
-              color={a.color ?? airtagColor(a.id)}
-              selected={filter?.type === 'airtag' && filter.id === a.id}
-              onClick={() => onFilterChange({ type: 'airtag', id: a.id })}
-            />
-          ))}
+          {/* Devices before AirTags, matching ObjectsList.tsx's own group
+              order (Geräte, then AirTags) - both already read the same
+              backend-ordered `devices`/`airtags` arrays (see CLAUDE.md's
+              AirTag/device parity section), so this only needed the section
+              order swapped to actually match. */}
           {devices.map((d) => (
             <FilterChip
               key={d.id}
@@ -223,6 +230,15 @@ export function TimelinePage({
               onClick={() => onFilterChange({ type: 'device', id: d.id })}
             />
           ))}
+          {airtags.map((a) => (
+            <FilterChip
+              key={a.id}
+              label={a.name}
+              color={a.color ?? airtagColor(a.id)}
+              selected={filter?.type === 'airtag' && filter.id === a.id}
+              onClick={() => onFilterChange({ type: 'airtag', id: a.id })}
+            />
+          ))}
         </div>
       )}
       <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
@@ -230,15 +246,15 @@ export function TimelinePage({
           <FilterChip
             key={opt.label}
             label={opt.label}
-            selected={rangeDays === opt.days}
-            onClick={() => onRangeChange(opt.days)}
+            selected={rangeDays === opt.value}
+            onClick={() => onRangeChange(opt.value)}
           />
         ))}
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         {groups.length === 0 ? (
           <div className="mx-1 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
-            {filter ? 'Keine Standortverläufe für diese Auswahl.' : 'Noch keine Standortverläufe vorhanden.'}
+            {filter || rangeDays ? 'Keine Standortverläufe für diese Auswahl.' : 'Noch keine Standortverläufe vorhanden.'}
           </div>
         ) : (
           groups.map((group) => (

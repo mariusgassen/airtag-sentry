@@ -45,7 +45,7 @@ import type { PlaceSeed } from './components/SettingsPlaces'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
 import { TimelinePage } from './components/TimelinePage'
-import type { TimelineFilter } from './components/TimelinePage'
+import type { TimelineFilter, TimelineRange } from './components/TimelinePage'
 import { usePushNotifications } from './hooks/usePushNotifications'
 
 // 'default' is the normal half-height sheet; 'expanded' is near-fullscreen
@@ -146,8 +146,11 @@ export default function App() {
   // this state's default: capping the feed to a fixed number of points per
   // object (the pre-this-change behavior) could silently cut off well under
   // a day of history for a frequently-polling device, reading as "no more
-  // history" when there just was more than the cap allowed.
-  const [timelineRangeDays, setTimelineRangeDays] = useState<number | null>(null)
+  // history" when there just was more than the cap allowed. 'today' is
+  // fetched as "all" too (see refreshTimeline) and filtered client-side
+  // instead, so it respects the viewer's own local calendar day rather than
+  // a server-side rolling 24h window in UTC.
+  const [timelineRangeDays, setTimelineRangeDays] = useState<TimelineRange>(null)
   // A location picked via a map popup's "Ort hier hinzufügen" (see
   // MapCard.tsx's AddPlaceButton) - consumed by SettingsPanel/SettingsPlaces
   // to jump straight into a new place's editor seeded at that spot, then
@@ -318,7 +321,10 @@ export default function App() {
   }, [refreshPlaces])
 
   const refreshTimeline = useCallback(async () => {
-    await getTimeline(timelineRangeDays)
+    // 'today' is filtered client-side (see TimelinePage.tsx) - fetch
+    // everything for it, same as the null/"Alle" case.
+    const days = timelineRangeDays === 'today' ? null : timelineRangeDays
+    await getTimeline(days)
       .then((t) => setTimeline(t.visits))
       .catch(() => {})
   }, [timelineRangeDays])
@@ -409,8 +415,23 @@ export default function App() {
   const deviceLocationsById: Record<string, OwnerLocation> = Object.fromEntries(
     ownerLocations.map((l) => [l.device_id, l]),
   )
+  // Zeitachse's own object filter (see handleTimelineFilterChange) drives
+  // this same title/stepper chrome too, alongside the Objects tab's `detail`
+  // drill-down - both end up pointing currentId/selectedDeviceId at the same
+  // object, so the title/older-newer stepper should reflect whichever one is
+  // currently "the thing on screen" instead of only ever the Objects tab's.
+  const timelineActiveAirtag = activeTab === 'timeline' && timelineFilter?.type === 'airtag' ? currentAirtag : null
+  const timelineActiveDevice = activeTab === 'timeline' && timelineFilter?.type === 'device' ? selectedDevice : null
   const detailName =
-    detail === 'airtag' ? currentAirtag?.name : detail === 'device' && selectedDevice ? deviceLabel(selectedDevice) : null
+    detail === 'airtag'
+      ? currentAirtag?.name
+      : detail === 'device' && selectedDevice
+        ? deviceLabel(selectedDevice)
+        : timelineActiveAirtag
+          ? timelineActiveAirtag.name
+          : timelineActiveDevice
+            ? deviceLabel(timelineActiveDevice)
+            : null
   const title = detailName ? `AirTagSentry — ${detailName}` : 'AirTagSentry'
   useEffect(() => {
     document.title = title
@@ -432,7 +453,7 @@ export default function App() {
   // HistoryStepper just renders whatever count it's given, see the comment
   // there.
   let stepPosition: { current: number; total: number } | null = null
-  if (detail === 'airtag' && currentAirtag) {
+  if ((detail === 'airtag' || timelineActiveAirtag) && currentAirtag) {
     const selectedIndex =
       selectedReportId != null ? reportStays.findIndex((s) => s.anchor_id === selectedReportId) : -1
     const displayedIndex = selectedIndex >= 0 ? selectedIndex : reportStays.length - 1
@@ -443,7 +464,7 @@ export default function App() {
     if (reportStays.length > 0) {
       stepPosition = { current: reportStays.length - displayedIndex, total: reportStays.length }
     }
-  } else if (detail === 'device' && selectedDevice) {
+  } else if ((detail === 'device' || timelineActiveDevice) && selectedDevice) {
     const stays = ownerLocationStays[selectedDevice.id] ?? []
     const selectedIndex =
       selectedDeviceLocationKey != null
