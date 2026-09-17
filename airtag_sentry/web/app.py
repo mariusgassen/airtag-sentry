@@ -273,6 +273,7 @@ class SettingsIn(BaseModel):
     movement_alert_on_backfill: bool
     movement_away_distance_meters: float = Field(gt=0)
     owner_location_max_age_minutes: float = Field(gt=0)
+    movement_max_speed_kmh: float = Field(gt=0)
     history_cluster_radius_meters: float = Field(gt=0)
     color_palette: str
     map_tile_provider: str

@@ -22,6 +22,7 @@ class MovementConfig:
     alert_on_backfill: bool
     away_distance_threshold_meters: float
     owner_location_max_age_minutes: float
+    max_speed_kmh: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -50,6 +51,34 @@ def _accuracy_adjusted_distance(distance: float, accuracy1: float | None, accura
     """
     slack = (accuracy1 or 0.0) + (accuracy2 or 0.0)
     return max(distance - slack, 0.0)
+
+
+def implied_speed_kmh(lat1: float, lon1: float, t1: dt.datetime, lat2: float, lon2: float, t2: dt.datetime) -> float:
+    """Average speed implied by traveling between two points/timestamps, in
+    km/h. `math.inf` for two points at (or effectively at) the same instant -
+    any nonzero distance there is an infinite implied speed, not a division
+    error to hide.
+    """
+    elapsed_hours = abs((t2 - t1).total_seconds()) / 3600
+    if elapsed_hours <= 0:
+        return math.inf
+    distance_km = haversine_distance(lat1, lon1, lat2, lon2) / 1000
+    return distance_km / elapsed_hours
+
+
+def is_speed_outlier(new_report: Report, prior_report: Report | None, cfg: MovementConfig) -> bool:
+    """Whether `new_report`'s implied travel speed from `prior_report` (the
+    last *kept*, i.e. already-not-an-outlier, report) is physically
+    implausible for an AirTag - a bad crowd-sourced Bluetooth relay, not real
+    movement. `prior_report` being None (first-ever report) is never an
+    outlier: there's nothing to compare against.
+    """
+    if prior_report is None:
+        return False
+    speed = implied_speed_kmh(
+        prior_report.lat, prior_report.lon, prior_report.timestamp, new_report.lat, new_report.lon, new_report.timestamp
+    )
+    return speed > cfg.max_speed_kmh
 
 
 def _stillstand_anchor(prior_reports: list[Report], cfg: MovementConfig) -> Report:

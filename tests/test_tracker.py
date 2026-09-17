@@ -107,6 +107,7 @@ def _settings(**overrides) -> AppSettings:
         movement_alert_on_backfill=False,
         movement_away_distance_meters=150,
         owner_location_max_age_minutes=60,
+        movement_max_speed_kmh=200,
         history_cluster_radius_meters=50,
         color_palette="pastel",
         map_tile_provider="auto",

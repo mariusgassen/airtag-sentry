@@ -122,6 +122,7 @@ function validate(settings: AppSettings): Partial<Record<FieldKey, string>> {
     'movement_distance_threshold_meters',
     'movement_stillstand_hours',
     'movement_stillstand_movement_meters',
+    'movement_max_speed_kmh',
     'movement_away_distance_meters',
     'owner_location_max_age_minutes',
     'history_cluster_radius_meters',

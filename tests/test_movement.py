@@ -6,6 +6,8 @@ from airtag_sentry.movement import (
     evaluate_away,
     evaluate_movement,
     haversine_distance,
+    implied_speed_kmh,
+    is_speed_outlier,
     owner_already_reunited,
 )
 
@@ -16,6 +18,7 @@ CFG = MovementConfig(
     alert_on_backfill=False,
     away_distance_threshold_meters=150,
     owner_location_max_age_minutes=60,
+    max_speed_kmh=200,
 )
 
 NOW = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
@@ -186,3 +189,34 @@ def test_owner_already_reunited_false_when_current_owner_location_still_far():
     new = _report(0, 52.5, 13.4)
     current = _owner_location(0, 52.51, 13.4)  # still ~1.1km away, now
     assert owner_already_reunited(new, current, CFG) is False
+
+
+def test_implied_speed_kmh_known_case():
+    # ~24-28km apart (Berlin-Potsdam, see test_haversine_known_distance), 1h apart.
+    t1 = NOW
+    t2 = NOW + dt.timedelta(hours=1)
+    speed = implied_speed_kmh(52.5163, 13.3777, t1, 52.4029, 13.0402, t2)
+    assert 24 < speed < 28
+
+
+def test_implied_speed_kmh_infinite_for_same_instant():
+    assert implied_speed_kmh(52.5, 13.4, NOW, 52.6, 13.5, NOW) == float("inf")
+
+
+def test_is_speed_outlier_false_without_a_baseline_report():
+    new = _report(0, 52.5, 13.4)
+    assert is_speed_outlier(new, None, CFG) is False
+
+
+def test_is_speed_outlier_false_for_plausible_travel():
+    # ~1.1km in 5 minutes is fast but not impossible (car in traffic).
+    prior = _report(5 / 60, 52.5, 13.4)
+    new = _report(0, 52.51, 13.4)
+    assert is_speed_outlier(new, prior, CFG) is False
+
+
+def test_is_speed_outlier_true_for_implausible_jump():
+    # ~24-28km in under a minute - no AirTag moves at that speed.
+    prior = _report(1 / 60, 52.5163, 13.3777)
+    new = _report(0, 52.4029, 13.0402)
+    assert is_speed_outlier(new, prior, CFG) is True

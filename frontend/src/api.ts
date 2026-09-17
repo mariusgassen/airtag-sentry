@@ -51,6 +51,7 @@ export interface AppSettings {
   movement_alert_on_backfill: boolean
   movement_away_distance_meters: number
   owner_location_max_age_minutes: number
+  movement_max_speed_kmh: number
   history_cluster_radius_meters: number
   color_palette: 'vivid' | 'pastel' | 'pastel_white'
   map_tile_provider: 'auto' | 'osm'

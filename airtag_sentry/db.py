@@ -40,6 +40,13 @@ class Report:
     # tracker._battery_level): "full" | "medium" | "low" | "very_low", or None
     # for older rows recorded before this column existed.
     battery_level: str | None = None
+    # Set by tracker._poll_airtag (see movement.is_speed_outlier) when this
+    # report's implied travel speed from the prior *kept* report is
+    # physically implausible - a bad crowd-sourced Bluetooth relay, not real
+    # movement. Still stored for completeness, but fetch_reports/
+    # fetch_reports_before both exclude it: it never appears on the map
+    # trail/stays and is never evaluated for a movement alert.
+    is_outlier: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -207,6 +214,11 @@ class AppSettings:
     movement_alert_on_backfill: bool
     movement_away_distance_meters: float
     owner_location_max_age_minutes: float
+    # Implied speed (km/h) from the prior kept report above which a new
+    # AirTag report is treated as a crowd-sourced relay outlier rather than
+    # real movement - see movement.is_speed_outlier. Generous enough for
+    # car/train travel, well below what a bad relay implies.
+    movement_max_speed_kmh: float
     history_cluster_radius_meters: float
     color_palette: str
     # 'auto' (default): CARTO Voyager/Dark Matter tiles when an API key is
@@ -308,10 +320,11 @@ def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Repo
         for report in sorted(reports, key=lambda r: r.timestamp):
             cur.execute(
                 """
-                INSERT INTO location_reports (airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO location_reports
+                    (airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level, is_outlier)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (airtag_id, "timestamp") DO NOTHING
-                RETURNING id, airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level
+                RETURNING id, airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level, is_outlier
                 """,
                 (
                     report.airtag_id,
@@ -321,6 +334,7 @@ def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Repo
                     report.accuracy,
                     report.confidence,
                     report.battery_level,
+                    report.is_outlier,
                 ),
             )
             row = cur.fetchone()
@@ -337,17 +351,23 @@ def count_reports(conn: psycopg.Connection, airtag_id: str) -> int:
         return count
 
 
+_REPORT_COLUMNS = 'id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level, is_outlier'
+
+
 def fetch_reports(conn: psycopg.Connection, airtag_id: str, limit: int | None = None) -> list[Report]:
+    """Never returns is_outlier reports - see Report.is_outlier. Callers that
+    need the raw, unfiltered history (currently none) would need a separate
+    query."""
     query = (
-        'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM location_reports '
-        'WHERE airtag_id = %s ORDER BY "timestamp" ASC'
+        f"SELECT {_REPORT_COLUMNS} FROM location_reports "
+        'WHERE airtag_id = %s AND NOT is_outlier ORDER BY "timestamp" ASC'
     )
     params: tuple = (airtag_id,)
     if limit is not None:
         query = (
-            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM ('
-            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM location_reports '
-            'WHERE airtag_id = %s ORDER BY "timestamp" DESC LIMIT %s'
+            f"SELECT {_REPORT_COLUMNS} FROM ("
+            f"SELECT {_REPORT_COLUMNS} FROM location_reports "
+            'WHERE airtag_id = %s AND NOT is_outlier ORDER BY "timestamp" DESC LIMIT %s'
             ") sub ORDER BY \"timestamp\" ASC"
         )
         params = (airtag_id, limit)
@@ -359,10 +379,13 @@ def fetch_reports(conn: psycopg.Connection, airtag_id: str, limit: int | None = 
 def fetch_reports_before(
     conn: psycopg.Connection, airtag_id: str, timestamp: dt.datetime
 ) -> list[Report]:
+    """Never returns is_outlier reports, so movement detection always
+    compares against the last physically-plausible position - see
+    Report.is_outlier."""
     with conn.cursor() as cur:
         cur.execute(
-            'SELECT id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level FROM location_reports '
-            'WHERE airtag_id = %s AND "timestamp" < %s ORDER BY "timestamp" ASC',
+            f"SELECT {_REPORT_COLUMNS} FROM location_reports "
+            'WHERE airtag_id = %s AND "timestamp" < %s AND NOT is_outlier ORDER BY "timestamp" ASC',
             (airtag_id, timestamp),
         )
         return [Report(*row) for row in cur.fetchall()]
@@ -676,6 +699,7 @@ _SETTINGS_COLUMNS = (
     "movement_alert_on_backfill",
     "movement_away_distance_meters",
     "owner_location_max_age_minutes",
+    "movement_max_speed_kmh",
     "history_cluster_radius_meters",
     "color_palette",
     "map_tile_provider",
@@ -704,6 +728,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 movement_alert_on_backfill = %s,
                 movement_away_distance_meters = %s,
                 owner_location_max_age_minutes = %s,
+                movement_max_speed_kmh = %s,
                 history_cluster_radius_meters = %s,
                 color_palette = %s,
                 map_tile_provider = %s,
@@ -721,6 +746,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.movement_alert_on_backfill,
                 settings.movement_away_distance_meters,
                 settings.owner_location_max_age_minutes,
+                settings.movement_max_speed_kmh,
                 settings.history_cluster_radius_meters,
                 settings.color_palette,
                 settings.map_tile_provider,
