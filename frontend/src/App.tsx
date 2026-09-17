@@ -17,7 +17,6 @@ import { setColorPalette } from './airtagColor'
 import { setCartoApiKey, setMapTileProvider } from './mapTiles'
 import {
   createAirtag,
-  deleteAirtag,
   getAirtags,
   getCartoStatus,
   getOwnerAppleStatus,
@@ -33,7 +32,6 @@ import {
   pollNow,
   reorderAirtags,
   reorderOwnerDevices,
-  setOwnerDeviceEnabled,
 } from './api'
 import { deviceLabel } from './format'
 import { ObjectsList } from './components/ObjectsList'
@@ -543,23 +541,6 @@ export default function App() {
     }
   }
 
-  // ObjectsList's edit-mode delete button for AirTags - a hard delete
-  // (history, key, everything), same as AirtagDetail's own "Entfernen" row.
-  async function handleDeleteAirtag(id: string) {
-    await deleteAirtag(id)
-    await refreshAirtags()
-  }
-
-  // ObjectsList's edit-mode delete button for a device - a device is
-  // Apple-discovered and gets re-synced on the next poll, so this just stops
-  // tracking it (same as OwnerDevicesPanel's Settings toggle), not a row
-  // deletion. Mirrors handleDeleteAirtag above (CLAUDE.md's AirTag/owner-
-  // device parity rule).
-  async function handleRemoveDevice(id: string) {
-    await setOwnerDeviceEnabled(id, false)
-    await refreshOwnerDevices()
-  }
-
   // "Ort hier hinzufügen" from any map popup (MapCard/DeviceMapCard/
   // OverviewMap) - switches to Settings, where the placeSeed effect below
   // opens Orte straight into a new place's editor at this exact position.
@@ -987,14 +968,12 @@ export default function App() {
                 onSelectAirtag={handleSelect}
                 onCreate={handleCreate}
                 onReorderAirtags={handleReorderAirtags}
-                onDeleteAirtag={handleDeleteAirtag}
                 ownerConnected={ownerConnected}
                 devices={ownerDevices}
                 deviceLocations={deviceLocationsById}
                 selectedDeviceId={selectedDeviceId}
                 onSelectDevice={handleSelectDevice}
                 onReorderDevices={handleReorderDevices}
-                onRemoveDevice={handleRemoveDevice}
                 onRefresh={handleManualRefresh}
                 refreshing={manualRefreshing}
               />

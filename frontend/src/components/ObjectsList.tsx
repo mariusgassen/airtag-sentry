@@ -15,7 +15,7 @@ import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
 import { capitalize, deviceLabel, formatAirtagBattery, formatDeviceBattery, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
-import { CheckIcon, ChevronRightIcon, DragHandleIcon, PencilIcon, PlusIcon, RefreshIcon, StarIcon, TrashIcon } from './icons'
+import { CheckIcon, ChevronRightIcon, DragHandleIcon, PencilIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -27,10 +27,6 @@ interface Props {
   // handleReorderAirtags / PUT /api/airtags/order). Mirrors
   // onReorderDevices below - see CLAUDE.md's AirTag/owner-device parity rule.
   onReorderAirtags: (airtagIds: string[]) => void
-  // Edit mode's delete button - a hard delete (history, key, everything),
-  // same as AirtagDetail's own "Entfernen" row. Mirrors onRemoveDevice below,
-  // but a device can't be hard-deleted the same way (see there).
-  onDeleteAirtag: (id: string) => void
   // Only rendered when the owner-tracking Apple account (see
   // owner_tracking.py / Settings -> Apple-Konten) is connected.
   ownerConnected: boolean
@@ -48,11 +44,6 @@ interface Props {
   // Persists a full drag-and-drop reorder of `devices` (see App.tsx's
   // handleReorderDevices / PUT /api/owner-devices/order).
   onReorderDevices: (deviceIds: string[]) => void
-  // Edit mode's delete button for a device - a device is Apple-discovered
-  // and gets re-synced on the next poll, so "delete" here means the same
-  // thing OwnerDevicesPanel's Settings toggle does: stop tracking it
-  // (setOwnerDeviceEnabled(id, false)), not a row deletion.
-  onRemoveDevice: (id: string) => void
   // Manual "refresh now" (POST /api/poll-now) - triggers an immediate poll
   // instead of waiting for the scheduled interval, see App.tsx.
   onRefresh: () => void
@@ -67,7 +58,6 @@ function DeviceRow({
   showHandle,
   isFirst,
   onSelect,
-  onRemove,
 }: {
   device: OwnerDevice
   location: OwnerLocation | undefined
@@ -76,12 +66,7 @@ function DeviceRow({
   showHandle: boolean
   isFirst: boolean
   onSelect: (id: string) => void
-  onRemove: (id: string) => void
 }) {
-  function handleRemove() {
-    if (!confirm(`"${deviceLabel(device)}" nicht mehr verfolgen?`)) return
-    onRemove(device.id)
-  }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: device.id,
     disabled: !editing,
@@ -122,15 +107,6 @@ function DeviceRow({
     >
       {editing ? (
         <div className="flex items-center gap-3 px-3 py-2.5">
-          <button
-            type="button"
-            onClick={handleRemove}
-            aria-label="Nicht mehr verfolgen"
-            title="Nicht mehr verfolgen"
-            className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--destructive)]"
-          >
-            <TrashIcon className="h-4.5 w-4.5" />
-          </button>
           {content}
           {showHandle && (
             <button
@@ -169,7 +145,6 @@ function AirtagRow({
   showHandle,
   isFirst,
   onSelect,
-  onDelete,
 }: {
   airtag: Airtag
   subtitle: string
@@ -178,17 +153,11 @@ function AirtagRow({
   showHandle: boolean
   isFirst: boolean
   onSelect: (id: string) => void
-  onDelete: (id: string) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: airtag.id,
     disabled: !editing,
   })
-  function handleDelete() {
-    if (!confirm(`"${airtag.name}" wirklich entfernen? Der gesamte Standortverlauf und der Schlüssel werden ebenfalls gelöscht.`))
-      return
-    onDelete(airtag.id)
-  }
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition }
   const content = (
     <>
@@ -209,15 +178,6 @@ function AirtagRow({
     >
       {editing ? (
         <div className="flex items-center gap-3 px-3 py-2.5">
-          <button
-            type="button"
-            onClick={handleDelete}
-            aria-label="AirTag entfernen"
-            title="AirTag entfernen"
-            className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--destructive)]"
-          >
-            <TrashIcon className="h-4.5 w-4.5" />
-          </button>
           {content}
           {showHandle && (
             <button
@@ -257,10 +217,10 @@ function AirtagRow({
  *
  * The pencil/check icon button toggles an edit mode (both groups at once,
  * icon-only since it's reached rarely) where rows swap their nav chevron for
- * a leading delete button and a trailing drag handle - dragging persists the
- * new order via onReorderAirtags/onReorderDevices, which just resend the
- * whole reordered id list to the same PUT endpoints the old up/down buttons
- * used. */
+ * a drag handle - dragging persists the new order via
+ * onReorderAirtags/onReorderDevices, which just resend the whole reordered
+ * id list to the same PUT endpoints the old up/down buttons used. Deleting
+ * an AirTag or removing a device stays in their detail views, not here. */
 export function ObjectsList({
   airtags,
   statuses,
@@ -268,14 +228,12 @@ export function ObjectsList({
   onSelectAirtag,
   onCreate,
   onReorderAirtags,
-  onDeleteAirtag,
   ownerConnected,
   devices,
   deviceLocations,
   selectedDeviceId,
   onSelectDevice,
   onReorderDevices,
-  onRemoveDevice,
   onRefresh,
   refreshing,
 }: Props) {
@@ -318,17 +276,16 @@ export function ObjectsList({
     onReorderAirtags(arrayMove(airtags, oldIndex, newIndex).map((a) => a.id))
   }
 
-  // Edit mode is worth offering once there's anything to reorder or delete -
-  // and, once already editing, stays offered so "Fertig" is always reachable
-  // even if that drops to zero (e.g. deleting the last AirTag).
-  const canEdit = airtags.length > 0 || (ownerConnected && devices.length > 0)
+  // Keeps the toggle reachable even if the list that made reordering worth
+  // offering shrinks to one item while already editing.
+  const canReorder = airtags.length > 1 || (ownerConnected && devices.length > 1)
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Objekte</h1>
         <div className="flex items-center gap-1">
-          {(canEdit || editing) && (
+          {(canReorder || editing) && (
             <button
               type="button"
               onClick={() => setEditing((v) => !v)}
@@ -408,7 +365,6 @@ export function ObjectsList({
                         showHandle={devices.length > 1}
                         isFirst={i === 0}
                         onSelect={onSelectDevice}
-                        onRemove={onRemoveDevice}
                       />
                     ))}
                   </SortableContext>
@@ -449,7 +405,6 @@ export function ObjectsList({
                       showHandle={airtags.length > 1}
                       isFirst={i === 0}
                       onSelect={onSelectAirtag}
-                      onDelete={onDeleteAirtag}
                     />
                   )
                 })}
