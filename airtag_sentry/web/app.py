@@ -362,15 +362,20 @@ def _slugify(name: str) -> str:
     return slug or "airtag"
 
 
-def _stay_label(conn, place, lat: float, lon: float) -> str | None:
+def _stay_place_details(conn, place, lat: float, lon: float) -> dict[str, str | None]:
     correction = get_place_label_correction(conn, lat, lon)
     geocoded = get_geocoded_point(conn, lat, lon)
-    return resolve_label(
-        place,
-        correction,
-        geocoded.poi_name if geocoded else None,
-        geocoded.address if geocoded else None,
-    )
+    poi_name = geocoded.poi_name if geocoded else None
+    address = geocoded.address if geocoded else None
+    return {
+        "label": resolve_label(place, correction, poi_name, address),
+        "address": address,
+        "poi_name": poi_name,
+    }
+
+
+def _stay_label(conn, place, lat: float, lon: float) -> str | None:
+    return _stay_place_details(conn, place, lat, lon)["label"]
 
 
 def _hash_ha_token(token: str) -> str:
@@ -1038,6 +1043,83 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             ],
             "stays": stays,
         }
+
+    @app.get("/api/timeline")
+    def get_timeline(limit_per_object: int = 500):
+        """Unified, newest-first feed of every AirTag's and every enabled
+        owner device's stays (see stays.py) - the "Google Timeline" style
+        view of everywhere the owner (and their tagged things) has been,
+        with each stop's public place info (address/POI name) alongside its
+        resolved label. Mirrors /api/reports and /api/owner-devices/history's
+        per-object clustering rather than re-deriving it, just merged across
+        every tracked object instead of scoped to one airtag_id/device_id."""
+        with get_conn(cfg.database_url) as conn:
+            radius = get_settings(conn).history_cluster_radius_meters
+            places = list_named_places(conn)
+            visits: list[dict[str, Any]] = []
+
+            for airtag in list_airtags(conn):
+                reports = fetch_reports(conn, airtag.id, limit=limit_per_object)
+                for c in cluster_by_proximity(reports, lambda r: (r.lat, r.lon), radius):
+                    place = match_place(c.anchor.lat, c.anchor.lon, places)
+                    details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
+                    visits.append(
+                        {
+                            "object_type": "airtag",
+                            "object_id": airtag.id,
+                            "object_name": airtag.name,
+                            "object_icon": airtag.icon,
+                            "object_color": airtag.color,
+                            "object_device_type": None,
+                            # Lets a click on this visit deep-link into
+                            # AirtagDetail/MapCard's existing selectedReportId
+                            # navigation, same anchor GET /api/reports returns.
+                            "anchor_id": c.anchor.id,
+                            "anchor_recorded_at": None,
+                            "start": c.points[0].timestamp.isoformat(),
+                            "end": c.points[-1].timestamp.isoformat(),
+                            "count": len(c.points),
+                            "lat": c.anchor.lat,
+                            "lon": c.anchor.lon,
+                            "place_id": place.id if place else None,
+                            **details,
+                        }
+                    )
+
+            for device in db_list_owner_devices(conn):
+                if not device.enabled:
+                    continue
+                locations = fetch_owner_device_location_history(conn, device.id, limit=limit_per_object)
+                for c in cluster_by_proximity(locations, lambda l: (l.lat, l.lon), radius):
+                    place = match_place(c.anchor.lat, c.anchor.lon, places)
+                    details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
+                    # locations are newest-first (see CLAUDE.md's asymmetry),
+                    # so the earliest point in the stay is the last one.
+                    visits.append(
+                        {
+                            "object_type": "device",
+                            "object_id": device.id,
+                            "object_name": device.display_name or device.name,
+                            "object_icon": device.icon,
+                            "object_color": device.color,
+                            "object_device_type": device.device_type,
+                            # Same deep-link idea as the AirTag branch, but
+                            # keyed by recorded_at - see DeviceDetail/
+                            # DeviceMapCard's selectedLocationKey.
+                            "anchor_id": None,
+                            "anchor_recorded_at": c.anchor.recorded_at.isoformat(),
+                            "start": c.points[-1].recorded_at.isoformat(),
+                            "end": c.points[0].recorded_at.isoformat(),
+                            "count": len(c.points),
+                            "lat": c.anchor.lat,
+                            "lon": c.anchor.lon,
+                            "place_id": place.id if place else None,
+                            **details,
+                        }
+                    )
+
+        visits.sort(key=lambda v: v["start"], reverse=True)
+        return {"visits": visits}
 
     @app.get("/api/apple/status")
     def apple_status():
