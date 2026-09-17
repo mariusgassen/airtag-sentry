@@ -169,6 +169,11 @@ interface Props {
   onPlaceSeedConsumed?: () => void
   // Forwarded to SettingsPlaces - see its own onRequestExpand comment.
   onRequestExpand?: () => void
+  // Bumped by App.tsx's handleTabChange when the Einstellungen tab button is
+  // clicked while already active - pops this panel's own page stack back to
+  // 'root', mirroring the "tap the active tab to go back" behavior the
+  // Objects/Zeitachse tabs get for free from their own App.tsx-level state.
+  resetSignal?: number
 }
 
 export function SettingsPanel({
@@ -183,6 +188,7 @@ export function SettingsPanel({
   placeSeed = null,
   onPlaceSeedConsumed,
   onRequestExpand,
+  resetSignal,
 }: Props) {
   const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -193,6 +199,10 @@ export function SettingsPanel({
   useEffect(() => {
     getSettings().then(setSettings)
   }, [])
+
+  useEffect(() => {
+    if (resetSignal !== undefined) setPage('root')
+  }, [resetSignal])
 
   // A seed arriving means the user just tapped "Ort hier hinzufügen" on the
   // map (Settings isn't even necessarily open yet) - jump straight past the
