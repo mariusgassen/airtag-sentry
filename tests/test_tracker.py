@@ -11,6 +11,7 @@ from airtag_sentry.db import (
     AppSettings,
     GeocodedPoint,
     OwnerLocation,
+    create_named_place,
     get_conn,
     get_geocoded_point,
     list_owner_devices,
@@ -40,8 +41,8 @@ def conn():
             upgrade_to_head()
             with connection.cursor() as cur:
                 cur.execute(
-                    "TRUNCATE geocoded_points, owner_devices, owner_device_locations, alerts "
-                    "RESTART IDENTITY CASCADE"
+                    "TRUNCATE geocoded_points, owner_devices, owner_device_locations, alerts, "
+                    "named_places RESTART IDENTITY CASCADE"
                 )
             connection.commit()
             yield connection
@@ -123,7 +124,8 @@ def _settings(**overrides) -> AppSettings:
         map_tile_provider="auto",
         notify_on_distance_threshold=True,
         notify_on_stillstand_movement=True,
-        notify_on_moved_without_owner=True,
+        notify_on_left_behind=True,
+        notify_on_autonomous_movement=True,
     )
     defaults.update(overrides)
     return AppSettings(**defaults)
@@ -134,7 +136,8 @@ def _settings(**overrides) -> AppSettings:
     [
         ("distance_threshold", "notify_on_distance_threshold"),
         ("stillstand_movement", "notify_on_stillstand_movement"),
-        ("moved_without_owner", "notify_on_moved_without_owner"),
+        ("left_behind", "notify_on_left_behind"),
+        ("autonomous_movement", "notify_on_autonomous_movement"),
     ],
 )
 def test_should_notify_reads_the_matching_settings_field(reason, field):
@@ -365,8 +368,8 @@ def test_evaluate_device_away_alerts_skips_first_ever_reading_by_default(monkeyp
 
 
 def test_evaluate_device_away_alerts_still_records_when_notify_setting_off(monkeypatch, conn):
-    """notify_on_moved_without_owner only gates the push, same as _poll_airtag -
-    the alert itself is still recorded either way."""
+    """The per-reason notify_on_* setting only gates the push, same as
+    _poll_airtag - the alert itself is still recorded either way."""
     from airtag_sentry import tracker as tracker_module
 
     _setup_primary_and_device(conn)
@@ -378,20 +381,23 @@ def test_evaluate_device_away_alerts_still_records_when_notify_setting_off(monke
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
     _record(conn, "primary", t0, 52.5, 13.4)
     _record(conn, "laptop", t0, 52.5, 13.4)
-    _record(conn, "primary", t1, 52.5, 13.4)
-    _record(conn, "laptop", t1, 52.51, 13.4)
+    _record(conn, "primary", t1, 52.5, 13.4)  # primary stays
+    _record(conn, "laptop", t1, 52.51, 13.4)  # laptop itself moved - autonomous_movement
 
     tracker_module._evaluate_device_away_alerts(
-        object(), conn, [], _settings(notify_on_moved_without_owner=False)
+        object(), conn, [], _settings(notify_on_autonomous_movement=False)
     )
 
     assert notified == []
     with conn.cursor() as cur:
         cur.execute("SELECT reason, owner_device_id FROM alerts")
-        assert cur.fetchall() == [("moved_without_owner", "laptop")]
+        assert cur.fetchall() == [("autonomous_movement", "laptop")]
 
 
 def test_evaluate_device_away_alerts_fires_on_new_away_transition(monkeypatch, conn):
+    """The device itself moved (its own position changed) while the primary
+    stayed put - classified as autonomous_movement, not left_behind (see
+    CLAUDE.md's "you left it" vs "it left you" constraint)."""
     from airtag_sentry import tracker as tracker_module
 
     _setup_primary_and_device(conn)
@@ -405,18 +411,103 @@ def test_evaluate_device_away_alerts_fires_on_new_away_transition(monkeypatch, c
     _record(conn, "primary", t0, 52.5, 13.4)
     _record(conn, "laptop", t0, 52.5, 13.4)  # together
     _record(conn, "primary", t1, 52.5, 13.4)  # primary stays
-    _record(conn, "laptop", t1, 52.51, 13.4)  # laptop now ~1.1km away
+    _record(conn, "laptop", t1, 52.51, 13.4)  # laptop now ~1.1km away, and its own position changed
 
     tracker_module._evaluate_device_away_alerts(_fake_cfg(), conn, [], _settings())
 
     assert len(notified) == 1
     title, message = notified[0]
-    assert title == "Bewegung ohne dich"
+    assert title == "Eigenständige Bewegung"
+    assert "MacBook" in message
+    assert "eigenständig" in message
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT reason, owner_device_id FROM alerts")
+        assert cur.fetchall() == [("autonomous_movement", "laptop")]
+
+
+def test_evaluate_device_away_alerts_classifies_left_behind_when_device_is_stationary(monkeypatch, conn):
+    """The device's own position never changed - it's the primary who moved
+    away from it - classified as left_behind, not autonomous_movement."""
+    from airtag_sentry import tracker as tracker_module
+
+    _setup_primary_and_device(conn)
+    monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
+    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    notified = []
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+
+    t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
+    t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    _record(conn, "primary", t0, 52.5, 13.4)
+    _record(conn, "laptop", t0, 52.5, 13.4)  # together
+    _record(conn, "laptop", t1, 52.5, 13.4)  # laptop itself never moves
+    _record(conn, "primary", t1, 52.51, 13.4)  # primary moved away from it
+
+    tracker_module._evaluate_device_away_alerts(_fake_cfg(), conn, [], _settings())
+
+    assert len(notified) == 1
+    title, message = notified[0]
+    assert title == "Zurückgelassen"
     assert "MacBook" in message
 
     with conn.cursor() as cur:
         cur.execute("SELECT reason, owner_device_id FROM alerts")
-        assert cur.fetchall() == [("moved_without_owner", "laptop")]
+        assert cur.fetchall() == [("left_behind", "laptop")]
+
+
+def test_evaluate_device_away_alerts_suppresses_left_behind_at_a_named_place(monkeypatch, conn):
+    """Leaving a device behind at a known place (home, office, ...) is
+    routine - the alert is still recorded, but no push."""
+    from airtag_sentry import tracker as tracker_module
+
+    _setup_primary_and_device(conn)
+    create_named_place(conn, "Zuhause", 52.5, 13.4, 50.0)
+    monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
+    notified = []
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+
+    t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
+    t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    _record(conn, "primary", t0, 52.5, 13.4)
+    _record(conn, "laptop", t0, 52.5, 13.4)
+    _record(conn, "laptop", t1, 52.5, 13.4)  # laptop stays at "Zuhause"
+    _record(conn, "primary", t1, 52.51, 13.4)  # primary left without it
+
+    tracker_module._evaluate_device_away_alerts(object(), conn, [], _settings())
+
+    assert notified == []  # at a named place - routine, no push
+    with conn.cursor() as cur:
+        cur.execute("SELECT reason, owner_device_id FROM alerts")
+        assert cur.fetchall() == [("left_behind", "laptop")]  # still recorded
+
+
+def test_evaluate_device_away_alerts_does_not_suppress_autonomous_movement_at_a_named_place(monkeypatch, conn):
+    """The named-place exception only applies to left_behind - autonomous
+    movement is worth knowing about regardless of where it started (see
+    CLAUDE.md's "you left it" vs "it left you" constraint)."""
+    from airtag_sentry import tracker as tracker_module
+
+    _setup_primary_and_device(conn)
+    create_named_place(conn, "Zuhause", 52.5, 13.4, 50.0)
+    monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
+    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    notified = []
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+
+    t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
+    t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    _record(conn, "primary", t0, 52.5, 13.4)
+    _record(conn, "laptop", t0, 52.5, 13.4)  # together, at "Zuhause"
+    _record(conn, "primary", t1, 52.5, 13.4)  # primary stays home
+    _record(conn, "laptop", t1, 52.51, 13.4)  # laptop itself moved away from "Zuhause"
+
+    tracker_module._evaluate_device_away_alerts(_fake_cfg(), conn, [], _settings())
+
+    assert len(notified) == 1
+    with conn.cursor() as cur:
+        cur.execute("SELECT reason, owner_device_id FROM alerts")
+        assert cur.fetchall() == [("autonomous_movement", "laptop")]
 
 
 def test_evaluate_device_away_alerts_does_not_repeat_while_still_away(monkeypatch, conn):
@@ -479,4 +570,4 @@ def test_evaluate_device_away_alerts_suppresses_notification_when_already_reunit
     assert notified == []  # already reunited - push suppressed
     with conn.cursor() as cur:
         cur.execute("SELECT reason, owner_device_id FROM alerts")
-        assert cur.fetchall() == [("moved_without_owner", "laptop")]  # but still recorded
+        assert cur.fetchall() == [("left_behind", "laptop")]  # but still recorded

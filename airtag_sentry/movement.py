@@ -53,6 +53,34 @@ def _accuracy_adjusted_distance(distance: float, accuracy1: float | None, accura
     return max(distance - slack, 0.0)
 
 
+def is_object_displaced(
+    lat1: float,
+    lon1: float,
+    accuracy1: float | None,
+    lat2: float,
+    lon2: float,
+    accuracy2: float | None,
+    cfg: MovementConfig,
+) -> bool:
+    """Whether two readings of the *same tracked object's own position*
+    (not object-vs-owner) differ enough to count as real movement rather
+    than GPS/BLE noise - the same accuracy-adjusted distance_threshold_meters
+    check evaluate_movement uses for an AirTag's own reports, generalized to
+    plain lat/lon/accuracy so it also works for an owner device's own two
+    readings (see tracker._evaluate_device_away_alerts).
+
+    This is the classification signal behind CLAUDE.md's "you left it" vs
+    "it left you" constraint: called only once an object is already known to
+    be far from the primary owner device, to decide whether the object
+    itself moved there on its own (alert as autonomous movement - the actual
+    signal this app exists to catch) or stayed put while the owner moved
+    away from it (alert as left-behind - routine, not urgent).
+    """
+    raw_distance = haversine_distance(lat1, lon1, lat2, lon2)
+    distance = _accuracy_adjusted_distance(raw_distance, accuracy1, accuracy2)
+    return distance > cfg.distance_threshold_meters
+
+
 def implied_speed_kmh(lat1: float, lon1: float, t1: dt.datetime, lat2: float, lon2: float, t2: dt.datetime) -> float:
     """Average speed implied by traveling between two points/timestamps, in
     km/h. `math.inf` for two points at (or effectively at) the same instant -

@@ -9,6 +9,7 @@ from airtag_sentry.movement import (
     evaluate_movement,
     haversine_distance,
     implied_speed_kmh,
+    is_object_displaced,
     is_speed_outlier,
     owner_already_reunited,
 )
@@ -264,3 +265,18 @@ def test_device_already_reunited_false_when_current_primary_location_still_far()
     device = _owner_location(0, 52.5, 13.4, device_id="laptop")
     current_primary = _owner_location(0, 52.51, 13.4, device_id="primary")
     assert device_already_reunited(device, current_primary, CFG) is False
+
+
+def test_is_object_displaced_false_for_gps_noise():
+    # A few meters apart - within GPS noise, well under the 100m threshold.
+    assert is_object_displaced(52.5, 13.4, 5.0, 52.50005, 13.40005, 5.0, CFG) is False
+
+
+def test_is_object_displaced_true_for_real_movement():
+    # ~1.1km apart - well over the 100m threshold.
+    assert is_object_displaced(52.5, 13.4, 5.0, 52.51, 13.4, 5.0, CFG) is True
+
+
+def test_is_object_displaced_discounts_combined_accuracy_radius():
+    # ~100m raw distance, entirely absorbed by the two points' noise margins.
+    assert is_object_displaced(52.5, 13.4, 100.0, 52.5009, 13.4, 100.0, CFG) is False

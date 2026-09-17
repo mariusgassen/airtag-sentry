@@ -21,12 +21,13 @@ class AirtagRecord:
     name: str
     icon: str | None = None
     color: str | None = None
-    # Whether this AirTag raises a "moved without you" alert when it ends up
-    # far from the primary owner device - defaults true, preserving the
-    # behavior from before this was per-object (still gated by the account-
-    # wide notify_on_moved_without_owner switch too). Mirrors OwnerDevice's
-    # own away_alert_enabled, which defaults false instead - see its
-    # docstring for why the defaults differ.
+    # Whether this AirTag is evaluated at all when it ends up far from the
+    # primary owner device (as "left_behind" or "autonomous_movement" - see
+    # CLAUDE.md) - defaults true, preserving the behavior from before this
+    # was per-object (still gated by the account-wide notify_on_left_behind/
+    # notify_on_autonomous_movement switches too). Mirrors OwnerDevice's own
+    # away_alert_enabled, which defaults false instead - see its docstring
+    # for why the defaults differ.
     away_alert_enabled: bool = True
     # User-controlled display order in ObjectsList.tsx (see set_airtags_order)
     # - lower sorts first. Mirrors OwnerDevice.sort_order; compare=False for
@@ -257,7 +258,13 @@ class AppSettings:
     # way; this only gates notify_all().
     notify_on_distance_threshold: bool
     notify_on_stillstand_movement: bool
-    notify_on_moved_without_owner: bool
+    # Split from a single notify_on_moved_without_owner (see CLAUDE.md's
+    # "you left it" vs "it left you" constraint) - left_behind is routine
+    # (you moved away from a stationary object), autonomous_movement is the
+    # actual signal this app exists to catch (the object moved on its own).
+    # Independently toggleable so one can be silenced without the other.
+    notify_on_left_behind: bool
+    notify_on_autonomous_movement: bool
 
 
 @contextmanager
@@ -752,7 +759,8 @@ _SETTINGS_COLUMNS = (
     "map_tile_provider",
     "notify_on_distance_threshold",
     "notify_on_stillstand_movement",
-    "notify_on_moved_without_owner",
+    "notify_on_left_behind",
+    "notify_on_autonomous_movement",
 )
 
 
@@ -781,7 +789,8 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 map_tile_provider = %s,
                 notify_on_distance_threshold = %s,
                 notify_on_stillstand_movement = %s,
-                notify_on_moved_without_owner = %s,
+                notify_on_left_behind = %s,
+                notify_on_autonomous_movement = %s,
                 updated_at = now()
             WHERE id = 1
             """,
@@ -799,7 +808,8 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.map_tile_provider,
                 settings.notify_on_distance_threshold,
                 settings.notify_on_stillstand_movement,
-                settings.notify_on_moved_without_owner,
+                settings.notify_on_left_behind,
+                settings.notify_on_autonomous_movement,
             ),
         )
     conn.commit()

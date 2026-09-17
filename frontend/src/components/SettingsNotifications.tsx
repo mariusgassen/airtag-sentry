@@ -118,17 +118,34 @@ export function SettingsNotifications({
           }
         />
         <Row
-          label="Bewegung ohne dich"
+          label="Zurückgelassen"
           trailing={
             settings && (
               <Switch
-                checked={settings.notify_on_moved_without_owner}
-                onChange={(v) => update({ notify_on_moved_without_owner: v }, { immediate: true })}
+                checked={settings.notify_on_left_behind}
+                onChange={(v) => update({ notify_on_left_behind: v }, { immediate: true })}
+              />
+            )
+          }
+        />
+        <Row
+          label="Eigenständige Bewegung"
+          trailing={
+            settings && (
+              <Switch
+                checked={settings.notify_on_autonomous_movement}
+                onChange={(v) => update({ notify_on_autonomous_movement: v }, { immediate: true })}
               />
             )
           }
         />
       </Section>
+      <p className="mb-2 px-1 text-[0.72rem] text-[var(--text-secondary)]">
+        "Zurückgelassen": du hast dich von einem stillstehenden Objekt entfernt - routinemäßig, z. B. wenn
+        du dein Laptop zu Hause lässt. "Eigenständige Bewegung": das Objekt selbst hat sich ohne dich
+        bewegt. "Zurückgelassen" wird nicht gemeldet, wenn das Objekt an einem hinterlegten Ort
+        (Einstellungen → Orte) liegen bleibt.
+      </p>
       <p className="mb-2 px-1 text-[0.72rem] text-[var(--text-secondary)]">
         Gilt für alle Kanäle oben. Ein deaktiviertes Ereignis wird weiterhin im Verlauf aufgezeichnet, löst
         aber keine Benachrichtigung aus.

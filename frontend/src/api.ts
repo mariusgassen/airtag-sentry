@@ -60,7 +60,12 @@ export interface AppSettings {
   map_tile_provider: 'auto' | 'osm'
   notify_on_distance_threshold: boolean
   notify_on_stillstand_movement: boolean
-  notify_on_moved_without_owner: boolean
+  // Split from a single notify_on_moved_without_owner - left_behind (you
+  // moved away from a stationary object, routine) and autonomous_movement
+  // (the object moved on its own, the actual signal this app exists to
+  // catch) are independently toggleable. See CLAUDE.md.
+  notify_on_left_behind: boolean
+  notify_on_autonomous_movement: boolean
 }
 
 export interface OwnerDevice {

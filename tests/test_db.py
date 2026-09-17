@@ -310,7 +310,8 @@ def test_get_settings_returns_seeded_defaults(conn):
         map_tile_provider="auto",
         notify_on_distance_threshold=True,
         notify_on_stillstand_movement=True,
-        notify_on_moved_without_owner=True,
+        notify_on_left_behind=True,
+        notify_on_autonomous_movement=True,
     )
 
 
@@ -331,7 +332,8 @@ def test_update_settings_round_trips(conn):
             map_tile_provider="osm",
             notify_on_distance_threshold=False,
             notify_on_stillstand_movement=True,
-            notify_on_moved_without_owner=False,
+            notify_on_left_behind=False,
+            notify_on_autonomous_movement=True,
         ),
     )
     assert updated.polling_interval_minutes == 30
@@ -906,7 +908,7 @@ def test_record_alert_for_owner_device_round_trips(conn):
     record_alert(
         conn,
         Alert(
-            reason="moved_without_owner",
+            reason="left_behind",
             distance_meters=800.0,
             owner_device_id="mac-1",
             owner_location_id=location.id,
@@ -920,12 +922,12 @@ def test_record_alert_for_owner_device_round_trips(conn):
             ("mac-1",),
         )
         row = cur.fetchone()
-    assert row == ("moved_without_owner", 800.0, None, None, "mac-1", location.id)
+    assert row == ("left_behind", 800.0, None, None, "mac-1", location.id)
 
 
 def test_record_alert_rejects_row_with_no_source(conn):
     with pytest.raises(psycopg.errors.CheckViolation):
-        record_alert(conn, Alert(reason="moved_without_owner", distance_meters=1.0))
+        record_alert(conn, Alert(reason="left_behind", distance_meters=1.0))
     conn.rollback()
 
 
@@ -937,7 +939,7 @@ def test_record_alert_rejects_row_with_both_sources(conn):
         record_alert(
             conn,
             Alert(
-                reason="moved_without_owner",
+                reason="left_behind",
                 distance_meters=1.0,
                 airtag_id="bike",
                 report_id=inserted[0].id,

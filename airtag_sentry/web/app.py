@@ -287,7 +287,8 @@ class SettingsIn(BaseModel):
     map_tile_provider: str
     notify_on_distance_threshold: bool
     notify_on_stillstand_movement: bool
-    notify_on_moved_without_owner: bool
+    notify_on_left_behind: bool
+    notify_on_autonomous_movement: bool
 
 
 class NamedPlaceIn(BaseModel):

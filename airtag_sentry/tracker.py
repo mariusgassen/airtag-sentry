@@ -33,6 +33,7 @@ from airtag_sentry.db import (
     insert_reports,
     latest_owner_device_locations,
     list_airtags,
+    list_named_places,
     list_owner_devices,
     primary_owner_device_latest_location,
     primary_owner_device_location_near,
@@ -48,12 +49,14 @@ from airtag_sentry.movement import (
     evaluate_away,
     evaluate_device_away,
     evaluate_movement,
+    is_object_displaced,
     is_speed_outlier,
     owner_already_reunited,
 )
 from airtag_sentry.notifiers import build_notifiers, notify_all
 from airtag_sentry.notifiers.homeassistant import HomeAssistantPublisher, build_ha_publisher
 from airtag_sentry.owner_tracking import fetch_owner_device_locations
+from airtag_sentry.stays import match_place
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +73,12 @@ def _battery_level(status: int) -> str:
 _ALERT_TITLES = {
     "distance_threshold": "Unerwartete Bewegung",
     "stillstand_movement": "Bewegung nach Stillstand",
-    "moved_without_owner": "Bewegung ohne dich",
+    # Split reasons (see CLAUDE.md's "you left it" vs "it left you"
+    # constraint) - left_behind: the object stayed put, you moved away from
+    # it (routine). autonomous_movement: the object itself moved without
+    # you (the actual signal this app exists to catch).
+    "left_behind": "Zurückgelassen",
+    "autonomous_movement": "Eigenständige Bewegung",
 }
 
 # Which AppSettings switch gates a notification for each alert reason (see
@@ -80,12 +88,23 @@ _ALERT_TITLES = {
 _NOTIFY_SETTINGS_FIELD = {
     "distance_threshold": "notify_on_distance_threshold",
     "stillstand_movement": "notify_on_stillstand_movement",
-    "moved_without_owner": "notify_on_moved_without_owner",
+    "left_behind": "notify_on_left_behind",
+    "autonomous_movement": "notify_on_autonomous_movement",
 }
 
 
 def _should_notify(settings: AppSettings, reason: str) -> bool:
     return getattr(settings, _NOTIFY_SETTINGS_FIELD[reason])
+
+
+def _at_named_place(conn, lat: float, lon: float) -> bool:
+    """Whether (lat, lon) falls within one of the user's configured named
+    places (Settings -> Orte). Used to suppress a "left_behind" push at an
+    expected, routine spot (home, office) without suppressing the more
+    urgent autonomous_movement case, which fires regardless of where the
+    object started - see CLAUDE.md's "you left it" vs "it left you"
+    constraint."""
+    return match_place(lat, lon, list_named_places(conn)) is not None
 
 
 def _load_key(cfg: Config, conn, airtag_id: str):
@@ -186,11 +205,12 @@ def _owner_location_for_away_check(
 
 
 def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSettings) -> None:
-    """"You left without X" alerts for non-primary owner devices (a laptop,
-    AirPods) - the device-side counterpart to _poll_airtag's moved_without_owner
-    check for AirTags (see CLAUDE.md's AirTag/device parity constraint). Runs
-    once per poll, after _update_owner_devices has refreshed every enabled
-    device's location, reusing the same movement_away_distance_meters/
+    """"Left behind" / "autonomous movement" alerts for non-primary owner
+    devices (a laptop, AirPods) - the device-side counterpart to
+    _poll_airtag's away-check for AirTags (see CLAUDE.md's AirTag/device
+    parity constraint, and its "you left it" vs "it left you" constraint).
+    Runs once per poll, after _update_owner_devices has refreshed every
+    enabled device's location, reusing the same movement_away_distance_meters/
     owner_location_max_age_minutes settings AirTags already use.
 
     Opt-in per device (device.away_alert_enabled) - introducing this
@@ -203,11 +223,14 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
     append-only history with one row per poll regardless of movement - so
     this only fires on the transition *into* "away", by checking whether the
     device's previous recorded location was already away too, rather than
-    re-notifying every poll for as long as it stays away.
+    re-notifying every poll for as long as it stays away. That same previous
+    reading also tells left_behind and autonomous_movement apart: if the
+    device's own position hasn't moved since it, the owner is the one who
+    moved away from it; if it has, the device moved on its own.
 
-    An alert is always recorded once that transition is detected, same as
-    _poll_airtag - notify_on_moved_without_owner only gates the push, not
-    whether the alert itself is kept in history.
+    An alert is always recorded once a transition is detected, same as
+    _poll_airtag - the per-reason notify_on_* setting only gates the push,
+    not whether the alert itself is kept in history.
     """
     devices = {d.id: d for d in list_owner_devices(conn)}
     if not any(d.is_primary for d in devices.values()):
@@ -229,11 +252,11 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
             continue
 
         history = fetch_owner_device_location_history(conn, device.id, limit=2)
-        if len(history) <= 1:
+        previous = history[1] if len(history) > 1 else None
+        if previous is None:
             if not settings.movement_alert_on_backfill:
                 continue  # first-ever reading for this device - same backfill guard AirTags use
         else:
-            previous = history[1]
             previous_primary = primary_owner_device_location_near(conn, previous.recorded_at)
             if evaluate_device_away(previous, previous_primary, movement_cfg) is not None:
                 continue  # already away last poll too - not a new "left without" event
@@ -245,26 +268,44 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
         if away_distance is None:
             continue
 
+        object_moved = previous is not None and is_object_displaced(
+            location.lat,
+            location.lon,
+            location.horizontal_accuracy,
+            previous.lat,
+            previous.lon,
+            previous.horizontal_accuracy,
+            movement_cfg,
+        )
+        reason = "autonomous_movement" if object_moved else "left_behind"
         record_alert(
             conn,
             DbAlert(
-                reason="moved_without_owner",
+                reason=reason,
                 distance_meters=away_distance,
                 owner_device_id=device.id,
                 owner_location_id=location.id,
             ),
         )
+        if not _should_notify(settings, reason):
+            continue
         current_primary_location = primary_owner_device_latest_location(conn)
-        if _should_notify(settings, "moved_without_owner") and not device_already_reunited(
-            location, current_primary_location, movement_cfg
-        ):
-            name = device.display_name or device.name
-            address = reverse_geocode(location.lat, location.lon).address
-            message = (
-                f"Du hast dich ohne {name} entfernt ({away_distance:.0f} m).\n"
-                f"{format_location_line(location.lat, location.lon, location.recorded_at, address, cfg.display_timezone)}"
+        if device_already_reunited(location, current_primary_location, movement_cfg):
+            continue
+        if reason == "left_behind" and _at_named_place(conn, location.lat, location.lon):
+            continue  # left at a known place (home, office, ...) - routine, not worth a push
+
+        name = device.display_name or device.name
+        address = reverse_geocode(location.lat, location.lon).address
+        message = (
+            (
+                f"{name} hat sich eigenständig bewegt und ist jetzt {away_distance:.0f} m von dir entfernt.\n"
+                if object_moved
+                else f"Du hast dich {away_distance:.0f} m von {name} entfernt.\n"
             )
-            notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], message)
+            + format_location_line(location.lat, location.lon, location.recorded_at, address, cfg.display_timezone)
+        )
+        notify_all(notifiers, _ALERT_TITLES[reason], message)
 
 
 # Guards against two poll_once() calls racing each other - the scheduled
@@ -413,50 +454,73 @@ def _poll_airtag(
 
             prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
             alert = evaluate_movement(report, prior_reports, movement_cfg)
-            if alert is None:
-                continue
-
-            record_alert(
-                conn,
-                DbAlert(
-                    airtag_id=airtag.id,
-                    reason=alert.reason,
-                    distance_meters=alert.distance_meters,
-                    report_id=report.id,
-                ),
-            )
-            address = reverse_geocode(report.lat, report.lon).address
-            if _should_notify(settings, alert.reason):
-                message = (
-                    f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
-                    f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
-                )
-                notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
-
-            if not airtag.away_alert_enabled:
-                continue
-
-            owner_location = _owner_location_for_away_check(
-                cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes
-            )
-            away_distance = evaluate_away(report, owner_location, movement_cfg)
-            if away_distance is not None:
+            if alert is not None:
                 record_alert(
                     conn,
                     DbAlert(
                         airtag_id=airtag.id,
-                        reason="moved_without_owner",
-                        distance_meters=away_distance,
+                        reason=alert.reason,
+                        distance_meters=alert.distance_meters,
                         report_id=report.id,
                     ),
                 )
-                if _should_notify(settings, "moved_without_owner") and not owner_already_reunited(
-                    report, primary_owner_device_latest_location(conn), movement_cfg
-                ):
-                    away_message = (
-                        f"{airtag.name} hat sich {away_distance:.0f} m von dir entfernt bewegt.\n"
+                if _should_notify(settings, alert.reason):
+                    address = reverse_geocode(report.lat, report.lon).address
+                    message = (
+                        f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
                         f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
                     )
-                    notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)
+                    notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+
+            if not airtag.away_alert_enabled:
+                continue
+
+            # Deliberately *not* gated on `alert` above - a stationary AirTag
+            # (no movement alert) must still be checked against the owner's
+            # position, or "you left it behind" could never be detected (see
+            # CLAUDE.md's "you left it" vs "it left you" constraint).
+            owner_location = _owner_location_for_away_check(
+                cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes
+            )
+            away_distance = evaluate_away(report, owner_location, movement_cfg)
+            if away_distance is None:
+                continue
+
+            object_moved = bool(prior_reports) and is_object_displaced(
+                report.lat,
+                report.lon,
+                report.accuracy,
+                prior_reports[-1].lat,
+                prior_reports[-1].lon,
+                prior_reports[-1].accuracy,
+                movement_cfg,
+            )
+            reason = "autonomous_movement" if object_moved else "left_behind"
+            record_alert(
+                conn,
+                DbAlert(
+                    airtag_id=airtag.id,
+                    reason=reason,
+                    distance_meters=away_distance,
+                    report_id=report.id,
+                ),
+            )
+            if not _should_notify(settings, reason):
+                continue
+            if owner_already_reunited(report, primary_owner_device_latest_location(conn), movement_cfg):
+                continue
+            if reason == "left_behind" and _at_named_place(conn, report.lat, report.lon):
+                continue  # left at a known place (home, office, ...) - routine, not worth a push
+
+            address = reverse_geocode(report.lat, report.lon).address
+            away_message = (
+                (
+                    f"{airtag.name} hat sich eigenständig bewegt und ist jetzt {away_distance:.0f} m von dir entfernt.\n"
+                    if object_moved
+                    else f"Du hast dich {away_distance:.0f} m von {airtag.name} entfernt.\n"
+                )
+                + format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)
+            )
+            notify_all(notifiers, _ALERT_TITLES[reason], away_message)
 
     _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted if not r.is_outlier])
