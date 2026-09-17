@@ -216,15 +216,11 @@ export function TimelinePage({
       {(airtags.length > 0 || devices.length > 0) && (
         <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
           <FilterChip label="Alle" selected={filter === null} onClick={() => onFilterChange(null)} />
-          {airtags.map((a) => (
-            <FilterChip
-              key={a.id}
-              label={a.name}
-              color={a.color ?? airtagColor(a.id)}
-              selected={filter?.type === 'airtag' && filter.id === a.id}
-              onClick={() => onFilterChange({ type: 'airtag', id: a.id })}
-            />
-          ))}
+          {/* Devices before AirTags, matching ObjectsList.tsx's own group
+              order (Geräte, then AirTags) - both already read the same
+              backend-ordered `devices`/`airtags` arrays (see CLAUDE.md's
+              AirTag/device parity section), so this only needed the section
+              order swapped to actually match. */}
           {devices.map((d) => (
             <FilterChip
               key={d.id}
@@ -232,6 +228,15 @@ export function TimelinePage({
               color={d.color ?? airtagColor(d.id)}
               selected={filter?.type === 'device' && filter.id === d.id}
               onClick={() => onFilterChange({ type: 'device', id: d.id })}
+            />
+          ))}
+          {airtags.map((a) => (
+            <FilterChip
+              key={a.id}
+              label={a.name}
+              color={a.color ?? airtagColor(a.id)}
+              selected={filter?.type === 'airtag' && filter.id === a.id}
+              onClick={() => onFilterChange({ type: 'airtag', id: a.id })}
             />
           ))}
         </div>
