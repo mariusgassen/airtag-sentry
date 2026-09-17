@@ -27,6 +27,7 @@ import {
 } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { useCurrentPosition } from '../hooks/useCurrentPosition'
+import { useRoutedTrail } from '../hooks/useRoutedTrail'
 import {
   OWNER_TRAIL_COLOR,
   PIN_POPUP_OFFSET,
@@ -710,6 +711,7 @@ export function MapCard({
   )
   const animatedPosition = useAnimatedLatLng(displayedPosition)
   const [showOwnerTrail, setShowOwnerTrail] = useState(false)
+  const routedPositions = useRoutedTrail(positions)
 
   if (positions.length === 0 || !displayed) {
     return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
@@ -722,7 +724,7 @@ export function MapCard({
     <div className="relative h-full w-full">
       <MapContainer center={last} zoom={15} className="h-full w-full">
         <AppTileLayer />
-        <Polyline positions={positions} pathOptions={{ color: trailColor, weight: 4 }} />
+        <Polyline positions={routedPositions} pathOptions={{ color: trailColor, weight: 4 }} />
         <PlaceCircles places={places} />
         <HistoryPoints
           points={stays}

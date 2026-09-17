@@ -322,6 +322,15 @@ export async function searchAddress(query: string): Promise<AddressSearchResult[
   return (await apiFetch(`/api/geocode/search?q=${encodeURIComponent(query)}`)).json()
 }
 
+/** Road-following geometry for a trail's points (see useRoutedTrail.ts) -
+ * null if OSRM couldn't route them (too many points, request failure), in
+ * which case the caller falls back to the straight-line points itself. */
+export async function getRoute(points: [number, number][]): Promise<[number, number][] | null> {
+  const res = await apiFetch('/api/route', { method: 'POST', body: JSON.stringify({ points }) })
+  const data: { points: [number, number][] | null } = await res.json()
+  return data.points
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return (await apiFetch('/api/settings')).json()
 }
