@@ -161,6 +161,23 @@ export function airtagPinIcon(airtag: { id: string; icon?: string | null; color?
   })
 }
 
+/** Cluster badge for `MarkerClusterGroup` (leaflet.markercluster) - same
+ * two-tone-ring badge shape as `airtagPinIcon` (via the shared
+ * `airtag-pin__badge` class) rather than the library's default grey/yellow/
+ * orange circles, so a cluster reads as "several pins" instead of an
+ * unrelated widget. Uses `var(--accent)` rather than any one grouped item's
+ * color, since a cluster mixes different AirTags/devices. Grows mildly with
+ * count (clamped), same idea as `stayMarkerRadius`. */
+export function clusterPinIcon(count: number): L.DivIcon {
+  const size = Math.min(SIZE + Math.sqrt(count) * 4, SIZE * 1.5)
+  return L.divIcon({
+    className: 'airtag-pin',
+    html: `<span class="airtag-pin__badge airtag-pin__badge--cluster" style="width:${size}px;height:${size}px;background:var(--accent);color:#fff">${count}</span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  })
+}
+
 /** "You are here" pulsing-dot marker, shared between MapCard (browser
  * geolocation fallback) and any map showing the owner's own device
  * location - deliberately distinct from airtagPinIcon's badge look. */

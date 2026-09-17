@@ -3,7 +3,7 @@ import type { PropsWithChildren } from 'react'
 import L from 'leaflet'
 import 'leaflet.markercluster'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
+import { clusterPinIcon } from '../mapIcons'
 
 type Props = PropsWithChildren<L.MarkerClusterGroupOptions>
 
@@ -16,10 +16,19 @@ type Props = PropsWithChildren<L.MarkerClusterGroupOptions>
  * uses internally) rather than a community React cluster package, since none
  * of those yet support react-leaflet v5/React 19 - this keeps ordinary
  * `<Marker>`/`<Popup>` JSX working unchanged as children.
+ *
+ * Cluster badges default to `clusterPinIcon` (matches the app's own pin
+ * styling, see mapIcons.ts) instead of leaflet.markercluster's stock grey/
+ * yellow/orange circles - `MarkerCluster.Default.css`, which only supplies
+ * those, is deliberately not imported. Callers can still override via
+ * `iconCreateFunction`.
  */
 export const MarkerClusterGroup = createLayerComponent<L.MarkerClusterGroup, Props>(
   ({ children: _children, ...options }, context) => {
-    const group = L.markerClusterGroup(options)
+    const group = L.markerClusterGroup({
+      iconCreateFunction: (cluster) => clusterPinIcon(cluster.getChildCount()),
+      ...options,
+    })
     return createElementObject(group, extendContext(context, { layerContainer: group }))
   },
 )
