@@ -289,6 +289,16 @@ export function RouteIcon({ className }: IconProps) {
   )
 }
 
+/** Checkmark - "Fertig" (done) counterpart to PencilIcon's "Bearbeiten" (edit)
+ * in ObjectsList.tsx's icon-only edit-mode toggle. */
+export function CheckIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M5 12.5l4.5 4.5L19 7" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 /** Grip handle for drag-to-reorder rows (ObjectsList.tsx's edit mode) - three
  * stacked bars, the standard iOS/Android reorder affordance. */
 export function DragHandleIcon({ className }: IconProps) {

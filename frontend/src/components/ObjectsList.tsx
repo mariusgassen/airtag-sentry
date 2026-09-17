@@ -15,7 +15,7 @@ import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
 import { capitalize, deviceLabel, formatAirtagBattery, formatDeviceBattery, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
-import { ChevronRightIcon, DragHandleIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
+import { CheckIcon, ChevronRightIcon, DragHandleIcon, PencilIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -215,10 +215,12 @@ function AirtagRow({
  * are tracked, not their history (see tasks/todo.md for the version that
  * moved it here).
  *
- * "Bearbeiten" toggles an edit mode (both groups at once) where rows swap
- * their nav chevron for a drag handle - dragging persists the new order via
+ * The pencil/check icon button toggles an edit mode (both groups at once,
+ * icon-only since it's reached rarely) where rows swap their nav chevron for
+ * a drag handle - dragging persists the new order via
  * onReorderAirtags/onReorderDevices, which just resend the whole reordered
- * id list to the same PUT endpoints the old up/down buttons used. */
+ * id list to the same PUT endpoints the old up/down buttons used. Deleting
+ * an AirTag or removing a device stays in their detail views, not here. */
 export function ObjectsList({
   airtags,
   statuses,
@@ -274,7 +276,7 @@ export function ObjectsList({
     onReorderAirtags(arrayMove(airtags, oldIndex, newIndex).map((a) => a.id))
   }
 
-  // Keeps "Fertig" reachable even if the list that made reordering worth
+  // Keeps the toggle reachable even if the list that made reordering worth
   // offering shrinks to one item while already editing.
   const canReorder = airtags.length > 1 || (ownerConnected && devices.length > 1)
 
@@ -287,9 +289,13 @@ export function ObjectsList({
             <button
               type="button"
               onClick={() => setEditing((v) => !v)}
-              className={`px-2 text-[0.95rem] text-[var(--accent)] ${editing ? 'font-semibold' : ''}`}
+              aria-label={editing ? 'Fertig' : 'Bearbeiten'}
+              title={editing ? 'Fertig' : 'Bearbeiten'}
+              className={`flex h-9 w-9 items-center justify-center rounded-full text-[var(--accent)] hover:bg-[var(--surface)] ${
+                editing ? 'bg-[var(--accent)]/15' : ''
+              }`}
             >
-              {editing ? 'Fertig' : 'Bearbeiten'}
+              {editing ? <CheckIcon className="h-5 w-5" /> : <PencilIcon className="h-[1.1rem] w-[1.1rem]" />}
             </button>
           )}
           <button
