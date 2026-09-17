@@ -207,6 +207,14 @@ body {
     0 2px 4px rgba(0, 0, 0, 0.35);
 }
 
+/* MarkerClusterGroup's cluster badge (mapIcons.ts's clusterPinIcon) - same
+   `.airtag-pin__badge` ring/shadow, just with a count label instead of a
+   glyph. */
+.airtag-pin__badge--cluster {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 /* iOS-style translucent "material" for floating chrome (tab bar, sheet grab
    handle) that sits over the full-bleed map - vs. the sheet body itself,
    which stays opaque so scrolling list/detail content stays readable. */
