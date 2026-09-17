@@ -64,10 +64,16 @@ function VisitRow({ visit, onSelect }: { visit: TimelineVisit; onSelect: () => v
       )}
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
-          <span className="block truncate text-[0.95rem] font-medium">
-            {visit.label ?? `${visit.lat.toFixed(4)}, ${visit.lon.toFixed(4)}`}
-          </span>
-          <span className="shrink-0 text-[0.8rem] text-[var(--text-secondary)]">· {visit.object_name}</span>
+          <span className="block truncate text-[0.95rem] font-medium">{visit.label ?? visit.object_name}</span>
+          {/* Only a real place name needs the object name spelled out
+              separately - an unnamed place has nothing to disambiguate from,
+              so its title is just the object name with no dangling "· " in
+              front of it (raw coordinates aren't a place name worth showing
+              here either; the address line below already covers "where"
+              when one's resolved). */}
+          {visit.label && (
+            <span className="shrink-0 text-[0.8rem] text-[var(--text-secondary)]">· {visit.object_name}</span>
+          )}
         </span>
         {/* The "public info about places" line - the raw geocoded address
             behind the resolved label above, same data stay.label is built
