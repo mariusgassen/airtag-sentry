@@ -66,3 +66,27 @@ export function useTheme() {
 
   return { theme, setTheme }
 }
+
+/** Effective light/dark scheme right now - `data-theme` when set, else the OS
+ * preference - kept live via a MutationObserver (data-theme changes, e.g.
+ * from useTheme's setTheme) and a matchMedia listener (OS preference changes
+ * while on "system"). Used by MapCard.tsx's AppTileLayer to pick light/dark
+ * map tiles; deliberately separate from useTheme's own state since map
+ * components don't otherwise need the full theme-preference/setter API. */
+export function useColorScheme(): 'light' | 'dark' {
+  const [scheme, setScheme] = useState<'light' | 'dark'>(() => effectiveScheme(getStoredTheme()))
+
+  useEffect(() => {
+    const recompute = () => setScheme(effectiveScheme(getStoredTheme()))
+    const observer = new MutationObserver(recompute)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mq.addEventListener('change', recompute)
+    return () => {
+      observer.disconnect()
+      mq.removeEventListener('change', recompute)
+    }
+  }, [])
+
+  return scheme
+}
