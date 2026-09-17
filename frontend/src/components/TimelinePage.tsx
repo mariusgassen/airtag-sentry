@@ -1,10 +1,15 @@
-import type { TimelineVisit } from '../api'
-import { capitalize, formatClusterRange, formatDayHeading, formatRelative } from '../format'
+import type { Airtag, OwnerDevice, TimelineVisit } from '../api'
+import { airtagColor } from '../airtagColor'
+import { capitalize, deviceLabel, formatClusterRange, formatDayHeading, formatRelative } from '../format'
 import { mapsUrl } from '../maps'
 import { staticMapTileUrl } from '../staticMapTile'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+
+/** Which single object (if any) the feed/map pane are narrowed to - see
+ * App.tsx's handleTimelineFilterChange. */
+export type TimelineFilter = { type: 'airtag' | 'device'; id: string } | null
 
 /** Groups newest-first visits (already sorted that way by GET /api/timeline)
  * into calendar-day buckets, preserving order within and across days. */
@@ -84,8 +89,8 @@ function VisitRow({ visit, onSelect }: { visit: TimelineVisit; onSelect: () => v
           {/* A real, external link (not just this row's own onSelect) - lets
               a visit be opened straight into Maps for directions/street view
               instead of only ever re-centering this app's own map. Nested
-              inside the row's own button, same as StayRow.tsx's correction
-              button - stopPropagation keeps it from also firing onSelect. */}
+              inside the row's own button - stopPropagation keeps it from
+              also firing onSelect. */}
           <button
             type="button"
             aria-label="In Maps öffnen"
@@ -116,32 +121,92 @@ function VisitRow({ visit, onSelect }: { visit: TimelineVisit; onSelect: () => v
   )
 }
 
+function FilterChip({
+  label,
+  color,
+  selected,
+  onClick,
+}: {
+  label: string
+  color?: string
+  selected: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[0.8rem] font-medium ${
+        selected
+          ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]'
+          : 'border-[var(--divider)] text-[var(--text-secondary)]'
+      }`}
+    >
+      {color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
+      <span className="max-w-[8rem] truncate">{label}</span>
+    </button>
+  )
+}
+
 /** Aggregate, cross-object "Google Timeline" style feed - every AirTag's and
  * every tracked owner device's stays (see GET /api/timeline), grouped by
  * calendar day and shown newest-first, each stop's place info (resolved
  * label + raw address) shown alongside it. Deliberately a plain list rather
  * than embedding its own map: a visit here already carries its object's
- * identity, and picking one deep-links into that object's own MapCard/
- * DeviceMapCard (see onSelectVisit) rather than duplicating that map's trail/
- * selection logic in a second place. */
+ * identity, and picking one (or a filter chip) hands off to that object's
+ * own MapCard/DeviceMapCard in App.tsx's map pane (see onSelectVisit/
+ * onFilterChange) rather than duplicating that map's trail/selection logic
+ * in a second place. */
 export function TimelinePage({
   visits,
+  airtags,
+  devices,
+  filter,
+  onFilterChange,
   onSelectVisit,
 }: {
   visits: TimelineVisit[]
+  airtags: Airtag[]
+  devices: OwnerDevice[]
+  filter: TimelineFilter
+  onFilterChange: (filter: TimelineFilter) => void
   onSelectVisit: (visit: TimelineVisit) => void
 }) {
-  const groups = groupByDay(visits)
+  const filtered = filter ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id) : visits
+  const groups = groupByDay(filtered)
 
   return (
     <div className="flex h-full flex-col">
       <div className="px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Zeitachse</h1>
       </div>
+      {(airtags.length > 0 || devices.length > 0) && (
+        <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
+          <FilterChip label="Alle" selected={filter === null} onClick={() => onFilterChange(null)} />
+          {airtags.map((a) => (
+            <FilterChip
+              key={a.id}
+              label={a.name}
+              color={a.color ?? airtagColor(a.id)}
+              selected={filter?.type === 'airtag' && filter.id === a.id}
+              onClick={() => onFilterChange({ type: 'airtag', id: a.id })}
+            />
+          ))}
+          {devices.map((d) => (
+            <FilterChip
+              key={d.id}
+              label={deviceLabel(d)}
+              color={d.color ?? airtagColor(d.id)}
+              selected={filter?.type === 'device' && filter.id === d.id}
+              onClick={() => onFilterChange({ type: 'device', id: d.id })}
+            />
+          ))}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         {groups.length === 0 ? (
           <div className="mx-1 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
-            Noch keine Standortverläufe vorhanden.
+            {filter ? 'Keine Standortverläufe für diese Auswahl.' : 'Noch keine Standortverläufe vorhanden.'}
           </div>
         ) : (
           groups.map((group) => (

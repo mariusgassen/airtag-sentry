@@ -70,7 +70,10 @@ shipping AirTag-only and needing a follow-up pass for devices) - don't make
 it a third time.
 
 Concretely, these pairs are expected to stay in lockstep:
-- `AirtagDetail.tsx` / `DeviceDetail.tsx` (rename, symbol & color, history list)
+- `AirtagDetail.tsx` / `DeviceDetail.tsx` (rename, symbol & color, a
+  "Zeitachse" link into `TimelinePage.tsx` filtered to that one object -
+  neither renders its own history list anymore, see the Zeitachse section
+  below)
 - `MapCard.tsx` / `DeviceMapCard.tsx` (trail, marker selection, popup content,
   Previous/Next trail stepping) - `DeviceMapCard.tsx` deliberately imports
   `PanToSelection`/`AddressLine`/`FitBounds`/`InvalidateSizeOnResize`/
@@ -83,10 +86,25 @@ The two data shapes differ in real ways that don't disappear under this
 constraint - most importantly, AirTag `Report`s have a numeric `id` and
 arrive oldest-first, while owner-device `OwnerLocation`s have no `id` in the
 API response and arrive newest-first (`recorded_at` is what
-`DeviceHistoryList`/`DeviceMapCard.tsx` key and select by instead, and
+`TimelinePage.tsx`/`DeviceMapCard.tsx` key and select by instead, and
 "older"/"newer" step in the *opposite* index direction from the AirTag
 case). Mirror the *feature and UI*, not the implementation line-for-line -
 but never skip a side because its plumbing is different.
+
+## The Zeitachse tab
+
+`TimelinePage.tsx` (App.tsx's third tab, alongside Objekte/Einstellungen) is
+the *only* place a per-object history list renders - `AirtagDetail.tsx`/
+`DeviceDetail.tsx` used to each have their own collapsible one (`HistoryList`/
+`DeviceHistoryList`, built on the now-deleted `StayRow.tsx`), duplicating the
+same stay data GET /api/timeline already merges across every AirTag and
+device. Their "Verlauf" section is now a single row that hands off to this
+tab instead (`onViewTimeline`, via App.tsx's `handleTimelineFilterChange`),
+pre-filtered to that one object via `TimelineFilter` (`{ type, id }`) - the
+same filter a Zeitachse chip or a visit-row tap sets, which also switches the
+tab's own map pane to that object's `MapCard`/`DeviceMapCard`. Don't
+reintroduce a second per-object history list in the detail views - extend
+`TimelinePage.tsx`/`GET /api/timeline` instead.
 
 ## Project shape
 

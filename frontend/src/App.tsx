@@ -42,6 +42,7 @@ import type { PlaceSeed } from './components/SettingsPlaces'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
 import { TimelinePage } from './components/TimelinePage'
+import type { TimelineFilter } from './components/TimelinePage'
 import { usePushNotifications } from './hooks/usePushNotifications'
 
 // 'default' is the normal half-height sheet; 'expanded' is near-fullscreen
@@ -122,6 +123,16 @@ export default function App() {
   // independently of the objects/detail selection state below, since it
   // spans every AirTag/device at once rather than following `currentId`.
   const [timeline, setTimeline] = useState<TimelineVisit[]>([])
+  // Which single object (if any) the Zeitachse tab is currently narrowed to -
+  // drives both TimelinePage's own filtering and, below, which map the
+  // Zeitachse tab's map pane shows (its own MapCard/DeviceMapCard instead of
+  // OverviewMap). Deliberately separate from `detail` (the Objects tab's own
+  // drill-down state) - selecting an object here shouldn't also switch tabs
+  // or leave the Objects tab's own selection disturbed once you switch back.
+  // currentId/selectedDeviceId are still what's kept in sync (see
+  // handleTimelineFilterChange) so the existing per-object report/location
+  // fetching just works instead of needing a second copy of it.
+  const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>(null)
   // A location picked via a map popup's "Ort hier hinzufügen" (see
   // MapCard.tsx's AddPlaceButton) - consumed by SettingsPanel/SettingsPlaces
   // to jump straight into a new place's editor seeded at that spot, then
@@ -458,21 +469,45 @@ export default function App() {
     setSheetState('minimized')
   }
 
-  // Zeitachse (TimelinePage) row tap - deep-links into that visit's own
-  // object exactly like picking it from ObjectsList, but additionally
-  // pre-selects the specific stay (anchor_id/anchor_recorded_at, see
-  // GET /api/timeline) so the map/history land on that visit instead of
-  // just the object's latest one. See pendingReportIdRef's comment for why
-  // the AirTag side needs the extra ref.
+  // Zeitachse's own object filter (its chip row, or MapCard/DeviceMapCard's
+  // onSelectDevice/onMapClick while that tab's map is showing) - narrows the
+  // Zeitachse feed to one object and switches its map pane to that object's
+  // own MapCard/DeviceMapCard (see the map-pane ternary below). Keeps
+  // currentId/selectedDeviceId in sync so the existing per-object report/
+  // location-history fetching (refreshReports, refreshOwnerDevices) already
+  // covers it - no separate fetch path needed. Resetting selectedReportId/
+  // selectedDeviceLocationKey to "no explicit stay selected" here (rather
+  // than leaving a stale one from a previous object/tab) mirrors handleSelect/
+  // handleSelectDevice's own reset - see pendingReportIdRef's comment for why
+  // the AirTag side goes through a ref instead of setting it directly.
+  function handleTimelineFilterChange(filter: TimelineFilter) {
+    setTimelineFilter(filter)
+    if (filter?.type === 'airtag') {
+      pendingReportIdRef.current = null
+      setCurrentId(filter.id)
+    } else if (filter?.type === 'device') {
+      setSelectedDeviceId(filter.id)
+      setSelectedDeviceLocationKey(null)
+    }
+  }
+
+  // Zeitachse (TimelinePage) row tap - narrows the feed to that visit's own
+  // object (see handleTimelineFilterChange) and additionally pre-selects the
+  // specific stay (anchor_id/anchor_recorded_at, see GET /api/timeline) so
+  // the map/history land on that exact visit instead of just the object's
+  // latest one.
   function handleSelectVisit(visit: TimelineVisit) {
     if (visit.object_type === 'airtag') {
       pendingReportIdRef.current = visit.anchor_id
-      handleSelect(visit.object_id)
-      if (visit.anchor_id != null) handleSelectReport(visit.anchor_id)
+      setTimelineFilter({ type: 'airtag', id: visit.object_id })
+      setCurrentId(visit.object_id)
+      if (visit.anchor_id != null) setSelectedReportId(visit.anchor_id)
     } else {
-      handleSelectDevice(visit.object_id)
-      if (visit.anchor_recorded_at != null) handleSelectDeviceLocation(visit.anchor_recorded_at)
+      setTimelineFilter({ type: 'device', id: visit.object_id })
+      setSelectedDeviceId(visit.object_id)
+      setSelectedDeviceLocationKey(visit.anchor_recorded_at)
     }
+    setSheetState('minimized')
   }
 
   async function handleCreate(name: string) {
@@ -568,6 +603,34 @@ export default function App() {
             selectedLocationKey={selectedDeviceLocationKey}
             onSelectLocation={handleSelectDeviceLocation}
             onMapClick={() => setDetail(null)}
+            onAddPlace={handleAddPlace}
+          />
+        ) : /* Zeitachse's own object filter (see handleTimelineFilterChange) -
+               same MapCard/DeviceMapCard as the Objects tab's detail view,
+               just reached from a chip pick or a row tap instead of drilling
+               into AirtagDetail/DeviceDetail. Tapping the map background
+               clears the filter back to "Alle" rather than closing a detail
+               screen, since there's no detail screen open here. */
+        activeTab === 'timeline' && timelineFilter?.type === 'airtag' && currentAirtag ? (
+          <MapCard
+            reports={reports}
+            airtag={currentAirtag}
+            stays={reportStays}
+            places={places}
+            selectedReportId={selectedReportId}
+            onSelectReport={handleSelectReport}
+            onMapClick={() => setTimelineFilter(null)}
+            onAddPlace={handleAddPlace}
+          />
+        ) : activeTab === 'timeline' && timelineFilter?.type === 'device' && selectedDevice ? (
+          <DeviceMapCard
+            device={selectedDevice}
+            locations={ownerLocationHistories[selectedDevice.id] ?? []}
+            stays={ownerLocationStays[selectedDevice.id] ?? []}
+            places={places}
+            selectedLocationKey={selectedDeviceLocationKey}
+            onSelectLocation={handleSelectDeviceLocation}
+            onMapClick={() => setTimelineFilter(null)}
             onAddPlace={handleAddPlace}
           />
         ) : (
@@ -740,7 +803,14 @@ export default function App() {
               out below the handle instead of the map being fully clear. */}
           <div className={`min-h-0 flex-1 ${sheetState === 'minimized' ? 'max-md:invisible' : ''}`}>
             {activeTab === 'timeline' ? (
-              <TimelinePage visits={timeline} onSelectVisit={handleSelectVisit} />
+              <TimelinePage
+                visits={timeline}
+                airtags={airtags}
+                devices={ownerDevices}
+                filter={timelineFilter}
+                onFilterChange={handleTimelineFilterChange}
+                onSelectVisit={handleSelectVisit}
+              />
             ) : activeTab === 'settings' ? (
               <SettingsPanel
                 pushStatus={push.status}
@@ -759,8 +829,6 @@ export default function App() {
                 airtag={currentAirtag}
                 status={statuses[currentAirtag.id] ?? null}
                 stays={reportStays}
-                selectedReportId={selectedReportId}
-                onSelectReport={handleSelectReport}
                 onBack={() => setDetail(null)}
                 stepOlder={stepOlder}
                 stepNewer={stepNewer}
@@ -772,21 +840,25 @@ export default function App() {
                   await refreshAirtags()
                   setDetail(null)
                 }}
-                onCorrected={refreshReports}
+                onViewTimeline={() => {
+                  handleTimelineFilterChange({ type: 'airtag', id: currentAirtag.id })
+                  setActiveTab('timeline')
+                }}
               />
             ) : detail === 'device' && selectedDevice ? (
               <DeviceDetail
                 device={selectedDevice}
                 location={deviceLocationsById[selectedDevice.id] ?? null}
                 stays={ownerLocationStays[selectedDevice.id] ?? null}
-                selectedLocationKey={selectedDeviceLocationKey}
-                onSelectLocation={handleSelectDeviceLocation}
                 onBack={() => setDetail(null)}
                 stepOlder={stepOlder}
                 stepNewer={stepNewer}
                 stepPosition={stepPosition}
                 onChanged={refreshOwnerDevices}
-                onCorrected={refreshOwnerDevices}
+                onViewTimeline={() => {
+                  handleTimelineFilterChange({ type: 'device', id: selectedDevice.id })
+                  setActiveTab('timeline')
+                }}
               />
             ) : (
               <ObjectsList

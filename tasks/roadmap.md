@@ -46,8 +46,8 @@ users rely on this as their primary alerting mechanism).
 
 The `alerts` table already stores full history; the dashboard only ever
 surfaces the single latest one (`/api/status`'s `last_alert`). Cheap, high
-value: a scrollable list per AirTag, same shape as the existing
-"Verlauf" (location history) collapsible section in `AirtagDetail.tsx`.
+value: a scrollable list per AirTag, same shape as the "Zeitachse" tab's
+own per-object feed (`TimelinePage.tsx`).
 
 ## 5. Trip/stop report per AirTag
 
