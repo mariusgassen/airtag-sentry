@@ -98,6 +98,7 @@ def conn():
                         movement_alert_on_backfill = false,
                         movement_away_distance_meters = 150,
                         owner_location_max_age_minutes = 60,
+                        movement_max_speed_kmh = 200,
                         history_cluster_radius_meters = 50,
                         color_palette = 'pastel',
                         map_tile_provider = 'auto'
@@ -282,6 +283,7 @@ def test_get_settings_returns_seeded_defaults(conn):
         movement_alert_on_backfill=False,
         movement_away_distance_meters=150,
         owner_location_max_age_minutes=60,
+        movement_max_speed_kmh=200,
         history_cluster_radius_meters=50,
         color_palette="pastel",
         map_tile_provider="auto",
@@ -302,6 +304,7 @@ def test_update_settings_round_trips(conn):
             movement_alert_on_backfill=True,
             movement_away_distance_meters=250,
             owner_location_max_age_minutes=30,
+            movement_max_speed_kmh=150,
             history_cluster_radius_meters=25,
             color_palette="vivid",
             map_tile_provider="osm",

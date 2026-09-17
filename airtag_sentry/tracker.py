@@ -4,6 +4,7 @@ movement check -> notify -> publish to Home Assistant.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import logging
@@ -39,7 +40,13 @@ from airtag_sentry.db import (
     store_geocoded_point,
 )
 from airtag_sentry.geocode import format_location_line, reverse_geocode
-from airtag_sentry.movement import MovementConfig, evaluate_away, evaluate_movement, owner_already_reunited
+from airtag_sentry.movement import (
+    MovementConfig,
+    evaluate_away,
+    evaluate_movement,
+    is_speed_outlier,
+    owner_already_reunited,
+)
 from airtag_sentry.notifiers import build_notifiers, notify_all
 from airtag_sentry.notifiers.homeassistant import HomeAssistantPublisher, build_ha_publisher
 from airtag_sentry.owner_tracking import fetch_owner_device_locations
@@ -253,6 +260,32 @@ def _poll_airtag(
         )
         for lr in location_reports
     ]
+    reports.sort(key=lambda r: r.timestamp)
+
+    movement_cfg = MovementConfig(
+        distance_threshold_meters=settings.movement_distance_threshold_meters,
+        stillstand_hours=settings.movement_stillstand_hours,
+        stillstand_movement_meters=settings.movement_stillstand_movement_meters,
+        alert_on_backfill=settings.movement_alert_on_backfill,
+        away_distance_threshold_meters=settings.movement_away_distance_meters,
+        owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
+        max_speed_kmh=settings.movement_max_speed_kmh,
+    )
+
+    # Flag reports whose implied speed from the last physically-plausible
+    # (kept) report is impossible for an AirTag - a bad crowd-sourced
+    # Bluetooth relay, not real movement (see movement.is_speed_outlier).
+    # Done before insert, against a baseline that starts from what's already
+    # in the DB, so a flagged report can never anchor the next comparison.
+    baseline_reports = fetch_reports_before(conn, airtag.id, reports[0].timestamp)
+    baseline = baseline_reports[-1] if baseline_reports else None
+    flagged_reports = []
+    for report in reports:
+        outlier = is_speed_outlier(report, baseline, movement_cfg)
+        flagged_reports.append(dataclasses.replace(report, is_outlier=outlier))
+        if not outlier:
+            baseline = report
+    reports = flagged_reports
 
     was_empty = count_reports(conn, airtag.id) == 0
     newly_inserted = insert_reports(conn, reports)
@@ -264,13 +297,15 @@ def _poll_airtag(
     logger.info("[%s] Inserted %d new report(s).", airtag.id, len(newly_inserted))
 
     if ha_publisher is not None:
-        latest = max(reports, key=lambda r: r.timestamp)
-        try:
-            ha_publisher.publish_airtag(
-                airtag.id, airtag.name, latest.lat, latest.lon, latest.accuracy, latest.battery_level
-            )
-        except Exception:
-            logger.exception("Failed to publish airtag '%s' to Home Assistant.", airtag.id)
+        kept = [r for r in reports if not r.is_outlier]
+        latest = max(kept, key=lambda r: r.timestamp) if kept else None
+        if latest is not None:
+            try:
+                ha_publisher.publish_airtag(
+                    airtag.id, airtag.name, latest.lat, latest.lon, latest.accuracy, latest.battery_level
+                )
+            except Exception:
+                logger.exception("Failed to publish airtag '%s' to Home Assistant.", airtag.id)
 
     if was_empty and not settings.movement_alert_on_backfill:
         logger.info(
@@ -279,15 +314,15 @@ def _poll_airtag(
             len(newly_inserted),
         )
     else:
-        movement_cfg = MovementConfig(
-            distance_threshold_meters=settings.movement_distance_threshold_meters,
-            stillstand_hours=settings.movement_stillstand_hours,
-            stillstand_movement_meters=settings.movement_stillstand_movement_meters,
-            alert_on_backfill=settings.movement_alert_on_backfill,
-            away_distance_threshold_meters=settings.movement_away_distance_meters,
-            owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
-        )
         for report in newly_inserted:
+            if report.is_outlier:
+                logger.info(
+                    "[%s] Report at %s flagged as a speed outlier - skipping alert evaluation.",
+                    airtag.id,
+                    report.timestamp,
+                )
+                continue
+
             prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
             alert = evaluate_movement(report, prior_reports, movement_cfg)
             if alert is None:
@@ -333,4 +368,4 @@ def _poll_airtag(
                     )
                     notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], away_message)
 
-    _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted])
+    _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted if not r.is_outlier])

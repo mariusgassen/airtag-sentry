@@ -42,6 +42,7 @@ export type FieldKey =
   | 'movement_distance_threshold_meters'
   | 'movement_stillstand_hours'
   | 'movement_stillstand_movement_meters'
+  | 'movement_max_speed_kmh'
   | 'movement_away_distance_meters'
   | 'owner_location_max_age_minutes'
   | 'history_cluster_radius_meters'
@@ -104,6 +105,19 @@ export function SettingsTracking({ settings, errors, update }: Props) {
             onChange={(v) => update({ movement_alert_on_backfill: v }, { immediate: true })}
           />
         </div>
+      </Section>
+
+      <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+        Ausreißererkennung
+      </p>
+      <Section>
+        <Field
+          label="Max. plausible Geschwindigkeit"
+          suffix="km/h"
+          value={settings.movement_max_speed_kmh}
+          error={errors.movement_max_speed_kmh}
+          onChange={(v) => update({ movement_max_speed_kmh: v })}
+        />
       </Section>
 
       <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
