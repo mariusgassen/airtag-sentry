@@ -497,6 +497,31 @@ export async function disableTelegramCommands(): Promise<void> {
   await apiFetch('/api/notifications/telegram/commands', { method: 'DELETE' })
 }
 
+export interface CartoStatus {
+  connected: boolean
+  // Unlike TelegramStatus/MqttStatus, this does carry the plaintext secret -
+  // see GET /api/maps/carto's docstring for why (the browser, not the
+  // backend, is what actually uses it, to build Leaflet tile URLs).
+  api_key: string | null
+}
+
+export async function getCartoStatus(): Promise<CartoStatus> {
+  return (await apiFetch('/api/maps/carto')).json()
+}
+
+export async function setCartoApiKey(apiKey: string): Promise<CartoStatus> {
+  return (
+    await apiFetch('/api/maps/carto', {
+      method: 'POST',
+      body: JSON.stringify({ api_key: apiKey }),
+    })
+  ).json()
+}
+
+export async function deleteCartoApiKey(): Promise<void> {
+  await apiFetch('/api/maps/carto', { method: 'DELETE' })
+}
+
 export interface MqttStatus {
   connected: boolean
   host: string | null

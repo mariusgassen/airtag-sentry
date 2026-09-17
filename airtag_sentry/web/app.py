@@ -46,6 +46,7 @@ from airtag_sentry.db import (
     create_named_place,
     delete_airtag,
     delete_airtag_key,
+    delete_carto_credentials,
     delete_ha_api_token,
     delete_mqtt_credentials,
     delete_named_place,
@@ -53,6 +54,7 @@ from airtag_sentry.db import (
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
+    get_carto_credentials,
     get_conn,
     get_geocoded_point,
     get_ha_api_token,
@@ -71,6 +73,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_key,
+    set_carto_credentials,
     set_ha_api_token_hash,
     set_mqtt_credentials,
     set_place_label_correction,
@@ -347,6 +350,10 @@ class OwnerFamilyIn(BaseModel):
 class TelegramCredentialsIn(BaseModel):
     bot_token: str
     chat_id: str
+
+
+class CartoApiKeyIn(BaseModel):
+    api_key: str
 
 
 class MqttSettingsIn(BaseModel):
@@ -1291,6 +1298,36 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     logger.exception("Failed to delete Telegram webhook; disabling locally anyway.")
             set_telegram_bot_commands(conn, False, None)
         return {"bot_commands_enabled": False}
+
+    @app.get("/api/maps/carto")
+    def carto_status():
+        """Whether a CARTO basemap-tiles API key is configured (see
+        MapCard.tsx's AppTileLayer et al.) - entered via the dashboard's
+        Settings panel. Unlike telegram_status/mqtt_status, this *does*
+        return the decrypted key: CARTO tiles are fetched directly by the
+        browser (Leaflet issues the requests), so the frontend needs the
+        plaintext value to build tile URLs, not just a connected/disconnected
+        flag. It's still encrypted at rest in Postgres and only ever handed
+        to this already-authenticated dashboard session."""
+        with get_conn(cfg.database_url) as conn:
+            creds = get_carto_credentials(conn)
+        api_key = keystore.decrypt(cfg.key_encryption_key, creds.api_key_encrypted) if creds else None
+        return {"connected": creds is not None, "api_key": api_key}
+
+    @app.post("/api/maps/carto")
+    def carto_connect(body: CartoApiKeyIn):
+        if not body.api_key.strip():
+            raise HTTPException(status_code=400, detail="API-Key darf nicht leer sein.")
+        encrypted = keystore.encrypt(cfg.key_encryption_key, body.api_key.strip())
+        with get_conn(cfg.database_url) as conn:
+            set_carto_credentials(conn, encrypted)
+        return {"connected": True, "api_key": body.api_key.strip()}
+
+    @app.delete("/api/maps/carto")
+    def carto_disconnect():
+        with get_conn(cfg.database_url) as conn:
+            delete_carto_credentials(conn)
+        return {"ok": True}
 
     @app.post("/api/telegram/webhook")
     async def telegram_webhook(request: Request):

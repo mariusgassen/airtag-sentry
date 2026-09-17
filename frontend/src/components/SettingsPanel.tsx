@@ -7,6 +7,7 @@ import type { ThemePreference } from '../theme'
 import { useTheme } from '../theme'
 import { BellIcon, ChevronLeftIcon, ChevronRightIcon, GearIcon, LogoutIcon, MapPinIcon, PersonIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
+import { CartoPanel } from './CartoPanel'
 import { SettingsAppleAccounts } from './SettingsAppleAccounts'
 import { SettingsNotifications } from './SettingsNotifications'
 import { SettingsPlaces } from './SettingsPlaces'
@@ -121,6 +122,7 @@ interface Props {
   onEnablePush: () => void
   onDisablePush: () => void
   onSettingsChanged: (settings: AppSettings) => void
+  onCartoApiKeyChanged: (apiKey: string | null) => void
   places: Place[]
   onPlacesChanged: () => void | Promise<void>
   // A location seeded from a map popup's "Ort hier hinzufügen" - see
@@ -137,6 +139,7 @@ export function SettingsPanel({
   onEnablePush,
   onDisablePush,
   onSettingsChanged,
+  onCartoApiKeyChanged,
   places,
   onPlacesChanged,
   placeSeed = null,
@@ -296,6 +299,8 @@ export function SettingsPanel({
               />
             )}
           </Section>
+
+          <CartoPanel onApiKeyChanged={onCartoApiKeyChanged} />
 
           <Section>
             <Row

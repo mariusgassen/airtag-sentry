@@ -40,6 +40,7 @@ import {
   stayMarkerRadius,
 } from '../mapIcons'
 import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { CARTO_API_KEY } from '../mapTiles'
 import { useColorScheme } from '../theme'
 import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
 
@@ -57,8 +58,12 @@ export type AddPlaceHandler = (lat: number, lon: number, name?: string) => void
 // a short ("Letzte Position" only) and a long (address + prev/next) variant.
 export const POPUP_WIDTH_CLASS = 'w-60'
 
-// CARTO's free Voyager/Dark Matter basemaps - same OSM data, no API key
-// required, just two tile URLs/attributions picked by theme.
+// CARTO's Voyager/Dark Matter basemaps - same OSM data, styled by theme, but
+// now require a free API key (see mapTiles.ts) or anonymous requests get a
+// watermarked tile back. Falls back to plain, unstyled OSM tiles (no key
+// needed) until one is configured in Settings -> Darstellung.
+const PLAIN_OSM_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+const PLAIN_OSM_ATTRIBUTION = '&copy; OpenStreetMap contributors'
 const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
 const LIGHT_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -71,10 +76,13 @@ const DARK_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; <a href="http
  * this same tile choice. */
 export function AppTileLayer() {
   const scheme = useColorScheme()
+  if (!CARTO_API_KEY) {
+    return <TileLayer attribution={PLAIN_OSM_ATTRIBUTION} url={PLAIN_OSM_TILE_URL} />
+  }
   return scheme === 'dark' ? (
-    <TileLayer attribution={DARK_ATTRIBUTION} url={DARK_TILE_URL} />
+    <TileLayer attribution={DARK_ATTRIBUTION} url={`${DARK_TILE_URL}?api_key=${CARTO_API_KEY}`} />
   ) : (
-    <TileLayer attribution={LIGHT_ATTRIBUTION} url={LIGHT_TILE_URL} />
+    <TileLayer attribution={LIGHT_ATTRIBUTION} url={`${LIGHT_TILE_URL}?api_key=${CARTO_API_KEY}`} />
   )
 }
 

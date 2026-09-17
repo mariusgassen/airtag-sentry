@@ -6,6 +6,7 @@ import { Row, Section } from './AirtagDetail'
 import { EditableCircle } from './EditableCircle'
 import { ChevronRightIcon, MapPinIcon, PlusIcon, TrashIcon } from './icons'
 import { useCurrentPosition } from '../hooks/useCurrentPosition'
+import { CARTO_API_KEY } from '../mapTiles'
 
 const DEFAULT_RADIUS_METERS = 100
 // Initial center for a brand-new place before browser geolocation resolves
@@ -274,10 +275,17 @@ function PlaceEditor({
           {/* topright, not the default topleft - AddressSearch below spans
               the top of the map and would otherwise sit right under it. */}
           <ZoomControl position="topright" />
-          <TileLayer
-            attribution='&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          />
+          {CARTO_API_KEY ? (
+            <TileLayer
+              attribution='&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+              url={`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`}
+            />
+          ) : (
+            <TileLayer
+              attribution="&copy; OpenStreetMap contributors"
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+          )}
           <EditableCircle
             center={center}
             radius={radius}

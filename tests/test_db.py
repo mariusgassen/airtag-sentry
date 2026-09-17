@@ -16,6 +16,7 @@ from airtag_sentry.db import (
     create_named_place,
     delete_airtag,
     delete_airtag_key,
+    delete_carto_credentials,
     delete_ha_api_token,
     delete_mqtt_credentials,
     delete_named_place,
@@ -24,6 +25,7 @@ from airtag_sentry.db import (
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     get_airtag_key,
+    get_carto_credentials,
     get_conn,
     get_geocoded_point,
     get_ha_api_token,
@@ -52,6 +54,7 @@ from airtag_sentry.db import (
     set_owner_device_primary,
     set_ha_api_token_hash,
     set_mqtt_credentials,
+    set_carto_credentials,
     set_owner_include_family_devices,
     set_place_label_correction,
     set_telegram_bot_commands,
@@ -78,7 +81,8 @@ def conn():
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
                     "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings, "
-                    "mqtt_settings, ha_api_tokens, named_places, geocoded_points, place_label_corrections "
+                    "mqtt_settings, ha_api_tokens, named_places, geocoded_points, place_label_corrections, "
+                    "carto_settings "
                     "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
@@ -140,6 +144,7 @@ def test_schema_creates_tables(conn):
         "telegram_settings",
         "mqtt_settings",
         "ha_api_tokens",
+        "carto_settings",
         "alembic_version",
     } <= tables
 
@@ -657,6 +662,22 @@ def test_telegram_credentials_set_get_delete_round_trip(conn):
 
     delete_telegram_credentials(conn)
     assert get_telegram_credentials(conn) is None
+
+
+def test_carto_credentials_set_get_delete_round_trip(conn):
+    assert get_carto_credentials(conn) is None
+
+    set_carto_credentials(conn, "enc-key-1")
+    stored = get_carto_credentials(conn)
+    assert stored.api_key_encrypted == "enc-key-1"
+
+    # Setting again replaces rather than duplicating (single-row table).
+    set_carto_credentials(conn, "enc-key-2")
+    stored = get_carto_credentials(conn)
+    assert stored.api_key_encrypted == "enc-key-2"
+
+    delete_carto_credentials(conn)
+    assert get_carto_credentials(conn) is None
 
 
 def test_telegram_bot_commands_set_round_trip(conn):
