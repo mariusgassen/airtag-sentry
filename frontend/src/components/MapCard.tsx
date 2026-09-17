@@ -40,7 +40,7 @@ import {
   recentOwnerTrailPoints,
   stayMarkerRadius,
 } from '../mapIcons'
-import { centerMarkerOnClick, mapsUrl } from '../maps'
+import { centerMarkerOnClick, isWithinPlace, mapsUrl } from '../maps'
 import { CARTO_API_KEY, cartoTilesEnabled } from '../mapTiles'
 import { useColorScheme } from '../theme'
 import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
@@ -94,6 +94,19 @@ export function InfoRow({ icon, children }: { icon: ReactNode; children: ReactNo
     <div className="mb-1 flex items-start gap-1.5 text-xs text-[var(--text-secondary)] last:mb-0">
       <span className="mt-0.5 shrink-0">{icon}</span>
       <span>{children}</span>
+    </div>
+  )
+}
+
+/** Popup title + its icon-only secondary actions (OpenInMapsButton,
+ * AddPlaceButton), on one row - shared so every popup in the app opens with
+ * the same "name left, utility icons right" layout instead of a heavy
+ * button row further down fighting for attention with the title. */
+export function PopupHeader({ title, actions }: { title: string; actions?: ReactNode }) {
+  return (
+    <div className="mb-1.5 flex items-start justify-between gap-2">
+      <p className="text-[0.95rem] font-semibold leading-tight">{title}</p>
+      {actions && <div className="flex shrink-0 gap-1">{actions}</div>}
     </div>
   )
 }
@@ -271,8 +284,13 @@ const addressCache = new Map<string, string | null>()
 
 /** Best-effort address line for a marker popup - starts blank, fills in (or
  * silently stays empty) once the lookup resolves, never blocks the popup.
+ * `skipIfSame` (typically the popup's own title/label) suppresses the row
+ * when the resolved address turns out to be that exact same string - a
+ * point with no place/POI/correction match falls back to its raw address as
+ * its label (see stays.py's resolve_label), and without this the popup
+ * would show that one address twice, once as the title and once again here.
  * Exported for DeviceMapCard.tsx, which shares this same popup content. */
-export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
+export function AddressLine({ lat, lon, skipIfSame }: { lat: number; lon: number; skipIfSame?: string | null }) {
   const key = `${lat},${lon}`
   const [address, setAddress] = useState<string | null | undefined>(() => addressCache.get(key))
 
@@ -296,7 +314,7 @@ export function AddressLine({ lat, lon }: { lat: number; lon: number }) {
     }
   }, [key, lat, lon])
 
-  if (!address) return null
+  if (!address || address === skipIfSame) return null
   return (
     <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>
       <span>{address}</span>
@@ -335,31 +353,61 @@ export function BatteryRow({
   )
 }
 
+// Shared chrome for a popup's secondary, icon-only actions ("In Karten
+// öffnen", "Ort hier hinzufügen") - small and neutral (surface-2/secondary
+// text) rather than accent-bordered pills, so they read as utility icons
+// next to the title instead of competing with it or with an actual primary
+// CTA ("Details anzeigen") for attention.
+const POPUP_ICON_BUTTON_CLASS =
+  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-secondary)]'
+
+/** "Open in Maps" popup action - icon-only (see POPUP_ICON_BUTTON_CLASS),
+ * shared by every marker popup in the app. */
+export function OpenInMapsButton({ lat, lon, name }: { lat: number; lon: number; name: string }) {
+  return (
+    <a
+      href={mapsUrl(lat, lon, name)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="In Karten öffnen"
+      aria-label="In Karten öffnen"
+      className={POPUP_ICON_BUTTON_CLASS}
+    >
+      <LocationArrowIcon className="h-3.5 w-3.5" />
+    </a>
+  )
+}
+
 /** "Save this spot as a geofence" popup action - shared by every marker
  * popup in the app (this file, DeviceMapCard.tsx, OverviewMap.tsx) so
  * creating a place from an already-known location is always one tap away,
  * not just reachable by re-finding the same spot in Settings -> Orte from
- * scratch. Renders nothing when `onAddPlace` isn't wired up. */
+ * scratch. Renders nothing when `onAddPlace` isn't wired up, or when
+ * `withinPlace` says this point already has a matching geofence - adding
+ * another one on top of it isn't a useful action. */
 export function AddPlaceButton({
   lat,
   lon,
   name,
   onAddPlace,
+  withinPlace = false,
 }: {
   lat: number
   lon: number
   name?: string | null
   onAddPlace?: AddPlaceHandler
+  withinPlace?: boolean
 }) {
-  if (!onAddPlace) return null
+  if (!onAddPlace || withinPlace) return null
   return (
     <button
       type="button"
       onClick={() => onAddPlace(lat, lon, name ?? undefined)}
-      className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+      title="Ort hier hinzufügen"
+      aria-label="Ort hier hinzufügen"
+      className={POPUP_ICON_BUTTON_CLASS}
     >
       <PlusIcon className="h-3.5 w-3.5" />
-      Ort hier hinzufügen
     </button>
   )
 }
@@ -616,7 +664,8 @@ export function SelectedPin({
 export function NoReportsView({
   onMapClick,
   onAddPlace,
-}: { onMapClick?: () => void; onAddPlace?: AddPlaceHandler } = {}) {
+  places = [],
+}: { onMapClick?: () => void; onAddPlace?: AddPlaceHandler; places?: Place[] } = {}) {
   const here = useCurrentPosition()
 
   if (!here) {
@@ -639,20 +688,21 @@ export function NoReportsView({
             filler for an AirTag/device with nothing to show yet. */}
         <Popup autoPan={false}>
           <div className={POPUP_WIDTH_CLASS}>
-            <p className="mb-2 text-[0.95rem] font-semibold">Aktueller Standort</p>
+            <PopupHeader
+              title="Aktueller Standort"
+              actions={
+                <>
+                  <OpenInMapsButton lat={here[0]} lon={here[1]} name="Aktueller Standort" />
+                  <AddPlaceButton
+                    lat={here[0]}
+                    lon={here[1]}
+                    onAddPlace={onAddPlace}
+                    withinPlace={isWithinPlace(here[0], here[1], places)}
+                  />
+                </>
+              }
+            />
             <AddressLine lat={here[0]} lon={here[1]} />
-            <div className="mt-2 flex flex-wrap gap-2">
-              <a
-                href={mapsUrl(here[0], here[1], 'Aktueller Standort')}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-              >
-                <LocationArrowIcon className="h-3.5 w-3.5" />
-                In Karten öffnen
-              </a>
-              <AddPlaceButton lat={here[0]} lon={here[1]} onAddPlace={onAddPlace} />
-            </div>
           </div>
         </Popup>
       </Marker>
@@ -714,7 +764,7 @@ export function MapCard({
   const routedPositions = useRoutedTrail(positions)
 
   if (positions.length === 0 || !displayed) {
-    return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
+    return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} places={places} />
   }
 
   const last = positions[positions.length - 1]
@@ -737,38 +787,34 @@ export function MapCard({
         <OwnerTrails histories={ownerLocationHistories} visible={showOwnerTrail} />
         <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)} label={displayed.label}>
           <div className={POPUP_WIDTH_CLASS}>
-            <p className="mb-2 text-[0.95rem] font-semibold">
-              {displayed.label ?? (selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position')}
-            </p>
+            <PopupHeader
+              title={displayed.label ?? (selectedIndex >= 0 ? 'Ausgewählte Position' : 'Letzte Position')}
+              actions={
+                <>
+                  <OpenInMapsButton lat={displayedPosition[0]} lon={displayedPosition[1]} name={airtag.name} />
+                  <AddPlaceButton
+                    lat={displayedPosition[0]}
+                    lon={displayedPosition[1]}
+                    name={displayed.label}
+                    onAddPlace={onAddPlace}
+                    withinPlace={displayed.place_id != null}
+                  />
+                </>
+              }
+            />
             <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
               {displayed.count > 1
                 ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
                 : new Date(displayed.start).toLocaleString()}
             </InfoRow>
-            {/* Only live-fetch a fallback address when the server has no
-                precomputed label (stays.py's resolve_label) - otherwise this
-                popup and NoReportsView's would show different info for the
-                same kind of "position" depending on which one happened to
-                have a cached label yet. */}
-            {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+            {/* Shown even when there's already a resolved label (a named
+                place/POI/correction) per direct feedback - the address is
+                genuinely additional info there. skipIfSame drops it only for
+                the one case where it'd be a pure duplicate: no place/POI/
+                correction matched, so the label itself already *is* the raw
+                address (see stays.py's resolve_label). */}
+            <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} skipIfSame={displayed.label} />
             <BatteryRow level={displayed.battery_level} />
-            <div className="mt-2 flex flex-wrap gap-2">
-              <a
-                href={mapsUrl(displayedPosition[0], displayedPosition[1], airtag.name)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-              >
-                <LocationArrowIcon className="h-3.5 w-3.5" />
-                In Karten öffnen
-              </a>
-              <AddPlaceButton
-                lat={displayedPosition[0]}
-                lon={displayedPosition[1]}
-                name={displayed.label}
-                onAddPlace={onAddPlace}
-              />
-            </div>
           </div>
         </SelectedPin>
         {ownerLocations.map((loc) => (
@@ -780,33 +826,34 @@ export function MapCard({
           >
             <Popup autoPan={false}>
               <div className={POPUP_WIDTH_CLASS}>
-                <p className="mb-2 text-[0.95rem] font-semibold">{loc.name ?? 'Gerät'}</p>
+                <PopupHeader
+                  title={loc.name ?? 'Gerät'}
+                  actions={
+                    <>
+                      <OpenInMapsButton lat={loc.lat} lon={loc.lon} name={loc.name ?? 'Gerät'} />
+                      <AddPlaceButton
+                        lat={loc.lat}
+                        lon={loc.lon}
+                        onAddPlace={onAddPlace}
+                        withinPlace={isWithinPlace(loc.lat, loc.lon, places)}
+                      />
+                    </>
+                  }
+                />
                 <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
                   {capitalize(formatRelative(loc.recorded_at))}
                 </InfoRow>
                 <AddressLine lat={loc.lat} lon={loc.lon} />
                 <BatteryRow level={loc.battery_level} status={loc.battery_status} reported={loc.battery_reported} />
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {onSelectDevice && (
-                    <button
-                      type="button"
-                      onClick={() => onSelectDevice(loc.device_id)}
-                      className="rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
-                    >
-                      Details anzeigen
-                    </button>
-                  )}
-                  <a
-                    href={mapsUrl(loc.lat, loc.lon, loc.name ?? 'Gerät')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
+                {onSelectDevice && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectDevice(loc.device_id)}
+                    className="mt-2 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white"
                   >
-                    <LocationArrowIcon className="h-3.5 w-3.5" />
-                    In Karten öffnen
-                  </a>
-                  <AddPlaceButton lat={loc.lat} lon={loc.lon} onAddPlace={onAddPlace} />
-                </div>
+                    Details anzeigen
+                  </button>
+                )}
               </div>
             </Popup>
           </Marker>

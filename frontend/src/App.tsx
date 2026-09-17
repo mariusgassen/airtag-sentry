@@ -738,6 +738,7 @@ export default function App() {
             ownerLocationHistories={ownerLocationHistories}
             onSelectDevice={handleSelectDevice}
             onAddPlace={handleAddPlace}
+            places={places}
           />
         )}
       </div>

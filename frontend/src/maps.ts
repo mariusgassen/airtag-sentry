@@ -1,5 +1,32 @@
 import type L from 'leaflet'
 
+const EARTH_RADIUS_METERS = 6_371_000
+
+/** Great-circle distance between two lat/lon points, in meters - mirrors
+ * movement.py's haversine_distance (same formula, kept separate since one's
+ * server-side Python and this is client-side, both too small to share). */
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180
+  const dPhi = toRad(lat2 - lat1)
+  const dLambda = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dPhi / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLambda / 2) ** 2
+  return EARTH_RADIUS_METERS * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/** Whether a point already falls inside one of the user's existing named
+ * places (geofences) - mirrors stays.py's match_place, used client-side to
+ * hide "Ort hier hinzufügen" for a marker that already has a matching place,
+ * where the point isn't a Stay with its own server-resolved `place_id`
+ * (raw current-position markers in OverviewMap/MapCard's other-device pins). */
+export function isWithinPlace(
+  lat: number,
+  lon: number,
+  places: { lat: number; lon: number; radius_meters: number }[],
+): boolean {
+  return places.some((p) => haversineDistance(lat, lon, p.lat, p.lon) <= p.radius_meters)
+}
+
 /** Best-effort deep link to the device's native Maps app for a marker's
  * "open in Maps" popup action. Apple Maps' web URL (`ll` = coordinates, `q` =
  * label) hands off to the native app on iOS/macOS when installed and

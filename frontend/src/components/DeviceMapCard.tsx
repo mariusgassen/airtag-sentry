@@ -5,7 +5,6 @@ import { deviceLabel, formatClusterRange } from '../format'
 import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { useRoutedTrail } from '../hooks/useRoutedTrail'
 import { airtagPinIcon, deviceColor, stayMarkerRadius } from '../mapIcons'
-import { mapsUrl } from '../maps'
 import {
   AddPlaceButton,
   AddressLine,
@@ -20,13 +19,15 @@ import {
   LocateControl,
   MapClickHandler,
   NoReportsView,
+  OpenInMapsButton,
   PanToSelection,
   PlaceCircles,
+  PopupHeader,
   POPUP_WIDTH_CLASS,
   SelectedPin,
 } from './MapCard'
 import type { AddPlaceHandler } from './MapCard'
-import { ClockIcon, LocationArrowIcon } from './icons'
+import { ClockIcon } from './icons'
 
 /** Single-device counterpart to MapCard - one owner device's own location
  * trail, drilled into from ObjectsList (device selected -> DeviceDetail).
@@ -70,7 +71,7 @@ export function DeviceMapCard({
   const routedPositions = useRoutedTrail(positions)
 
   if (positions.length === 0 || !displayed) {
-    return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} />
+    return <NoReportsView onMapClick={onMapClick} onAddPlace={onAddPlace} places={places} />
   }
 
   const trailColor = deviceColor(device)
@@ -92,35 +93,31 @@ export function DeviceMapCard({
       />
       <SelectedPin position={animatedPosition} icon={airtagPinIcon(device)} label={displayed.label}>
         <div className={POPUP_WIDTH_CLASS}>
-          <p className="mb-2 text-[0.95rem] font-semibold">{displayed.label ?? deviceLabel(device)}</p>
+          <PopupHeader
+            title={displayed.label ?? deviceLabel(device)}
+            actions={
+              <>
+                <OpenInMapsButton lat={displayedPosition[0]} lon={displayedPosition[1]} name={deviceLabel(device)} />
+                <AddPlaceButton
+                  lat={displayedPosition[0]}
+                  lon={displayedPosition[1]}
+                  name={displayed.label}
+                  onAddPlace={onAddPlace}
+                  withinPlace={displayed.place_id != null}
+                />
+              </>
+            }
+          />
           <InfoRow icon={<ClockIcon className="h-3.5 w-3.5" />}>
             {displayed.count > 1
               ? `${formatClusterRange(displayed.start, displayed.end)} · ${displayed.count}×`
               : new Date(displayed.start).toLocaleString()}
           </InfoRow>
           {/* See MapCard.tsx's identical comment on its own SelectedPin
-              popup - only live-fetch a fallback address when there's no
-              precomputed label yet, so this and the AirTag popup never show
-              different kinds of info for the same "position" concept. */}
-          {!displayed.label && <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} />}
+              popup - shown even alongside a resolved label, skipped only when
+              the label itself already is the raw address. */}
+          <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} skipIfSame={displayed.label} />
           <BatteryRow level={displayed.battery_level} status={displayed.battery_status} reported={displayed.battery_reported} />
-          <div className="mt-2 flex flex-wrap gap-2">
-            <a
-              href={mapsUrl(displayedPosition[0], displayedPosition[1], deviceLabel(device))}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-lg border border-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent)]"
-            >
-              <LocationArrowIcon className="h-3.5 w-3.5" />
-              In Karten öffnen
-            </a>
-            <AddPlaceButton
-              lat={displayedPosition[0]}
-              lon={displayedPosition[1]}
-              name={displayed.label}
-              onAddPlace={onAddPlace}
-            />
-          </div>
         </div>
       </SelectedPin>
       {/* FitBounds then PanToSelection - see MapCard.tsx's identical comment. */}

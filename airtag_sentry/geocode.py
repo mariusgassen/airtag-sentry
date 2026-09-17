@@ -42,7 +42,7 @@ _last_call = 0.0
 
 @dataclasses.dataclass(frozen=True)
 class GeocodeResult:
-    address: str | None  # Nominatim's display_name - the full formatted address.
+    address: str | None  # Compact "Straße Hausnummer, Ort" (see _compact_address), or Nominatim's full display_name as a fallback.
     poi_name: str | None  # Nominatim's name - only present for a named POI (shop, amenity, ...).
 
 
@@ -72,13 +72,42 @@ def _rate_limited_get(url: str, params: dict[str, Any], timeout: float) -> Any |
             return None
 
 
+def _compact_address(address: dict[str, str] | None) -> str | None:
+    """Nominatim's display_name crams every administrative level - suburb,
+    city, county, state, postcode, country - into one comma list, most of it
+    redundant next to a marker that already has a name/label above it and a
+    lat/lon behind it. Build a short "Straße Hausnummer, Ort" line instead
+    from the structured breakdown (addressdetails=1), falling back through
+    the locality types Nominatim uses depending on how built-up the area is
+    (city/town/village/...), and gracefully to just one part - or None -
+    when a component is missing (e.g. open countryside has no street)."""
+    if not address:
+        return None
+    road = address.get("road") or address.get("pedestrian") or address.get("footway") or address.get("cycleway")
+    house_number = address.get("house_number")
+    street_line = f"{road} {house_number}" if road and house_number else road
+    locality = (
+        address.get("city")
+        or address.get("town")
+        or address.get("village")
+        or address.get("municipality")
+        or address.get("suburb")
+        or address.get("county")
+    )
+    parts = [p for p in (street_line, locality) if p]
+    return ", ".join(parts) or None
+
+
 def reverse_geocode(lat: float, lon: float, timeout: float = 5.0) -> GeocodeResult:
     body = _rate_limited_get(
-        _NOMINATIM_REVERSE_URL, {"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18}, timeout
+        _NOMINATIM_REVERSE_URL,
+        {"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18, "addressdetails": 1},
+        timeout,
     )
     if body is None:
         return GeocodeResult(address=None, poi_name=None)
-    return GeocodeResult(address=body.get("display_name"), poi_name=body.get("name"))
+    address = _compact_address(body.get("address")) or body.get("display_name")
+    return GeocodeResult(address=address, poi_name=body.get("name"))
 
 
 def search_address(query: str, timeout: float = 5.0) -> list[GeocodeSearchResult]:

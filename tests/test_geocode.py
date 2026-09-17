@@ -62,6 +62,43 @@ def test_reverse_geocode_returns_address_and_poi_name(monkeypatch):
     )
 
 
+def test_reverse_geocode_builds_a_compact_address_from_structured_fields(monkeypatch):
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "display_name": "REWE, 12, Musterstraße, Bessungen, Darmstadt, Hessen, 64283, Deutschland",
+        "name": "REWE",
+        "address": {
+            "house_number": "12",
+            "road": "Musterstraße",
+            "suburb": "Bessungen",
+            "city": "Darmstadt",
+            "state": "Hessen",
+            "postcode": "64283",
+            "country": "Deutschland",
+        },
+    }
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
+
+    result = reverse_geocode(49.8728, 8.6512)
+
+    assert result == GeocodeResult(address="Musterstraße 12, Darmstadt", poi_name="REWE")
+
+
+def test_reverse_geocode_falls_back_to_display_name_without_addressdetails(monkeypatch):
+    # A Nominatim response with no "address" breakdown at all (e.g. an older
+    # cached response shape) - the full display_name is still better than
+    # nothing.
+    mock_response = Mock()
+    mock_response.json.return_value = {"display_name": "Musterstraße 5, Darmstadt", "name": "REWE"}
+    mock_response.raise_for_status = Mock()
+    monkeypatch.setattr("requests.get", lambda *a, **k: mock_response)
+
+    result = reverse_geocode(49.8728, 8.6512)
+
+    assert result == GeocodeResult(address="Musterstraße 5, Darmstadt", poi_name="REWE")
+
+
 def test_reverse_geocode_returns_none_poi_name_for_a_plain_address(monkeypatch):
     # Nominatim omits "name" entirely for a point that isn't a named POI.
     mock_response = Mock()
