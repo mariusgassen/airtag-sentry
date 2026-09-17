@@ -1,10 +1,21 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import type { CSSProperties } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
+import type { DragEndEvent } from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import type { Airtag, OwnerDevice, OwnerLocation, Status } from '../api'
 import { capitalize, deviceLabel, formatAirtagBattery, formatDeviceBattery, formatRelative } from '../format'
 import { AirtagAvatar } from './AirtagAvatar'
 import { DeviceAvatar } from './DeviceAvatar'
-import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
+import { ChevronRightIcon, DragHandleIcon, PlusIcon, RefreshIcon, StarIcon } from './icons'
 
 interface Props {
   airtags: Airtag[]
@@ -12,10 +23,10 @@ interface Props {
   currentId: string | null
   onSelectAirtag: (id: string) => void
   onCreate: (name: string) => Promise<void>
-  // Swaps `id` with its neighbor in `airtags` and persists the result (see
-  // App.tsx's handleReorderAirtag / PUT /api/airtags/order). Mirrors
-  // onReorderDevice below - see CLAUDE.md's AirTag/owner-device parity rule.
-  onReorderAirtag: (id: string, direction: 'up' | 'down') => void
+  // Persists a full drag-and-drop reorder of `airtags` (see App.tsx's
+  // handleReorderAirtags / PUT /api/airtags/order). Mirrors
+  // onReorderDevices below - see CLAUDE.md's AirTag/owner-device parity rule.
+  onReorderAirtags: (airtagIds: string[]) => void
   // Only rendered when the owner-tracking Apple account (see
   // owner_tracking.py / Settings -> Apple-Konten) is connected.
   ownerConnected: boolean
@@ -30,13 +41,171 @@ interface Props {
   deviceLocations: Record<string, OwnerLocation>
   selectedDeviceId: string | null
   onSelectDevice: (id: string) => void
-  // Swaps `id` with its neighbor in `devices` and persists the result (see
-  // App.tsx's handleReorderDevice / PUT /api/owner-devices/order).
-  onReorderDevice: (id: string, direction: 'up' | 'down') => void
+  // Persists a full drag-and-drop reorder of `devices` (see App.tsx's
+  // handleReorderDevices / PUT /api/owner-devices/order).
+  onReorderDevices: (deviceIds: string[]) => void
   // Manual "refresh now" (POST /api/poll-now) - triggers an immediate poll
   // instead of waiting for the scheduled interval, see App.tsx.
   onRefresh: () => void
   refreshing: boolean
+}
+
+function DeviceRow({
+  device,
+  location,
+  selected,
+  editing,
+  showHandle,
+  isFirst,
+  onSelect,
+}: {
+  device: OwnerDevice
+  location: OwnerLocation | undefined
+  selected: boolean
+  editing: boolean
+  showHandle: boolean
+  isFirst: boolean
+  onSelect: (id: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: device.id,
+    disabled: !editing,
+  })
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition }
+  const content = (
+    <>
+      <DeviceAvatar device={device} size={40} />
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="block truncate text-[0.95rem] font-medium">{deviceLabel(device)}</span>
+          {device.is_primary && <StarIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" filled />}
+        </span>
+        {device.on_account === false ? (
+          <span className="block truncate text-[0.8rem] text-[var(--destructive)]">
+            Nicht mehr im iCloud-Account gefunden
+          </span>
+        ) : (
+          <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
+            {location
+              ? capitalize(formatRelative(location.recorded_at)) +
+                (location.battery_level != null
+                  ? ` · ${formatDeviceBattery(location.battery_level, location.battery_status)}`
+                  : '')
+              : 'Kein Standort verfügbar'}
+          </span>
+        )}
+      </span>
+    </>
+  )
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`bg-[var(--surface)] ${isDragging ? 'relative z-10 opacity-90' : ''} ${
+        !isFirst ? 'border-t border-[var(--divider)]' : ''
+      }`}
+    >
+      {editing ? (
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          {content}
+          {showHandle && (
+            <button
+              type="button"
+              {...attributes}
+              {...listeners}
+              aria-label="Zum Sortieren ziehen"
+              title="Zum Sortieren ziehen"
+              className="flex h-8 w-8 shrink-0 touch-none items-center justify-center text-[var(--text-secondary)] active:cursor-grabbing"
+            >
+              <DragHandleIcon className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onSelect(device.id)}
+          className={`flex w-full items-center gap-3 px-3 py-2.5 text-left ${
+            selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
+          }`}
+        >
+          {content}
+          <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AirtagRow({
+  airtag,
+  subtitle,
+  selected,
+  editing,
+  showHandle,
+  isFirst,
+  onSelect,
+}: {
+  airtag: Airtag
+  subtitle: string
+  selected: boolean
+  editing: boolean
+  showHandle: boolean
+  isFirst: boolean
+  onSelect: (id: string) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: airtag.id,
+    disabled: !editing,
+  })
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition }
+  const content = (
+    <>
+      <AirtagAvatar airtag={airtag} size={40} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[0.95rem] font-medium">{airtag.name}</span>
+        <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">{subtitle}</span>
+      </span>
+    </>
+  )
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`bg-[var(--surface)] ${isDragging ? 'relative z-10 opacity-90' : ''} ${
+        !isFirst ? 'border-t border-[var(--divider)]' : ''
+      }`}
+    >
+      {editing ? (
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          {content}
+          {showHandle && (
+            <button
+              type="button"
+              {...attributes}
+              {...listeners}
+              aria-label="Zum Sortieren ziehen"
+              title="Zum Sortieren ziehen"
+              className="flex h-8 w-8 shrink-0 touch-none items-center justify-center text-[var(--text-secondary)] active:cursor-grabbing"
+            >
+              <DragHandleIcon className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onSelect(airtag.id)}
+          className={`flex w-full items-center gap-3 px-3 py-2.5 text-left ${
+            selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
+          }`}
+        >
+          {content}
+          <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
+        </button>
+      )}
+    </div>
+  )
 }
 
 /** Grouped "Objekte" list: every AirTag plus every tracked owner device
@@ -44,26 +213,37 @@ interface Props {
  * labeled group. A device's own location history only shows once you've
  * selected it here (DeviceDetail) - Settings only manages which devices
  * are tracked, not their history (see tasks/todo.md for the version that
- * moved it here). */
+ * moved it here).
+ *
+ * "Bearbeiten" toggles an edit mode (both groups at once) where rows swap
+ * their nav chevron for a drag handle - dragging persists the new order via
+ * onReorderAirtags/onReorderDevices, which just resend the whole reordered
+ * id list to the same PUT endpoints the old up/down buttons used. */
 export function ObjectsList({
   airtags,
   statuses,
   currentId,
   onSelectAirtag,
   onCreate,
-  onReorderAirtag,
+  onReorderAirtags,
   ownerConnected,
   devices,
   deviceLocations,
   selectedDeviceId,
   onSelectDevice,
-  onReorderDevice,
+  onReorderDevices,
   onRefresh,
   refreshing,
 }: Props) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState(false)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   async function handleAdd(e: FormEvent) {
     e.preventDefault()
@@ -78,11 +258,40 @@ export function ObjectsList({
     }
   }
 
+  function handleDeviceDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = devices.findIndex((d) => d.id === active.id)
+    const newIndex = devices.findIndex((d) => d.id === over.id)
+    onReorderDevices(arrayMove(devices, oldIndex, newIndex).map((d) => d.id))
+  }
+
+  function handleAirtagDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = airtags.findIndex((a) => a.id === active.id)
+    const newIndex = airtags.findIndex((a) => a.id === over.id)
+    onReorderAirtags(arrayMove(airtags, oldIndex, newIndex).map((a) => a.id))
+  }
+
+  // Keeps "Fertig" reachable even if the list that made reordering worth
+  // offering shrinks to one item while already editing.
+  const canReorder = airtags.length > 1 || (ownerConnected && devices.length > 1)
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Objekte</h1>
         <div className="flex items-center gap-1">
+          {(canReorder || editing) && (
+            <button
+              type="button"
+              onClick={() => setEditing((v) => !v)}
+              className={`px-2 text-[0.95rem] text-[var(--accent)] ${editing ? 'font-semibold' : ''}`}
+            >
+              {editing ? 'Fertig' : 'Bearbeiten'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onRefresh}
@@ -138,78 +347,22 @@ export function ObjectsList({
               <div
                 className={`overflow-hidden rounded-2xl bg-[var(--surface)] ${refreshing ? 'animate-pulse' : ''}`}
               >
-                {devices.map((d, i) => {
-                  const location = deviceLocations[d.id]
-                  const selected = d.id === selectedDeviceId
-                  return (
-                    <button
-                      key={d.id}
-                      type="button"
-                      onClick={() => onSelectDevice(d.id)}
-                      className={`flex w-full items-center gap-3 px-3 py-2.5 text-left ${
-                        selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
-                      } ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
-                    >
-                      <DeviceAvatar device={d} size={40} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-1.5">
-                          <span className="block truncate text-[0.95rem] font-medium">{deviceLabel(d)}</span>
-                          {d.is_primary && <StarIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" filled />}
-                        </span>
-                        {d.on_account === false ? (
-                          <span className="block truncate text-[0.8rem] text-[var(--destructive)]">
-                            Nicht mehr im iCloud-Account gefunden
-                          </span>
-                        ) : (
-                          <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">
-                            {location
-                              ? capitalize(formatRelative(location.recorded_at)) +
-                                (location.battery_level != null
-                                  ? ` · ${formatDeviceBattery(location.battery_level, location.battery_status)}`
-                                  : '')
-                              : 'Kein Standort verfügbar'}
-                          </span>
-                        )}
-                      </span>
-                      {/* Reorder controls - only worth showing with something
-                          to reorder against. Nested inside the row's own
-                          button (same pattern as TimelinePage.tsx's "Maps"
-                          link) - stopPropagation keeps a tap here from also
-                          selecting the device. */}
-                      {devices.length > 1 && (
-                        <span className="flex shrink-0 flex-col">
-                          <button
-                            type="button"
-                            aria-label="Nach oben verschieben"
-                            title="Nach oben verschieben"
-                            disabled={i === 0}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onReorderDevice(d.id, 'up')
-                            }}
-                            className="text-[var(--text-secondary)] disabled:opacity-20"
-                          >
-                            <ChevronUpIcon className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Nach unten verschieben"
-                            title="Nach unten verschieben"
-                            disabled={i === devices.length - 1}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onReorderDevice(d.id, 'down')
-                            }}
-                            className="text-[var(--text-secondary)] disabled:opacity-20"
-                          >
-                            <ChevronDownIcon className="h-3.5 w-3.5" />
-                          </button>
-                        </span>
-                      )}
-                      <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
-                    </button>
-                  )
-                })}
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDeviceDragEnd}>
+                  <SortableContext items={devices.map((d) => d.id)} strategy={verticalListSortingStrategy}>
+                    {devices.map((d, i) => (
+                      <DeviceRow
+                        key={d.id}
+                        device={d}
+                        location={deviceLocations[d.id]}
+                        selected={d.id === selectedDeviceId}
+                        editing={editing}
+                        showHandle={devices.length > 1}
+                        isFirst={i === 0}
+                        onSelect={onSelectDevice}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </div>
             )}
           </div>
@@ -226,61 +379,31 @@ export function ObjectsList({
           </div>
         ) : (
           <div className={`overflow-hidden rounded-2xl bg-[var(--surface)] ${refreshing ? 'animate-pulse' : ''}`}>
-            {airtags.map((a, i) => {
-              const status = statuses[a.id]
-              const subtitle = status?.last_report
-                ? capitalize(formatRelative(status.last_report.timestamp)) +
-                  (status.last_report.battery_level ? ` · ${formatAirtagBattery(status.last_report.battery_level)}` : '')
-                : 'Kein Standort verfügbar'
-              const selected = a.id === currentId
-              return (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => onSelectAirtag(a.id)}
-                  className={`flex w-full items-center gap-3 px-3 py-2.5 text-left ${
-                    selected ? 'bg-[var(--accent)]/15' : 'hover:bg-white/5'
-                  } ${i > 0 ? 'border-t border-[var(--divider)]' : ''}`}
-                >
-                  <AirtagAvatar airtag={a} size={40} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.95rem] font-medium">{a.name}</span>
-                    <span className="block truncate text-[0.8rem] text-[var(--text-secondary)]">{subtitle}</span>
-                  </span>
-                  {airtags.length > 1 && (
-                    <span className="flex shrink-0 flex-col">
-                      <button
-                        type="button"
-                        aria-label="Nach oben verschieben"
-                        title="Nach oben verschieben"
-                        disabled={i === 0}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onReorderAirtag(a.id, 'up')
-                        }}
-                        className="text-[var(--text-secondary)] disabled:opacity-20"
-                      >
-                        <ChevronUpIcon className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Nach unten verschieben"
-                        title="Nach unten verschieben"
-                        disabled={i === airtags.length - 1}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onReorderAirtag(a.id, 'down')
-                        }}
-                        className="text-[var(--text-secondary)] disabled:opacity-20"
-                      >
-                        <ChevronDownIcon className="h-3.5 w-3.5" />
-                      </button>
-                    </span>
-                  )}
-                  <ChevronRightIcon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
-                </button>
-              )
-            })}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleAirtagDragEnd}>
+              <SortableContext items={airtags.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+                {airtags.map((a, i) => {
+                  const status = statuses[a.id]
+                  const subtitle = status?.last_report
+                    ? capitalize(formatRelative(status.last_report.timestamp)) +
+                      (status.last_report.battery_level
+                        ? ` · ${formatAirtagBattery(status.last_report.battery_level)}`
+                        : '')
+                    : 'Kein Standort verfügbar'
+                  return (
+                    <AirtagRow
+                      key={a.id}
+                      airtag={a}
+                      subtitle={subtitle}
+                      selected={a.id === currentId}
+                      editing={editing}
+                      showHandle={airtags.length > 1}
+                      isFirst={i === 0}
+                      onSelect={onSelectAirtag}
+                    />
+                  )
+                })}
+              </SortableContext>
+            </DndContext>
           </div>
         )}
       </div>

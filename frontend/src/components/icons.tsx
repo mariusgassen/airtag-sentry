@@ -289,6 +289,16 @@ export function RouteIcon({ className }: IconProps) {
   )
 }
 
+/** Grip handle for drag-to-reorder rows (ObjectsList.tsx's edit mode) - three
+ * stacked bars, the standard iOS/Android reorder affordance. */
+export function DragHandleIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** The AirTag glyph: concentric rings, similar to Find My's item icon. */
 export function AirtagGlyph({ className }: IconProps) {
   return (

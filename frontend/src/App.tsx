@@ -514,39 +514,28 @@ export default function App() {
     setActiveTab('objects')
   }
 
-  // ObjectsList's up/down reorder buttons - swaps `id` with its neighbor in
-  // the current (enabled-only) device list and persists the whole resulting
+  // ObjectsList's edit-mode drag reorder - persists the whole dragged-to
   // order (see api.ts's reorderOwnerDevices / db.py's set_owner_devices_order).
   // Optimistic: reorders the local `ownerDevices` state immediately so the
-  // swap doesn't visibly wait on the round trip, then reconciles with the
+  // drop doesn't visibly wait on the round trip, then reconciles with the
   // server via refreshOwnerDevices (a no-op if the PUT already applied
   // cleanly, a correction if it didn't).
-  async function handleReorderDevice(id: string, direction: 'up' | 'down') {
-    const index = ownerDevices.findIndex((d) => d.id === id)
-    const swapWith = direction === 'up' ? index - 1 : index + 1
-    if (index < 0 || swapWith < 0 || swapWith >= ownerDevices.length) return
-    const reordered = [...ownerDevices]
-    ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
-    setOwnerDevices(reordered)
+  async function handleReorderDevices(deviceIds: string[]) {
+    setOwnerDevices((prev) => deviceIds.map((id) => prev.find((d) => d.id === id)!))
     try {
-      await reorderOwnerDevices(reordered.map((d) => d.id))
+      await reorderOwnerDevices(deviceIds)
     } finally {
       await refreshOwnerDevices()
     }
   }
 
-  // ObjectsList's up/down reorder buttons for AirTags - mirrors
-  // handleReorderDevice/reorderOwnerDevices above (CLAUDE.md's AirTag/owner-
+  // ObjectsList's edit-mode drag reorder for AirTags - mirrors
+  // handleReorderDevices/reorderOwnerDevices above (CLAUDE.md's AirTag/owner-
   // device parity rule).
-  async function handleReorderAirtag(id: string, direction: 'up' | 'down') {
-    const index = airtags.findIndex((a) => a.id === id)
-    const swapWith = direction === 'up' ? index - 1 : index + 1
-    if (index < 0 || swapWith < 0 || swapWith >= airtags.length) return
-    const reordered = [...airtags]
-    ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
-    setAirtags(reordered)
+  async function handleReorderAirtags(airtagIds: string[]) {
+    setAirtags((prev) => airtagIds.map((id) => prev.find((a) => a.id === id)!))
     try {
-      await reorderAirtags(reordered.map((a) => a.id))
+      await reorderAirtags(airtagIds)
     } finally {
       await refreshAirtags()
     }
@@ -978,13 +967,13 @@ export default function App() {
                 currentId={currentId}
                 onSelectAirtag={handleSelect}
                 onCreate={handleCreate}
-                onReorderAirtag={handleReorderAirtag}
+                onReorderAirtags={handleReorderAirtags}
                 ownerConnected={ownerConnected}
                 devices={ownerDevices}
                 deviceLocations={deviceLocationsById}
                 selectedDeviceId={selectedDeviceId}
                 onSelectDevice={handleSelectDevice}
-                onReorderDevice={handleReorderDevice}
+                onReorderDevices={handleReorderDevices}
                 onRefresh={handleManualRefresh}
                 refreshing={manualRefreshing}
               />
