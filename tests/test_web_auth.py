@@ -495,6 +495,23 @@ def test_owner_device_routes_accept_ids_containing_a_slash(client, monkeypatch):
     assert seen_history == {"device_id": slashy_id, "limit": 50}
 
 
+def test_owner_devices_order_route_persists_the_given_order(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+
+    seen_order = {}
+    monkeypatch.setattr(
+        app_module.owner_tracking,
+        "set_devices_order",
+        lambda _conn, device_ids: seen_order.update(device_ids=device_ids),
+    )
+
+    resp = client.put("/api/owner-devices/order", json={"device_ids": ["d2", "d1"]})
+
+    assert resp.status_code == 200
+    assert seen_order == {"device_ids": ["d2", "d1"]}
+
+
 def test_ha_state_requires_bearer_token(client):
     resp = client.get("/api/ha/state")
     assert resp.status_code == 401

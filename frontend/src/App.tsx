@@ -30,6 +30,7 @@ import {
   getTimeline,
   ping,
   pollNow,
+  reorderOwnerDevices,
 } from './api'
 import { deviceLabel } from './format'
 import { ObjectsList } from './components/ObjectsList'
@@ -139,6 +140,13 @@ export default function App() {
   // handleTimelineFilterChange) so the existing per-object report/location
   // fetching just works instead of needing a second copy of it.
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilter>(null)
+  // Zeitachse's range chips (see TimelinePage.tsx) - null means "all
+  // available history" (GET /api/timeline's own default), which is also
+  // this state's default: capping the feed to a fixed number of points per
+  // object (the pre-this-change behavior) could silently cut off well under
+  // a day of history for a frequently-polling device, reading as "no more
+  // history" when there just was more than the cap allowed.
+  const [timelineRangeDays, setTimelineRangeDays] = useState<number | null>(null)
   // A location picked via a map popup's "Ort hier hinzufügen" (see
   // MapCard.tsx's AddPlaceButton) - consumed by SettingsPanel/SettingsPlaces
   // to jump straight into a new place's editor seeded at that spot, then
@@ -309,10 +317,10 @@ export default function App() {
   }, [refreshPlaces])
 
   const refreshTimeline = useCallback(async () => {
-    await getTimeline()
+    await getTimeline(timelineRangeDays)
       .then((t) => setTimeline(t.visits))
       .catch(() => {})
-  }, [])
+  }, [timelineRangeDays])
 
   useEffect(() => {
     refreshTimeline()
@@ -459,6 +467,27 @@ export default function App() {
     setSelectedDeviceLocationKey(null)
     setDetail('device')
     setActiveTab('objects')
+  }
+
+  // ObjectsList's up/down reorder buttons - swaps `id` with its neighbor in
+  // the current (enabled-only) device list and persists the whole resulting
+  // order (see api.ts's reorderOwnerDevices / db.py's set_owner_devices_order).
+  // Optimistic: reorders the local `ownerDevices` state immediately so the
+  // swap doesn't visibly wait on the round trip, then reconciles with the
+  // server via refreshOwnerDevices (a no-op if the PUT already applied
+  // cleanly, a correction if it didn't).
+  async function handleReorderDevice(id: string, direction: 'up' | 'down') {
+    const index = ownerDevices.findIndex((d) => d.id === id)
+    const swapWith = direction === 'up' ? index - 1 : index + 1
+    if (index < 0 || swapWith < 0 || swapWith >= ownerDevices.length) return
+    const reordered = [...ownerDevices]
+    ;[reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]]
+    setOwnerDevices(reordered)
+    try {
+      await reorderOwnerDevices(reordered.map((d) => d.id))
+    } finally {
+      await refreshOwnerDevices()
+    }
   }
 
   // "Ort hier hinzufügen" from any map popup (MapCard/DeviceMapCard/
@@ -826,6 +855,8 @@ export default function App() {
                 filter={timelineFilter}
                 onFilterChange={handleTimelineFilterChange}
                 onSelectVisit={handleSelectVisit}
+                rangeDays={timelineRangeDays}
+                onRangeChange={setTimelineRangeDays}
               />
             ) : activeTab === 'settings' ? (
               <SettingsPanel
@@ -889,6 +920,7 @@ export default function App() {
                 deviceLocations={deviceLocationsById}
                 selectedDeviceId={selectedDeviceId}
                 onSelectDevice={handleSelectDevice}
+                onReorderDevice={handleReorderDevice}
                 onRefresh={handleManualRefresh}
                 refreshing={manualRefreshing}
               />

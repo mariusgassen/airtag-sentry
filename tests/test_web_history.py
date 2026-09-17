@@ -276,3 +276,36 @@ def test_timeline_route_excludes_disabled_owner_devices(client, conn, monkeypatc
 
     assert resp.status_code == 200
     assert resp.json()["visits"] == []
+
+
+def test_timeline_route_defaults_to_all_history_and_days_filters_older_visits(client, conn, monkeypatch):
+    """Regression test: /api/timeline used to cap each object at its last
+    500/200 points regardless of age, which for a frequently-polling object
+    could cover well under a day - making "no more history" indistinguishable
+    from "there's more, just not fetched". Default (no `days`) must return
+    everything; `days` narrows to a recent window."""
+    _login(client, monkeypatch)
+    now = dt.datetime.now(dt.timezone.utc)
+    insert_reports(
+        conn,
+        [
+            Report(
+                id=None, airtag_id="bike", timestamp=now - dt.timedelta(days=40),
+                lat=49.8728, lon=8.6512, accuracy=5.0, confidence=3, battery_level="full",
+            ),
+            Report(
+                id=None, airtag_id="bike", timestamp=now - dt.timedelta(days=1),
+                lat=49.9, lon=8.7, accuracy=5.0, confidence=3, battery_level="full",
+            ),
+        ],
+    )
+
+    resp = client.get("/api/timeline")
+    assert resp.status_code == 200
+    assert len(resp.json()["visits"]) == 2
+
+    resp = client.get("/api/timeline", params={"days": 7})
+    assert resp.status_code == 200
+    visits = resp.json()["visits"]
+    assert len(visits) == 1
+    assert visits[0]["lat"] == 49.9

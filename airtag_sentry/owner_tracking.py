@@ -66,6 +66,7 @@ from airtag_sentry.db import (
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_owner_devices_order,
     set_owner_include_family_devices,
     upsert_owner_devices,
 )
@@ -306,6 +307,10 @@ def rename_device(conn, device_id: str, display_name: str | None) -> OwnerDevice
 
 def set_device_appearance(conn, device_id: str, icon: str | None, color: str | None) -> OwnerDevice | None:
     return set_owner_device_appearance(conn, device_id, icon, color)
+
+
+def set_devices_order(conn, device_ids: list[str]) -> None:
+    set_owner_devices_order(conn, device_ids)
 
 
 def play_sound(cfg: Config, conn, device_id: str) -> None:

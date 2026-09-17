@@ -122,6 +122,13 @@ class OwnerDevice:
     # sync, or has gone missing from the account (e.g. removed from iCloud) -
     # see GET /api/owner-devices' `on_account` field.
     last_seen_at: dt.datetime | None = None
+    # User-controlled display order in ObjectsList.tsx/TimelinePage.tsx (see
+    # set_owner_devices_order) - lower sorts first. A newly-discovered device
+    # is appended after the current max (see upsert_owner_devices), never
+    # inserted into the middle of an existing order. compare=False: it's
+    # presentation-only, not part of a device's identity, so tests comparing
+    # OwnerDevice instances for equality don't need to track it.
+    sort_order: int = dataclasses.field(default=0, compare=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -713,8 +720,11 @@ def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict], seen_at:
     with conn.cursor() as cur:
         cur.executemany(
             """
-            INSERT INTO owner_devices (id, name, device_type, last_seen_at)
-            VALUES (%(id)s, %(name)s, %(device_type)s, %(seen_at)s)
+            INSERT INTO owner_devices (id, name, device_type, last_seen_at, sort_order)
+            VALUES (
+                %(id)s, %(name)s, %(device_type)s, %(seen_at)s,
+                COALESCE((SELECT MAX(sort_order) FROM owner_devices), -1) + 1
+            )
             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, device_type = EXCLUDED.device_type,
                 last_seen_at = EXCLUDED.last_seen_at
             """,
@@ -723,13 +733,28 @@ def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict], seen_at:
     conn.commit()
 
 
-_OWNER_DEVICE_COLUMNS = "id, name, device_type, enabled, is_primary, display_name, icon, color, last_seen_at"
+_OWNER_DEVICE_COLUMNS = (
+    "id, name, device_type, enabled, is_primary, display_name, icon, color, last_seen_at, sort_order"
+)
 
 
 def list_owner_devices(conn: psycopg.Connection) -> list[OwnerDevice]:
     with conn.cursor() as cur:
-        cur.execute(f"SELECT {_OWNER_DEVICE_COLUMNS} FROM owner_devices ORDER BY name")
+        cur.execute(f"SELECT {_OWNER_DEVICE_COLUMNS} FROM owner_devices ORDER BY sort_order, name")
         return [OwnerDevice(*row) for row in cur.fetchall()]
+
+
+def set_owner_devices_order(conn: psycopg.Connection, device_ids: list[str]) -> None:
+    """Assigns sequential sort_order values (0, 1, 2, ...) to exactly the
+    given ids, in the given order - see PUT /api/owner-devices/order. Devices
+    not included (e.g. disabled ones ObjectsList never shows) keep whatever
+    sort_order they already had."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            "UPDATE owner_devices SET sort_order = %s WHERE id = %s",
+            list(enumerate(device_ids)),
+        )
+    conn.commit()
 
 
 def delete_owner_device(conn: psycopg.Connection, device_id: str) -> None:
@@ -904,16 +929,20 @@ def primary_owner_device_location_near(conn: psycopg.Connection, timestamp: dt.d
 
 
 def fetch_owner_device_location_history(
-    conn: psycopg.Connection, device_id: str, limit: int = 200
+    conn: psycopg.Connection, device_id: str, limit: int | None = 200
 ) -> list[OwnerLocation]:
+    query = (
+        "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status, "
+        "battery_reported "
+        "FROM owner_device_locations WHERE device_id = %s "
+        "ORDER BY recorded_at DESC"
+    )
+    params: tuple = (device_id,)
+    if limit is not None:
+        query += " LIMIT %s"
+        params = (device_id, limit)
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status, "
-            "battery_reported "
-            "FROM owner_device_locations WHERE device_id = %s "
-            "ORDER BY recorded_at DESC LIMIT %s",
-            (device_id, limit),
-        )
+        cur.execute(query, params)
         return [OwnerLocation(*row) for row in cur.fetchall()]
 
 

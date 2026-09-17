@@ -52,6 +52,7 @@ from airtag_sentry.db import (
     set_owner_device_appearance,
     set_owner_device_enabled,
     set_owner_device_primary,
+    set_owner_devices_order,
     set_ha_api_token_hash,
     set_mqtt_credentials,
     set_carto_credentials,
@@ -406,6 +407,36 @@ def test_upsert_and_list_owner_devices_preserves_enabled_on_reupsert(conn):
             id="mac-1", name="Marius' MacBook", device_type="Mac", enabled=True, is_primary=False, last_seen_at=later
         )
     ]
+
+
+def test_upsert_owner_devices_appends_new_devices_after_existing_sort_order(conn):
+    """A newly-discovered device must never jump ahead of an already-ordered
+    one - upsert_owner_devices appends after the current max sort_order
+    rather than defaulting to 0 (which would tie it for *first* place)."""
+    upsert_owner_devices(conn, [{"id": "d1", "name": "Zeta", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    upsert_owner_devices(conn, [{"id": "d2", "name": "Alpha", "device_type": "iPhone"}], seen_at=_SEEN_AT)
+
+    # Default order falls back to name once sort_order ties at 0/1 in
+    # insertion order - "Zeta" (inserted first, sort_order 0) still sorts
+    # before "Alpha" (sort_order 1) despite the alphabetical mismatch.
+    assert [d.id for d in list_owner_devices(conn)] == ["d1", "d2"]
+
+    set_owner_devices_order(conn, ["d2", "d1"])
+    assert [d.id for d in list_owner_devices(conn)] == ["d2", "d1"]
+
+    # Re-discovering both existing devices must not reset the order a user
+    # already set.
+    upsert_owner_devices(
+        conn,
+        [{"id": "d1", "name": "Zeta", "device_type": "Mac"}, {"id": "d2", "name": "Alpha", "device_type": "iPhone"}],
+        seen_at=_SEEN_AT,
+    )
+    assert [d.id for d in list_owner_devices(conn)] == ["d2", "d1"]
+
+    # A third, brand-new device is appended after the existing two, not
+    # inserted at the front (sort_order 0 would tie/beat both).
+    upsert_owner_devices(conn, [{"id": "d3", "name": "Beta", "device_type": "Watch"}], seen_at=_SEEN_AT)
+    assert [d.id for d in list_owner_devices(conn)] == ["d2", "d1", "d3"]
 
 
 def test_reupsert_does_not_clobber_display_name_or_appearance(conn):

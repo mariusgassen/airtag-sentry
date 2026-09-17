@@ -148,6 +148,15 @@ function FilterChip({
   )
 }
 
+// null = "all available history" - GET /api/timeline's own default (see
+// App.tsx's timelineRangeDays), not just this UI's.
+const RANGE_OPTIONS: { label: string; days: number | null }[] = [
+  { label: 'Alle', days: null },
+  { label: '7 Tage', days: 7 },
+  { label: '30 Tage', days: 30 },
+  { label: '90 Tage', days: 90 },
+]
+
 /** Aggregate, cross-object "Google Timeline" style feed - every AirTag's and
  * every tracked owner device's stays (see GET /api/timeline), grouped by
  * calendar day and shown newest-first, each stop's place info (resolved
@@ -164,6 +173,8 @@ export function TimelinePage({
   filter,
   onFilterChange,
   onSelectVisit,
+  rangeDays,
+  onRangeChange,
 }: {
   visits: TimelineVisit[]
   airtags: Airtag[]
@@ -171,6 +182,11 @@ export function TimelinePage({
   filter: TimelineFilter
   onFilterChange: (filter: TimelineFilter) => void
   onSelectVisit: (visit: TimelineVisit) => void
+  // Already applied server-side (see App.tsx's refreshTimeline) - `visits`
+  // only ever contains this range's data, so no further filtering happens
+  // here; this just drives which chip reads as selected.
+  rangeDays: number | null
+  onRangeChange: (days: number | null) => void
 }) {
   const filtered = filter ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id) : visits
   const groups = groupByDay(filtered)
@@ -203,6 +219,16 @@ export function TimelinePage({
           ))}
         </div>
       )}
+      <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
+        {RANGE_OPTIONS.map((opt) => (
+          <FilterChip
+            key={opt.label}
+            label={opt.label}
+            selected={rangeDays === opt.days}
+            onClick={() => onRangeChange(opt.days)}
+          />
+        ))}
+      </div>
       <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         {groups.length === 0 ? (
           <div className="mx-1 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
