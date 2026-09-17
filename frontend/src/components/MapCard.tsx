@@ -57,10 +57,10 @@ export type AddPlaceHandler = (lat: number, lon: number, name?: string) => void
 // a short ("Letzte Position" only) and a long (address + prev/next) variant.
 export const POPUP_WIDTH_CLASS = 'w-60'
 
-const LIGHT_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-const LIGHT_ATTRIBUTION = '&copy; OpenStreetMap contributors'
-// CARTO's free dark basemap - same OSM data, no API key required, just a
-// second tile URL/attribution.
+// CARTO's free Voyager/Dark Matter basemaps - same OSM data, no API key
+// required, just two tile URLs/attributions picked by theme.
+const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+const LIGHT_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const DARK_ATTRIBUTION = '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
 
