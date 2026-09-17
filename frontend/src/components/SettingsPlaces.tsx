@@ -275,8 +275,8 @@ function PlaceEditor({
               the top of the map and would otherwise sit right under it. */}
           <ZoomControl position="topright" />
           <TileLayer
-            attribution="&copy; OpenStreetMap contributors"
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
           />
           <EditableCircle
             center={center}
