@@ -74,6 +74,7 @@ from airtag_sentry.db import (
     remove_push_subscription,
     rename_airtag,
     set_airtag_appearance,
+    set_airtag_away_alert_enabled,
     set_airtag_key,
     set_airtags_order,
     set_carto_credentials,
@@ -259,6 +260,13 @@ class AirtagAppearanceIn(BaseModel):
     color: str | None = None
 
 
+class AwayAlertIn(BaseModel):
+    """Mirrors OwnerDeviceAwayAlertIn - one flag, no id (the AirTag's own
+    path segment already identifies it, see PATCH /api/airtags/{id}/away-alert)."""
+
+    enabled: bool
+
+
 class AirtagOrderIn(BaseModel):
     # Every AirTag's id, in the desired display order - see set_airtags_order.
     # Mirrors OwnerDeviceOrderIn.
@@ -353,6 +361,12 @@ class OwnerDeviceAppearanceIn(BaseModel):
     device_id: str
     icon: str | None = None
     color: str | None = None
+
+
+class OwnerDeviceAwayAlertIn(BaseModel):
+    # device_id travels in the body, not the URL path - see OwnerDeviceEnabledIn.
+    device_id: str
+    enabled: bool
 
 
 class OwnerDevicePlaySoundIn(BaseModel):
@@ -659,7 +673,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             airtags = list_airtags(conn)
             keyed_ids = list_keyed_airtag_ids(conn)
         return [
-            {"id": a.id, "name": a.name, "has_key": a.id in keyed_ids, "icon": a.icon, "color": a.color}
+            {
+                "id": a.id,
+                "name": a.name,
+                "has_key": a.id in keyed_ids,
+                "icon": a.icon,
+                "color": a.color,
+                "away_alert_enabled": a.away_alert_enabled,
+            }
             for a in airtags
         ]
 
@@ -677,7 +698,14 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 slug = f"{base_slug}-{suffix}"
                 suffix += 1
             record = create_airtag(conn, slug, name)
-        return {"id": record.id, "name": record.name, "has_key": False, "icon": record.icon, "color": record.color}
+        return {
+            "id": record.id,
+            "name": record.name,
+            "has_key": False,
+            "icon": record.icon,
+            "color": record.color,
+            "away_alert_enabled": record.away_alert_enabled,
+        }
 
     @app.patch("/api/airtags/{airtag_id}")
     def rename_airtag_route(airtag_id: str, body: AirtagIn):
@@ -699,6 +727,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             _resolve_airtag_id(conn, airtag_id)
             record = set_airtag_appearance(conn, airtag_id, body.icon, body.color)
         return {"id": record.id, "icon": record.icon, "color": record.color}
+
+    @app.patch("/api/airtags/{airtag_id}/away-alert")
+    def set_airtag_away_alert_route(airtag_id: str, body: AwayAlertIn):
+        """Whether this AirTag raises a "moved without you" alert - mirrors
+        PATCH /api/owner-devices/away-alert."""
+        with get_conn(cfg.database_url) as conn:
+            _resolve_airtag_id(conn, airtag_id)
+            record = set_airtag_away_alert_enabled(conn, airtag_id, body.enabled)
+        return {"id": record.id, "away_alert_enabled": record.away_alert_enabled}
 
     @app.put("/api/airtags/order")
     def set_airtags_order_route(body: AirtagOrderIn):
@@ -1008,6 +1045,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="color must be a '#rrggbb' hex string.")
         with get_conn(cfg.database_url) as conn:
             device = owner_tracking.set_device_appearance(conn, body.device_id, body.icon, body.color)
+        if device is None:
+            raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
+        return dataclasses.asdict(device)
+
+    @app.patch("/api/owner-devices/away-alert")
+    def set_owner_device_away_alert_route(body: OwnerDeviceAwayAlertIn):
+        """Whether this device raises a "left without it" alert - mirrors
+        PATCH /api/airtags/{id}/away-alert. Has no effect while the device is
+        primary (see OwnerDevice.away_alert_enabled)."""
+        with get_conn(cfg.database_url) as conn:
+            device = owner_tracking.set_device_away_alert_enabled(conn, body.device_id, body.enabled)
         if device is None:
             raise HTTPException(status_code=404, detail=f"Unknown device_id '{body.device_id}'")
         return dataclasses.asdict(device)

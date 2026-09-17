@@ -184,3 +184,52 @@ def owner_already_reunited(
         raw_distance, new_report.accuracy, current_owner_location.horizontal_accuracy
     )
     return distance <= cfg.away_distance_threshold_meters
+
+
+def evaluate_device_away(
+    device_location: OwnerLocation,
+    primary_location: OwnerLocation | None,
+    cfg: MovementConfig,
+) -> float | None:
+    """Device counterpart to evaluate_away() - the same "how far from the
+    primary owner device" check, but for a non-primary owner device's own
+    location instead of an AirTag report (see tracker._evaluate_device_away_alerts,
+    CLAUDE.md's AirTag/device parity constraint). `primary_location` must be
+    the primary device's reading closest in time to `device_location.recorded_at`
+    (db.primary_owner_device_location_near), for the same reason evaluate_away()
+    needs a time-matched reading rather than whatever's most recent.
+    """
+    if primary_location is None:
+        return None
+    time_delta = abs(device_location.recorded_at - primary_location.recorded_at)
+    if time_delta > dt.timedelta(minutes=cfg.owner_location_max_age_minutes):
+        return None
+
+    raw_distance = haversine_distance(
+        device_location.lat, device_location.lon, primary_location.lat, primary_location.lon
+    )
+    distance = _accuracy_adjusted_distance(
+        raw_distance, device_location.horizontal_accuracy, primary_location.horizontal_accuracy
+    )
+    return distance if distance > cfg.away_distance_threshold_meters else None
+
+
+def device_already_reunited(
+    device_location: OwnerLocation,
+    current_primary_location: OwnerLocation | None,
+    cfg: MovementConfig,
+) -> bool:
+    """Device counterpart to owner_already_reunited() - whether the primary
+    device's *current* location is already back near where `device_location`
+    (the non-primary device's own last known position) puts it, so a "you
+    left without X" push that's about to fire is already stale.
+    """
+    if current_primary_location is None:
+        return False
+    raw_distance = haversine_distance(
+        device_location.lat, device_location.lon, current_primary_location.lat, current_primary_location.lon
+    )
+    distance = _accuracy_adjusted_distance(
+        raw_distance, device_location.horizontal_accuracy, current_primary_location.horizontal_accuracy
+    )
+    return distance <= cfg.away_distance_threshold_meters

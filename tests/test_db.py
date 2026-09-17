@@ -5,6 +5,7 @@ import psycopg
 import pytest
 
 from airtag_sentry.db import (
+    Alert,
     AppSettings,
     GeocodedPoint,
     NamedPlace,
@@ -35,21 +36,25 @@ from airtag_sentry.db import (
     get_settings,
     get_telegram_credentials,
     insert_reports,
+    latest_alert,
     latest_owner_device_locations,
     list_airtags,
     list_keyed_airtag_ids,
     list_named_places,
     list_owner_devices,
     primary_owner_device_location_near,
+    record_alert,
     record_owner_device_location,
     rename_airtag,
     rename_owner_device,
     round_coord,
     set_airtag_appearance,
+    set_airtag_away_alert_enabled,
     set_airtag_key,
     set_owner_apple_credentials,
     set_owner_apple_sync_status,
     set_owner_device_appearance,
+    set_owner_device_away_alert_enabled,
     set_owner_device_enabled,
     set_owner_device_primary,
     set_owner_devices_order,
@@ -199,6 +204,22 @@ def test_set_airtag_appearance_round_trip(conn):
     reset = set_airtag_appearance(conn, "bike", None, None)
     assert reset.icon is None
     assert reset.color is None
+
+
+def test_set_airtag_away_alert_enabled_round_trip(conn):
+    # Defaults true - preserves the pre-per-object behavior (see AirtagRecord).
+    assert next(a for a in list_airtags(conn) if a.id == "bike").away_alert_enabled is True
+
+    updated = set_airtag_away_alert_enabled(conn, "bike", False)
+    assert updated.away_alert_enabled is False
+    assert next(a for a in list_airtags(conn) if a.id == "bike").away_alert_enabled is False
+
+    restored = set_airtag_away_alert_enabled(conn, "bike", True)
+    assert restored.away_alert_enabled is True
+
+
+def test_set_airtag_away_alert_enabled_returns_none_for_unknown_id(conn):
+    assert set_airtag_away_alert_enabled(conn, "does-not-exist", False) is None
 
 
 def test_delete_airtag_cascades_to_reports_alerts_and_key(conn):
@@ -499,6 +520,24 @@ def test_set_owner_device_appearance_returns_none_for_unknown_id(conn):
 
 def test_set_owner_device_enabled_returns_none_for_unknown_id(conn):
     assert set_owner_device_enabled(conn, "unknown", True) is None
+
+
+def test_set_owner_device_away_alert_enabled_round_trip(conn):
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    # Defaults false - unlike an AirTag, a device never had this alert at all
+    # before it became per-object (see OwnerDevice.away_alert_enabled).
+    assert list_owner_devices(conn)[0].away_alert_enabled is False
+
+    enabled = set_owner_device_away_alert_enabled(conn, "mac-1", True)
+    assert enabled.away_alert_enabled is True
+    assert list_owner_devices(conn)[0].away_alert_enabled is True
+
+    disabled = set_owner_device_away_alert_enabled(conn, "mac-1", False)
+    assert disabled.away_alert_enabled is False
+
+
+def test_set_owner_device_away_alert_enabled_returns_none_for_unknown_id(conn):
+    assert set_owner_device_away_alert_enabled(conn, "unknown", True) is None
 
 
 def test_set_owner_device_primary_is_exclusive_and_force_enables(conn):
@@ -841,3 +880,69 @@ def test_place_label_correction_round_trip(conn):
 
     delete_place_label_correction(conn, 49.8728, 8.6512)
     assert get_place_label_correction(conn, 49.8728, 8.6512) is None
+
+
+def test_record_alert_for_airtag_round_trips(conn):
+    # alerts.timestamp defaults to now() (when the alert was recorded/detected),
+    # not the triggering report's own timestamp - so only the reason is worth
+    # asserting on here.
+    inserted = insert_reports(conn, [_report("2026-01-01T10:00:00", 52.5, 13.4, airtag_id="bike")])
+    record_alert(
+        conn,
+        Alert(reason="distance_threshold", distance_meters=500.0, airtag_id="bike", report_id=inserted[0].id),
+    )
+    alert = latest_alert(conn, "bike")
+    assert alert is not None
+    assert alert[0] == "distance_threshold"
+
+
+def test_record_alert_for_owner_device_round_trips(conn):
+    """Alert is polymorphic (see alerts_source_xor) - a device's "left without
+    you" alert stores owner_device_id/owner_location_id instead of
+    airtag_id/report_id."""
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    location = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
+
+    record_alert(
+        conn,
+        Alert(
+            reason="moved_without_owner",
+            distance_meters=800.0,
+            owner_device_id="mac-1",
+            owner_location_id=location.id,
+        ),
+    )
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT reason, distance_meters, airtag_id, report_id, owner_device_id, owner_location_id "
+            "FROM alerts WHERE owner_device_id = %s",
+            ("mac-1",),
+        )
+        row = cur.fetchone()
+    assert row == ("moved_without_owner", 800.0, None, None, "mac-1", location.id)
+
+
+def test_record_alert_rejects_row_with_no_source(conn):
+    with pytest.raises(psycopg.errors.CheckViolation):
+        record_alert(conn, Alert(reason="moved_without_owner", distance_meters=1.0))
+    conn.rollback()
+
+
+def test_record_alert_rejects_row_with_both_sources(conn):
+    inserted = insert_reports(conn, [_report("2026-01-01T10:00:00", 52.5, 13.4, airtag_id="bike")])
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook Air", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    location = record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
+    with pytest.raises(psycopg.errors.CheckViolation):
+        record_alert(
+            conn,
+            Alert(
+                reason="moved_without_owner",
+                distance_meters=1.0,
+                airtag_id="bike",
+                report_id=inserted[0].id,
+                owner_device_id="mac-1",
+                owner_location_id=location.id,
+            ),
+        )
+    conn.rollback()

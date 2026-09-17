@@ -24,12 +24,14 @@ from airtag_sentry.db import (
     OwnerLocation,
     Report,
     count_reports,
+    fetch_owner_device_location_history,
     fetch_reports_before,
     get_airtag_key,
     get_conn,
     get_geocoded_point,
     get_settings,
     insert_reports,
+    latest_owner_device_locations,
     list_airtags,
     list_owner_devices,
     primary_owner_device_latest_location,
@@ -42,7 +44,9 @@ from airtag_sentry.db import (
 from airtag_sentry.geocode import format_location_line, reverse_geocode
 from airtag_sentry.movement import (
     MovementConfig,
+    device_already_reunited,
     evaluate_away,
+    evaluate_device_away,
     evaluate_movement,
     is_speed_outlier,
     owner_already_reunited,
@@ -181,6 +185,88 @@ def _owner_location_for_away_check(
     return primary_owner_device_location_near(conn, near_timestamp)
 
 
+def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSettings) -> None:
+    """"You left without X" alerts for non-primary owner devices (a laptop,
+    AirPods) - the device-side counterpart to _poll_airtag's moved_without_owner
+    check for AirTags (see CLAUDE.md's AirTag/device parity constraint). Runs
+    once per poll, after _update_owner_devices has refreshed every enabled
+    device's location, reusing the same movement_away_distance_meters/
+    owner_location_max_age_minutes settings AirTags already use.
+
+    Opt-in per device (device.away_alert_enabled) - introducing this
+    shouldn't suddenly start alerting on every device in the account. The
+    primary device is never evaluated, since it *is* "you" (see
+    owner_tracking.py).
+
+    Unlike AirTag reports (deduped on (airtag_id, timestamp), so a given
+    report is only ever evaluated once), owner_device_locations is an
+    append-only history with one row per poll regardless of movement - so
+    this only fires on the transition *into* "away", by checking whether the
+    device's previous recorded location was already away too, rather than
+    re-notifying every poll for as long as it stays away.
+
+    An alert is always recorded once that transition is detected, same as
+    _poll_airtag - notify_on_moved_without_owner only gates the push, not
+    whether the alert itself is kept in history.
+    """
+    devices = {d.id: d for d in list_owner_devices(conn)}
+    if not any(d.is_primary for d in devices.values()):
+        return
+
+    movement_cfg = MovementConfig(
+        distance_threshold_meters=settings.movement_distance_threshold_meters,
+        stillstand_hours=settings.movement_stillstand_hours,
+        stillstand_movement_meters=settings.movement_stillstand_movement_meters,
+        alert_on_backfill=settings.movement_alert_on_backfill,
+        away_distance_threshold_meters=settings.movement_away_distance_meters,
+        owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
+        max_speed_kmh=settings.movement_max_speed_kmh,
+    )
+
+    for location in latest_owner_device_locations(conn):
+        device = devices.get(location.device_id)
+        if device is None or device.is_primary or not device.away_alert_enabled:
+            continue
+
+        history = fetch_owner_device_location_history(conn, device.id, limit=2)
+        if len(history) <= 1:
+            if not settings.movement_alert_on_backfill:
+                continue  # first-ever reading for this device - same backfill guard AirTags use
+        else:
+            previous = history[1]
+            previous_primary = primary_owner_device_location_near(conn, previous.recorded_at)
+            if evaluate_device_away(previous, previous_primary, movement_cfg) is not None:
+                continue  # already away last poll too - not a new "left without" event
+
+        primary_location = _owner_location_for_away_check(
+            cfg, conn, location.recorded_at, movement_cfg.owner_location_max_age_minutes
+        )
+        away_distance = evaluate_device_away(location, primary_location, movement_cfg)
+        if away_distance is None:
+            continue
+
+        record_alert(
+            conn,
+            DbAlert(
+                reason="moved_without_owner",
+                distance_meters=away_distance,
+                owner_device_id=device.id,
+                owner_location_id=location.id,
+            ),
+        )
+        current_primary_location = primary_owner_device_latest_location(conn)
+        if _should_notify(settings, "moved_without_owner") and not device_already_reunited(
+            location, current_primary_location, movement_cfg
+        ):
+            name = device.display_name or device.name
+            address = reverse_geocode(location.lat, location.lon).address
+            message = (
+                f"Du hast dich ohne {name} entfernt ({away_distance:.0f} m).\n"
+                f"{format_location_line(location.lat, location.lon, location.recorded_at, address, cfg.display_timezone)}"
+            )
+            notify_all(notifiers, _ALERT_TITLES["moved_without_owner"], message)
+
+
 # Guards against two poll_once() calls racing each other - the scheduled
 # background poll (scheduler.py) and a dashboard-triggered manual "refresh
 # now" (web/app.py's /api/poll-now) run on different threads with no other
@@ -192,9 +278,10 @@ _poll_lock = threading.Lock()
 def poll_once(cfg: Config) -> bool:
     """Owner-device tracking and AirTag tracking are two independent Apple
     sessions (see owner_tracking.py's module docstring) - connecting only one
-    of them must not stop the other from polling. _update_owner_devices() runs
-    unconditionally; the AirTag session is only restored/polled if one has
-    actually been connected via the dashboard.
+    of them must not stop the other from polling. _update_owner_devices() and
+    _evaluate_device_away_alerts() both run unconditionally (the latter is a
+    no-op without a primary device set); the AirTag session is only
+    restored/polled if one has actually been connected via the dashboard.
 
     Returns False (and does nothing else) if another poll is already running -
     the caller can treat that the same as a completed poll, since the
@@ -210,6 +297,7 @@ def poll_once(cfg: Config) -> bool:
             ha_publisher = build_ha_publisher(cfg, conn)
             try:
                 _update_owner_devices(cfg, conn, ha_publisher)
+                _evaluate_device_away_alerts(cfg, conn, notifiers, settings)
 
                 if not is_connected(cfg):
                     logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
@@ -344,6 +432,9 @@ def _poll_airtag(
                     f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
                 )
                 notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+
+            if not airtag.away_alert_enabled:
+                continue
 
             owner_location = _owner_location_for_away_check(
                 cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes

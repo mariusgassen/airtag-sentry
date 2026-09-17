@@ -21,6 +21,13 @@ class AirtagRecord:
     name: str
     icon: str | None = None
     color: str | None = None
+    # Whether this AirTag raises a "moved without you" alert when it ends up
+    # far from the primary owner device - defaults true, preserving the
+    # behavior from before this was per-object (still gated by the account-
+    # wide notify_on_moved_without_owner switch too). Mirrors OwnerDevice's
+    # own away_alert_enabled, which defaults false instead - see its
+    # docstring for why the defaults differ.
+    away_alert_enabled: bool = True
     # User-controlled display order in ObjectsList.tsx (see set_airtags_order)
     # - lower sorts first. Mirrors OwnerDevice.sort_order; compare=False for
     # the same reason (presentation-only, not part of an AirTag's identity).
@@ -51,10 +58,18 @@ class Report:
 
 @dataclasses.dataclass(frozen=True)
 class Alert:
-    airtag_id: str
+    """Polymorphic: exactly one of (airtag_id, report_id) or (owner_device_id,
+    owner_location_id) is set, matching the alerts table's alerts_source_xor
+    CHECK - an AirTag's own movement/away alert, or a non-primary owner
+    device's "left without you" alert (see tracker._evaluate_device_away_alerts).
+    """
+
     reason: str
     distance_meters: float
-    report_id: int
+    airtag_id: str | None = None
+    report_id: int | None = None
+    owner_device_id: str | None = None
+    owner_location_id: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -113,10 +128,11 @@ class OwnerDevice:
     device_type: str
     enabled: bool
     # Exactly one device (or none) is primary at a time - see
-    # set_owner_device_primary(). The primary device is the one used for
-    # "moved without you" away-correlation and its history is drawn as the
-    # map trail; other enabled devices are tracked/listed but don't affect
-    # either.
+    # set_owner_device_primary(). The primary device is the one *other*
+    # objects (AirTags, and any other enabled device with away_alert_enabled)
+    # get compared against for "moved without you"/away-correlation, and its
+    # history is drawn as the map trail; the primary device is never itself
+    # evaluated for an away alert - it defines where "you" are.
     is_primary: bool
     # User-chosen name/icon/color, mirroring AirtagRecord's - None means
     # "unset", i.e. fall back to `name` (the Apple-synced technical name) /
@@ -125,6 +141,14 @@ class OwnerDevice:
     display_name: str | None = None
     icon: str | None = None
     color: str | None = None
+    # Whether this device raises a "you left without it" alert when it ends
+    # up far from the primary device - mirrors AirtagRecord.away_alert_enabled,
+    # but defaults false: unlike an AirTag (which already had this alert
+    # unconditionally before it became per-object), a device never had any
+    # away-alerting at all, and turning it on for every Mac/iPad/etc. in the
+    # account the moment this shipped would be a surprise, not a fix. Ignored
+    # for whichever device is currently primary (see is_primary above).
+    away_alert_enabled: bool = False
     # Set to the poll's timestamp every time this device appears in a
     # *successful* live Apple device listing (upsert_owner_devices, called for
     # every device the account has - see owner_tracking.py). Comparing this
@@ -242,13 +266,16 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
         yield conn
 
 
+_AIRTAG_COLUMNS = "id, name, icon, color, away_alert_enabled, sort_order"
+
+
 def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord:
     with conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             INSERT INTO airtags (id, name, sort_order)
             VALUES (%s, %s, COALESCE((SELECT MAX(sort_order) FROM airtags), -1) + 1)
-            RETURNING id, name, icon, color, sort_order
+            RETURNING {_AIRTAG_COLUMNS}
             """,
             (airtag_id, name),
         )
@@ -259,14 +286,14 @@ def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> Airtag
 
 def list_airtags(conn: psycopg.Connection) -> list[AirtagRecord]:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, name, icon, color, sort_order FROM airtags ORDER BY sort_order, created_at ASC")
+        cur.execute(f"SELECT {_AIRTAG_COLUMNS} FROM airtags ORDER BY sort_order, created_at ASC")
         return [AirtagRecord(*row) for row in cur.fetchall()]
 
 
 def rename_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord | None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE airtags SET name = %s WHERE id = %s RETURNING id, name, icon, color, sort_order",
+            f"UPDATE airtags SET name = %s WHERE id = %s RETURNING {_AIRTAG_COLUMNS}",
             (name, airtag_id),
         )
         row = cur.fetchone()
@@ -294,8 +321,20 @@ def set_airtag_appearance(
     always submits both current values."""
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE airtags SET icon = %s, color = %s WHERE id = %s RETURNING id, name, icon, color, sort_order",
+            f"UPDATE airtags SET icon = %s, color = %s WHERE id = %s RETURNING {_AIRTAG_COLUMNS}",
             (icon, color, airtag_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return AirtagRecord(*row) if row else None
+
+
+def set_airtag_away_alert_enabled(conn: psycopg.Connection, airtag_id: str, enabled: bool) -> AirtagRecord | None:
+    """Mirrors set_owner_device_away_alert_enabled."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE airtags SET away_alert_enabled = %s WHERE id = %s RETURNING {_AIRTAG_COLUMNS}",
+            (enabled, airtag_id),
         )
         row = cur.fetchone()
     conn.commit()
@@ -394,8 +433,16 @@ def fetch_reports_before(
 def record_alert(conn: psycopg.Connection, alert: Alert) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO alerts (airtag_id, reason, distance_meters, report_id) VALUES (%s, %s, %s, %s)",
-            (alert.airtag_id, alert.reason, alert.distance_meters, alert.report_id),
+            "INSERT INTO alerts (airtag_id, reason, distance_meters, report_id, owner_device_id, owner_location_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (
+                alert.airtag_id,
+                alert.reason,
+                alert.distance_meters,
+                alert.report_id,
+                alert.owner_device_id,
+                alert.owner_location_id,
+            ),
         )
     conn.commit()
 
@@ -788,7 +835,8 @@ def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict], seen_at:
 
 
 _OWNER_DEVICE_COLUMNS = (
-    "id, name, device_type, enabled, is_primary, display_name, icon, color, last_seen_at, sort_order"
+    "id, name, device_type, enabled, is_primary, display_name, icon, color, "
+    "away_alert_enabled, last_seen_at, sort_order"
 )
 
 
@@ -883,6 +931,21 @@ def set_owner_device_appearance(
         cur.execute(
             f"UPDATE owner_devices SET icon = %s, color = %s WHERE id = %s RETURNING {_OWNER_DEVICE_COLUMNS}",
             (icon, color, device_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return OwnerDevice(*row) if row else None
+
+
+def set_owner_device_away_alert_enabled(conn: psycopg.Connection, device_id: str, enabled: bool) -> OwnerDevice | None:
+    """Mirrors set_airtag_away_alert_enabled. Meaningless (and not evaluated,
+    see tracker._evaluate_device_away_alerts) for whichever device is
+    currently primary, but harmless to set - it just has no effect until/
+    unless that device stops being primary."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE owner_devices SET away_alert_enabled = %s WHERE id = %s RETURNING {_OWNER_DEVICE_COLUMNS}",
+            (enabled, device_id),
         )
         row = cur.fetchone()
     conn.commit()

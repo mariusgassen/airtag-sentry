@@ -64,6 +64,7 @@ from airtag_sentry.db import (
     set_owner_apple_credentials,
     set_owner_apple_sync_status,
     set_owner_device_appearance,
+    set_owner_device_away_alert_enabled,
     set_owner_device_enabled,
     set_owner_device_primary,
     set_owner_devices_order,
@@ -307,6 +308,10 @@ def rename_device(conn, device_id: str, display_name: str | None) -> OwnerDevice
 
 def set_device_appearance(conn, device_id: str, icon: str | None, color: str | None) -> OwnerDevice | None:
     return set_owner_device_appearance(conn, device_id, icon, color)
+
+
+def set_device_away_alert_enabled(conn, device_id: str, enabled: bool) -> OwnerDevice | None:
+    return set_owner_device_away_alert_enabled(conn, device_id, enabled)
 
 
 def set_devices_order(conn, device_ids: list[str]) -> None:
