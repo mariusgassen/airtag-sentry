@@ -295,6 +295,60 @@ def _fake_cfg() -> types.SimpleNamespace:
     return types.SimpleNamespace(display_timezone=dt.timezone.utc)
 
 
+def test_away_message_shows_both_object_and_owner_positions():
+    """The whole point: a false positive (GPS drift, an address the owner
+    doesn't recognize) should be sortable from the notification alone,
+    without opening the app - see the user's own framing: "this is here"
+    vs "you were there"."""
+    from airtag_sentry import tracker as tracker_module
+
+    message = tracker_module._away_message(
+        "MacBook",
+        "left_behind",
+        620.0,
+        52.5,
+        13.4,
+        dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc),
+        "Musterstr. 1",
+        52.51,
+        13.41,
+        dt.datetime(2026, 1, 1, 8, 55, tzinfo=dt.timezone.utc),
+        "Bahnhofstr. 5",
+        dt.timezone.utc,
+    )
+
+    assert message.startswith("Du hast dich 620 m von MacBook entfernt.")
+    assert "MacBook ist hier:" in message
+    assert "Musterstr. 1" in message
+    assert "https://maps.google.com/?q=52.5,13.4" in message
+    assert "Du warst hier:" in message
+    assert "Bahnhofstr. 5" in message
+    assert "https://maps.google.com/?q=52.51,13.41" in message
+
+
+def test_away_message_autonomous_movement_headline():
+    from airtag_sentry import tracker as tracker_module
+
+    message = tracker_module._away_message(
+        "Rucksack",
+        "autonomous_movement",
+        900.0,
+        52.5,
+        13.4,
+        dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc),
+        None,
+        52.4,
+        13.3,
+        dt.datetime(2026, 1, 1, 8, 58, tzinfo=dt.timezone.utc),
+        None,
+        dt.timezone.utc,
+    )
+
+    assert message.startswith("Rucksack hat sich eigenständig bewegt und ist jetzt 900 m von dir entfernt.")
+    assert "Rucksack ist hier:" in message
+    assert "Du warst hier:" in message
+
+
 def test_evaluate_device_away_alerts_noop_without_primary_device(monkeypatch, conn):
     from airtag_sentry import tracker as tracker_module
 
@@ -420,6 +474,12 @@ def test_evaluate_device_away_alerts_fires_on_new_away_transition(monkeypatch, c
     assert title == "Eigenständige Bewegung"
     assert "MacBook" in message
     assert "eigenständig" in message
+    # both positions shown, not just the device's, so a false positive is
+    # obvious from the notification alone - see CLAUDE.md
+    assert "MacBook ist hier:" in message
+    assert "Du warst hier:" in message
+    assert "52.51,13.4" in message  # the device's own position
+    assert "52.5,13.4" in message  # the primary's position at the same time
 
     with conn.cursor() as cur:
         cur.execute("SELECT reason, owner_device_id FROM alerts")
