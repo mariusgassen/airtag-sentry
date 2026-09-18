@@ -299,6 +299,14 @@ export function CheckIcon({ className }: IconProps) {
   )
 }
 
+export function CloseIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth={2} strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** Grip handle for drag-to-reorder rows (ObjectsList.tsx's edit mode) - three
  * stacked bars, the standard iOS/Android reorder affordance. */
 export function DragHandleIcon({ className }: IconProps) {

@@ -85,7 +85,7 @@ export function OverviewMap({
             >
               {/* autoPan off: centerMarkerOnClick above already centers this
                   pin explicitly on click. */}
-              <Popup autoPan={false}>
+              <Popup autoPan={false} closeButton={false}>
                 <div className={POPUP_WIDTH_CLASS}>
                   <PopupHeader
                     title={airtag.name}
@@ -125,7 +125,7 @@ export function OverviewMap({
             >
               {/* autoPan off: centerMarkerOnClick above already centers this
                   pin explicitly on click. */}
-              <Popup autoPan={false}>
+              <Popup autoPan={false} closeButton={false}>
                 <div className={POPUP_WIDTH_CLASS}>
                   <PopupHeader
                     title={loc.name ?? 'Gerät'}
