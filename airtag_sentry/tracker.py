@@ -486,6 +486,19 @@ def _poll_airtag(
             if away_distance is None:
                 continue
 
+            if prior_reports:
+                # AirTags report sporadically, so several new reports often
+                # arrive together (or across polls within minutes of each
+                # other) describing the same ongoing "away" episode, not a
+                # fresh one each time - only alert on the transition *into*
+                # away, same as _evaluate_device_away_alerts does for owner
+                # devices. Without this, each new report in a catch-up burst
+                # re-notified on its own.
+                previous_report = prior_reports[-1]
+                previous_owner_location = primary_owner_device_location_near(conn, previous_report.timestamp)
+                if evaluate_away(previous_report, previous_owner_location, movement_cfg) is not None:
+                    continue  # already away as of the last report too - not a new event
+
             object_moved = bool(prior_reports) and is_object_displaced(
                 report.lat,
                 report.lon,

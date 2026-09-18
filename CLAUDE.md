@@ -123,6 +123,18 @@ on every poll regardless of the device's own movement and so never told
 the two cases apart either. Don't let a future refactor reintroduce either
 asymmetry.
 
+**Also fire only on the transition into "away", never per new reading that
+merely reconfirms it.** AirTags report sporadically, so several new reports
+routinely arrive together (or across polls minutes apart) describing one
+ongoing away episode, not a fresh one each time - evaluating every new
+report/poll independently means the same episode re-notifies repeatedly in
+a short window. `_evaluate_device_away_alerts` got this right from the
+start (checks whether the device's *previous* reading was already away
+too); `_poll_airtag`'s away-check initially didn't, and needed the same
+"was the previous kept report already away" check retrofitted. Any new
+away-evaluation path must include this check from the start, on both
+sides.
+
 ## The Zeitachse tab
 
 `TimelinePage.tsx` (App.tsx's third tab, alongside Objekte/Einstellungen) is
