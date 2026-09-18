@@ -50,7 +50,8 @@ export function formatDayHeading(iso: string): string {
 export const ALERT_REASON_LABELS: Record<string, string> = {
   distance_threshold: 'Bewegung',
   stillstand_movement: 'Bewegung nach Stillstand',
-  moved_without_owner: 'Bewegung ohne dich',
+  left_behind: 'Zurückgelassen',
+  autonomous_movement: 'Eigenständige Bewegung',
 }
 
 export function formatAlertReason(reason: string): string {

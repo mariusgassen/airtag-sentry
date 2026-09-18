@@ -91,6 +91,38 @@ API response and arrive newest-first (`recorded_at` is what
 case). Mirror the *feature and UI*, not the implementation line-for-line -
 but never skip a side because its plumbing is different.
 
+## Hard constraint: "you left it" and "it left you" are different alerts
+
+Distinguishing an object moving away *because you moved and left it
+behind* from an object moving away *on its own, without you* is not a
+nice-to-have refinement - it's the actual reason this app exists. The
+first is routine (you forgot your bag at home); the second is the signal
+worth being woken up for (it's being carried off by someone else, or
+something is otherwise wrong). Any "moved without you"-style alert -
+`movement.py`'s away-correlation, `tracker.py`'s alert evaluation, the
+notification text, the per-reason `notify_on_*` settings - must classify
+which of the two happened, not collapse them into one undifferentiated
+"away" event, for AirTags and owner devices alike (see the parity
+constraint above).
+
+The classification signal is simple: at the moment an object is found far
+from the primary owner device, check whether the *object's own* position
+also just changed meaningfully (the same accuracy-adjusted
+`distance_threshold_meters` check `evaluate_movement` already uses for an
+AirTag's own reports). If it did, the object moved on its own - alert as
+autonomous movement. If it didn't - the object is right where it was, and
+it's the owner who moved - alert as left-behind, calmer framing, likely a
+notification people want to silence independently of the other case.
+
+Watch for the gating bug this constraint exists to prevent: as originally
+built, `_poll_airtag`'s away-check only ran when `evaluate_movement` had
+already fired for that report - which means a *stationary* left-behind
+AirTag could never trigger an away-check at all (no movement alert, so the
+away-check was never reached), while the away-check for owner devices ran
+on every poll regardless of the device's own movement and so never told
+the two cases apart either. Don't let a future refactor reintroduce either
+asymmetry.
+
 ## The Zeitachse tab
 
 `TimelinePage.tsx` (App.tsx's third tab, alongside Objekte/Einstellungen) is

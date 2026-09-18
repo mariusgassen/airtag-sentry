@@ -3,10 +3,13 @@ import datetime as dt
 from airtag_sentry.db import OwnerLocation, Report
 from airtag_sentry.movement import (
     MovementConfig,
+    device_already_reunited,
     evaluate_away,
+    evaluate_device_away,
     evaluate_movement,
     haversine_distance,
     implied_speed_kmh,
+    is_object_displaced,
     is_speed_outlier,
     owner_already_reunited,
 )
@@ -220,3 +223,60 @@ def test_is_speed_outlier_true_for_implausible_jump():
     prior = _report(1 / 60, 52.5163, 13.3777)
     new = _report(0, 52.4029, 13.0402)
     assert is_speed_outlier(new, prior, CFG) is True
+
+
+def test_evaluate_device_away_none_without_primary_location():
+    device = _owner_location(0, 52.5, 13.4, device_id="laptop")
+    assert evaluate_device_away(device, None, CFG) is None
+
+
+def test_evaluate_device_away_returns_distance_when_far_and_close_in_time():
+    device = _owner_location(0, 52.51, 13.4, device_id="laptop")  # ~1.1km from primary below
+    primary = _owner_location(5, 52.5, 13.4, device_id="primary")
+    distance = evaluate_device_away(device, primary, CFG)
+    assert distance is not None
+    assert distance > CFG.away_distance_threshold_meters
+
+
+def test_evaluate_device_away_none_when_near_primary():
+    device = _owner_location(0, 52.5, 13.4, device_id="laptop")
+    primary = _owner_location(5, 52.50005, 13.40005, device_id="primary")  # a few meters of GPS noise
+    assert evaluate_device_away(device, primary, CFG) is None
+
+
+def test_evaluate_device_away_none_when_primary_reading_far_in_time():
+    device = _owner_location(0, 52.51, 13.4, device_id="laptop")
+    primary = _owner_location(120, 52.5, 13.4, device_id="primary")  # 120 min away, over the 60 min max age
+    assert evaluate_device_away(device, primary, CFG) is None
+
+
+def test_device_already_reunited_false_without_current_primary_location():
+    device = _owner_location(0, 52.5, 13.4, device_id="laptop")
+    assert device_already_reunited(device, None, CFG) is False
+
+
+def test_device_already_reunited_true_when_current_primary_location_is_near():
+    device = _owner_location(0, 52.5, 13.4, device_id="laptop")
+    current_primary = _owner_location(0, 52.50005, 13.40005, device_id="primary")
+    assert device_already_reunited(device, current_primary, CFG) is True
+
+
+def test_device_already_reunited_false_when_current_primary_location_still_far():
+    device = _owner_location(0, 52.5, 13.4, device_id="laptop")
+    current_primary = _owner_location(0, 52.51, 13.4, device_id="primary")
+    assert device_already_reunited(device, current_primary, CFG) is False
+
+
+def test_is_object_displaced_false_for_gps_noise():
+    # A few meters apart - within GPS noise, well under the 100m threshold.
+    assert is_object_displaced(52.5, 13.4, 5.0, 52.50005, 13.40005, 5.0, CFG) is False
+
+
+def test_is_object_displaced_true_for_real_movement():
+    # ~1.1km apart - well over the 100m threshold.
+    assert is_object_displaced(52.5, 13.4, 5.0, 52.51, 13.4, 5.0, CFG) is True
+
+
+def test_is_object_displaced_discounts_combined_accuracy_radius():
+    # ~100m raw distance, entirely absorbed by the two points' noise margins.
+    assert is_object_displaced(52.5, 13.4, 100.0, 52.5009, 13.4, 100.0, CFG) is False

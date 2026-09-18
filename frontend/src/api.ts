@@ -4,6 +4,9 @@ export interface Airtag {
   has_key: boolean
   icon: string | null
   color: string | null
+  // Whether this AirTag raises a "moved without you" alert - mirrors
+  // OwnerDevice's own away_alert_enabled. See AirtagDetail.tsx.
+  away_alert_enabled: boolean
 }
 
 export interface Report {
@@ -57,7 +60,12 @@ export interface AppSettings {
   map_tile_provider: 'auto' | 'osm'
   notify_on_distance_threshold: boolean
   notify_on_stillstand_movement: boolean
-  notify_on_moved_without_owner: boolean
+  // Split from a single notify_on_moved_without_owner - left_behind (you
+  // moved away from a stationary object, routine) and autonomous_movement
+  // (the object moved on its own, the actual signal this app exists to
+  // catch) are independently toggleable. See CLAUDE.md.
+  notify_on_left_behind: boolean
+  notify_on_autonomous_movement: boolean
 }
 
 export interface OwnerDevice {
@@ -72,6 +80,10 @@ export interface OwnerDevice {
   display_name: string | null
   icon: string | null
   color: string | null
+  // Whether this device raises a "you left without it" alert - mirrors
+  // Airtag's own away_alert_enabled. Ignored while this device is primary
+  // (see AirtagDetail.tsx/DeviceDetail.tsx).
+  away_alert_enabled: boolean
   // Only present on GET /api/owner-devices (not on the rename/enable/primary/
   // appearance mutation responses) - whether this device was present in the
   // background poller's most recent *successful* Apple sync. False means
@@ -279,6 +291,18 @@ export async function setAirtagAppearance(
   ).json()
 }
 
+export async function setAirtagAwayAlertEnabled(
+  id: string,
+  enabled: boolean,
+): Promise<{ id: string; away_alert_enabled: boolean }> {
+  return (
+    await apiFetch(`/api/airtags/${encodeURIComponent(id)}/away-alert`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    })
+  ).json()
+}
+
 export async function setAirtagKeyB64(id: string, privateKeyB64: string): Promise<void> {
   await apiFetch(`/api/airtags/${encodeURIComponent(id)}/key`, {
     method: 'POST',
@@ -400,6 +424,15 @@ export async function setOwnerDeviceAppearance(
     await apiFetch('/api/owner-devices/appearance', {
       method: 'PATCH',
       body: JSON.stringify({ device_id: id, icon, color }),
+    })
+  ).json()
+}
+
+export async function setOwnerDeviceAwayAlertEnabled(id: string, enabled: boolean): Promise<OwnerDevice> {
+  return (
+    await apiFetch('/api/owner-devices/away-alert', {
+      method: 'PATCH',
+      body: JSON.stringify({ device_id: id, enabled }),
     })
   ).json()
 }

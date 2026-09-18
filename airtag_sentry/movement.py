@@ -53,6 +53,34 @@ def _accuracy_adjusted_distance(distance: float, accuracy1: float | None, accura
     return max(distance - slack, 0.0)
 
 
+def is_object_displaced(
+    lat1: float,
+    lon1: float,
+    accuracy1: float | None,
+    lat2: float,
+    lon2: float,
+    accuracy2: float | None,
+    cfg: MovementConfig,
+) -> bool:
+    """Whether two readings of the *same tracked object's own position*
+    (not object-vs-owner) differ enough to count as real movement rather
+    than GPS/BLE noise - the same accuracy-adjusted distance_threshold_meters
+    check evaluate_movement uses for an AirTag's own reports, generalized to
+    plain lat/lon/accuracy so it also works for an owner device's own two
+    readings (see tracker._evaluate_device_away_alerts).
+
+    This is the classification signal behind CLAUDE.md's "you left it" vs
+    "it left you" constraint: called only once an object is already known to
+    be far from the primary owner device, to decide whether the object
+    itself moved there on its own (alert as autonomous movement - the actual
+    signal this app exists to catch) or stayed put while the owner moved
+    away from it (alert as left-behind - routine, not urgent).
+    """
+    raw_distance = haversine_distance(lat1, lon1, lat2, lon2)
+    distance = _accuracy_adjusted_distance(raw_distance, accuracy1, accuracy2)
+    return distance > cfg.distance_threshold_meters
+
+
 def implied_speed_kmh(lat1: float, lon1: float, t1: dt.datetime, lat2: float, lon2: float, t2: dt.datetime) -> float:
     """Average speed implied by traveling between two points/timestamps, in
     km/h. `math.inf` for two points at (or effectively at) the same instant -
@@ -182,5 +210,54 @@ def owner_already_reunited(
     )
     distance = _accuracy_adjusted_distance(
         raw_distance, new_report.accuracy, current_owner_location.horizontal_accuracy
+    )
+    return distance <= cfg.away_distance_threshold_meters
+
+
+def evaluate_device_away(
+    device_location: OwnerLocation,
+    primary_location: OwnerLocation | None,
+    cfg: MovementConfig,
+) -> float | None:
+    """Device counterpart to evaluate_away() - the same "how far from the
+    primary owner device" check, but for a non-primary owner device's own
+    location instead of an AirTag report (see tracker._evaluate_device_away_alerts,
+    CLAUDE.md's AirTag/device parity constraint). `primary_location` must be
+    the primary device's reading closest in time to `device_location.recorded_at`
+    (db.primary_owner_device_location_near), for the same reason evaluate_away()
+    needs a time-matched reading rather than whatever's most recent.
+    """
+    if primary_location is None:
+        return None
+    time_delta = abs(device_location.recorded_at - primary_location.recorded_at)
+    if time_delta > dt.timedelta(minutes=cfg.owner_location_max_age_minutes):
+        return None
+
+    raw_distance = haversine_distance(
+        device_location.lat, device_location.lon, primary_location.lat, primary_location.lon
+    )
+    distance = _accuracy_adjusted_distance(
+        raw_distance, device_location.horizontal_accuracy, primary_location.horizontal_accuracy
+    )
+    return distance if distance > cfg.away_distance_threshold_meters else None
+
+
+def device_already_reunited(
+    device_location: OwnerLocation,
+    current_primary_location: OwnerLocation | None,
+    cfg: MovementConfig,
+) -> bool:
+    """Device counterpart to owner_already_reunited() - whether the primary
+    device's *current* location is already back near where `device_location`
+    (the non-primary device's own last known position) puts it, so a "you
+    left without X" push that's about to fire is already stale.
+    """
+    if current_primary_location is None:
+        return False
+    raw_distance = haversine_distance(
+        device_location.lat, device_location.lon, current_primary_location.lat, current_primary_location.lon
+    )
+    distance = _accuracy_adjusted_distance(
+        raw_distance, device_location.horizontal_accuracy, current_primary_location.horizontal_accuracy
     )
     return distance <= cfg.away_distance_threshold_meters

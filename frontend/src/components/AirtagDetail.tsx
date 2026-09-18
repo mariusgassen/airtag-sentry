@@ -6,6 +6,7 @@ import {
   deleteAirtagKey,
   renameAirtag,
   setAirtagAppearance,
+  setAirtagAwayAlertEnabled,
   setAirtagKeyB64,
   setAirtagKeyJson,
 } from '../api'
@@ -15,6 +16,7 @@ import { formatAirtagBattery, formatAlertReason, formatRelative, isLowBattery } 
 import { AirtagAvatar } from './AirtagAvatar'
 import {
   AirtagGlyph,
+  BellIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -179,6 +181,17 @@ export function AirtagDetail({
   const [keyOpen, setKeyOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [appearanceOpen, setAppearanceOpen] = useState(false)
+  const [awayAlertSaving, setAwayAlertSaving] = useState(false)
+
+  async function handleAwayAlertToggle(enabled: boolean) {
+    setAwayAlertSaving(true)
+    try {
+      await setAirtagAwayAlertEnabled(airtag.id, enabled)
+      await onChanged()
+    } finally {
+      setAwayAlertSaving(false)
+    }
+  }
 
   async function handleDelete() {
     if (
@@ -257,6 +270,21 @@ export function AirtagDetail({
               bordered={false}
             />
             {appearanceOpen && <AppearanceForm airtag={airtag} onDone={onChanged} />}
+          </Section>
+
+          <Section>
+            <Row
+              icon={<BellIcon className="h-5 w-5" />}
+              label="Alarm wenn ohne dich unterwegs"
+              trailing={
+                <Switch
+                  checked={airtag.away_alert_enabled}
+                  onChange={handleAwayAlertToggle}
+                  disabled={awayAlertSaving}
+                />
+              }
+              bordered={false}
+            />
           </Section>
 
           <Section>

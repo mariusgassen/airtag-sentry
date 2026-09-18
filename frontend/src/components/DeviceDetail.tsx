@@ -1,12 +1,27 @@
 import { useState } from 'react'
 import type { LocationStay, OwnerDevice, OwnerLocation } from '../api'
-import { playOwnerDeviceSound, renameOwnerDevice, setOwnerDeviceAppearance } from '../api'
+import {
+  playOwnerDeviceSound,
+  renameOwnerDevice,
+  setOwnerDeviceAppearance,
+  setOwnerDeviceAwayAlertEnabled,
+} from '../api'
 import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
 import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
-import { HistoryStepper, Row, Section } from './AirtagDetail'
-import { ChevronLeftIcon, ChevronRightIcon, ClockIcon, PaletteIcon, PencilIcon, PersonIcon, SpeakerIcon, StarIcon } from './icons'
+import { HistoryStepper, Row, Section, Switch } from './AirtagDetail'
+import {
+  BellIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ClockIcon,
+  PaletteIcon,
+  PencilIcon,
+  PersonIcon,
+  SpeakerIcon,
+  StarIcon,
+} from './icons'
 
 interface Props {
   device: OwnerDevice
@@ -48,6 +63,17 @@ export function DeviceDetail({
   const [appearanceOpen, setAppearanceOpen] = useState(false)
   const [soundState, setSoundState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [soundError, setSoundError] = useState<string | null>(null)
+  const [awayAlertSaving, setAwayAlertSaving] = useState(false)
+
+  async function handleAwayAlertToggle(enabled: boolean) {
+    setAwayAlertSaving(true)
+    try {
+      await setOwnerDeviceAwayAlertEnabled(device.id, enabled)
+      await onChanged()
+    } finally {
+      setAwayAlertSaving(false)
+    }
+  }
 
   async function handlePlaySound() {
     setSoundState('sending')
@@ -160,6 +186,26 @@ export function DeviceDetail({
               bordered={false}
             />
             {appearanceOpen && <DeviceAppearanceForm device={device} onDone={onChanged} />}
+          </Section>
+
+          <Section>
+            <Row
+              icon={<BellIcon className="h-5 w-5" />}
+              label="Alarm wenn du dich ohne es entfernst"
+              trailing={
+                <Switch
+                  checked={device.is_primary ? false : device.away_alert_enabled}
+                  onChange={handleAwayAlertToggle}
+                  disabled={awayAlertSaving || device.is_primary}
+                />
+              }
+              bordered={false}
+            />
+            {device.is_primary && (
+              <p className="border-t border-[var(--divider)] p-3 text-[0.72rem] text-[var(--text-secondary)]">
+                Dieses Gerät ist dein Referenzstandort und wird nicht mit sich selbst verglichen.
+              </p>
+            )}
           </Section>
 
           <Section>
