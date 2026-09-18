@@ -43,7 +43,7 @@ import {
 import { centerMarkerOnClick, isWithinPlace, mapsUrl } from '../maps'
 import { CARTO_API_KEY, cartoTilesEnabled } from '../mapTiles'
 import { useColorScheme } from '../theme'
-import { BatteryIcon, ClockIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
+import { BatteryIcon, ClockIcon, CloseIcon, LocationArrowIcon, MapPinIcon, PlusIcon, RouteIcon } from './icons'
 
 /** Callback for "Ort hier hinzufügen" (see AddPlaceButton) - jumps to
  * Settings -> Orte and opens the place editor pre-seeded at this exact
@@ -99,14 +99,32 @@ export function InfoRow({ icon, children }: { icon: ReactNode; children: ReactNo
 }
 
 /** Popup title + its icon-only secondary actions (OpenInMapsButton,
- * AddPlaceButton), on one row - shared so every popup in the app opens with
- * the same "name left, utility icons right" layout instead of a heavy
- * button row further down fighting for attention with the title. */
+ * AddPlaceButton) and the popup's own close button, all on one row - shared
+ * so every popup in the app opens with the same "name left, utility icons
+ * right" layout instead of a heavy button row further down fighting for
+ * attention with the title. The close button lives here, as the rightmost
+ * action, rather than using Leaflet's default top-right close glyph - that
+ * default is positioned independently of this row (absolute, relative to
+ * the popup chrome, not this content) and visually overlapped whichever
+ * action ended up rightmost here. Every `<Popup>` in the app passes
+ * `closeButton={false}` to suppress it in favor of this one. */
 export function PopupHeader({ title, actions }: { title: string; actions?: ReactNode }) {
+  const map = useMap()
   return (
     <div className="mb-1.5 flex items-start justify-between gap-2">
       <p className="text-[0.95rem] font-semibold leading-tight">{title}</p>
-      {actions && <div className="flex shrink-0 gap-1">{actions}</div>}
+      <div className="flex shrink-0 items-center gap-1">
+        {actions}
+        <button
+          type="button"
+          onClick={() => map.closePopup()}
+          title="Schließen"
+          aria-label="Schließen"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+        >
+          <CloseIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
   )
 }
@@ -654,7 +672,7 @@ export function SelectedPin({
       </Marker>
       {/* autoPan off: centerMarkerOnClick above already centers this pin
           explicitly on click. */}
-      <Popup ref={popupRef} position={position} offset={PIN_POPUP_OFFSET} autoPan={false}>
+      <Popup ref={popupRef} position={position} offset={PIN_POPUP_OFFSET} autoPan={false} closeButton={false}>
         {children}
       </Popup>
     </>
@@ -686,7 +704,7 @@ export function NoReportsView({
             than the bare title this used to be - this is a real, if
             approximate, position (the browser's own geolocation), not just
             filler for an AirTag/device with nothing to show yet. */}
-        <Popup autoPan={false}>
+        <Popup autoPan={false} closeButton={false}>
           <div className={POPUP_WIDTH_CLASS}>
             <PopupHeader
               title="Aktueller Standort"
@@ -824,7 +842,7 @@ export function MapCard({
             icon={airtagPinIcon({ id: loc.device_id, icon: loc.icon, color: loc.color })}
             eventHandlers={{ click: centerMarkerOnClick }}
           >
-            <Popup autoPan={false}>
+            <Popup autoPan={false} closeButton={false}>
               <div className={POPUP_WIDTH_CLASS}>
                 <PopupHeader
                   title={loc.name ?? 'Gerät'}
