@@ -107,6 +107,46 @@ def _at_named_place(conn, lat: float, lon: float) -> bool:
     return match_place(lat, lon, list_named_places(conn)) is not None
 
 
+def _away_message(
+    object_name: str,
+    reason: str,
+    away_distance: float,
+    object_lat: float,
+    object_lon: float,
+    object_timestamp: dt.datetime,
+    object_address: str | None,
+    owner_lat: float,
+    owner_lon: float,
+    owner_timestamp: dt.datetime,
+    owner_address: str | None,
+    tz: dt.tzinfo,
+) -> str:
+    """Shared left_behind/autonomous_movement notification body for both
+    AirTags and owner devices. Always shows *both* positions - where the
+    object is and where the owner was at the same moment - instead of just
+    the object's, so a false positive (GPS drift that only looks like
+    separation, or the owner just not recognizing an address) is something
+    to sanity-check from the notification itself, without opening the app.
+    `owner_lat`/`owner_lon`/`owner_timestamp` must be the reading actually
+    used for the away comparison (time-matched to `object_timestamp`, not
+    the owner's current position - see evaluate_away/evaluate_device_away),
+    so "Du warst hier" is truthfully where the owner was, not where they
+    are now.
+    """
+    headline = (
+        f"{object_name} hat sich eigenständig bewegt und ist jetzt {away_distance:.0f} m von dir entfernt."
+        if reason == "autonomous_movement"
+        else f"Du hast dich {away_distance:.0f} m von {object_name} entfernt."
+    )
+    return (
+        f"{headline}\n\n"
+        f"{object_name} ist hier:\n"
+        f"{format_location_line(object_lat, object_lon, object_timestamp, object_address, tz)}\n\n"
+        "Du warst hier:\n"
+        f"{format_location_line(owner_lat, owner_lon, owner_timestamp, owner_address, tz)}"
+    )
+
+
 def _load_key(cfg: Config, conn, airtag_id: str):
     stored = get_airtag_key(conn, airtag_id)
     if stored is None:
@@ -297,13 +337,20 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
 
         name = device.display_name or device.name
         address = reverse_geocode(location.lat, location.lon).address
-        message = (
-            (
-                f"{name} hat sich eigenständig bewegt und ist jetzt {away_distance:.0f} m von dir entfernt.\n"
-                if object_moved
-                else f"Du hast dich {away_distance:.0f} m von {name} entfernt.\n"
-            )
-            + format_location_line(location.lat, location.lon, location.recorded_at, address, cfg.display_timezone)
+        owner_address = reverse_geocode(primary_location.lat, primary_location.lon).address
+        message = _away_message(
+            name,
+            reason,
+            away_distance,
+            location.lat,
+            location.lon,
+            location.recorded_at,
+            address,
+            primary_location.lat,
+            primary_location.lon,
+            primary_location.recorded_at,
+            owner_address,
+            cfg.display_timezone,
         )
         notify_all(notifiers, _ALERT_TITLES[reason], message)
 
@@ -486,6 +533,19 @@ def _poll_airtag(
             if away_distance is None:
                 continue
 
+            if prior_reports:
+                # AirTags report sporadically, so several new reports often
+                # arrive together (or across polls within minutes of each
+                # other) describing the same ongoing "away" episode, not a
+                # fresh one each time - only alert on the transition *into*
+                # away, same as _evaluate_device_away_alerts does for owner
+                # devices. Without this, each new report in a catch-up burst
+                # re-notified on its own.
+                previous_report = prior_reports[-1]
+                previous_owner_location = primary_owner_device_location_near(conn, previous_report.timestamp)
+                if evaluate_away(previous_report, previous_owner_location, movement_cfg) is not None:
+                    continue  # already away as of the last report too - not a new event
+
             object_moved = bool(prior_reports) and is_object_displaced(
                 report.lat,
                 report.lon,
@@ -513,13 +573,20 @@ def _poll_airtag(
                 continue  # left at a known place (home, office, ...) - routine, not worth a push
 
             address = reverse_geocode(report.lat, report.lon).address
-            away_message = (
-                (
-                    f"{airtag.name} hat sich eigenständig bewegt und ist jetzt {away_distance:.0f} m von dir entfernt.\n"
-                    if object_moved
-                    else f"Du hast dich {away_distance:.0f} m von {airtag.name} entfernt.\n"
-                )
-                + format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)
+            owner_address = reverse_geocode(owner_location.lat, owner_location.lon).address
+            away_message = _away_message(
+                airtag.name,
+                reason,
+                away_distance,
+                report.lat,
+                report.lon,
+                report.timestamp,
+                address,
+                owner_location.lat,
+                owner_location.lon,
+                owner_location.recorded_at,
+                owner_address,
+                cfg.display_timezone,
             )
             notify_all(notifiers, _ALERT_TITLES[reason], away_message)
 
