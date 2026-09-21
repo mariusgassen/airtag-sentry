@@ -39,6 +39,14 @@ services:
     # first if this image is ever updated.
     volumes:
       - anisette_data:/home/Alcoholic/.config/anisette-v3/
+    # Base image is debian:stable-slim with curl installed (no wget) - the
+    # reverse of dashboard's python:3.14-slim below.
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "-s", "http://localhost:6969/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   dashboard:
     build: .
@@ -48,7 +56,7 @@ services:
       postgres:
         condition: service_healthy
       anisette:
-        condition: service_started
+        condition: service_healthy
     # The image is python:3.14-slim (no curl/wget), so probe with the
     # interpreter that's already there. Hardcodes WEB_PORT's fixed default
     # (see the README's Coolify section for why WEB_PORT isn't overridable)
