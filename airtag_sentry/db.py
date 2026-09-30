@@ -265,6 +265,9 @@ class AppSettings:
     # Independently toggleable so one can be silenced without the other.
     notify_on_left_behind: bool
     notify_on_autonomous_movement: bool
+    # Minimum FindMy.py report confidence (1-3) that may drive an alert - see
+    # movement.is_low_confidence. 1 = off.
+    movement_min_confidence: int = 1
 
 
 @contextmanager
@@ -761,6 +764,7 @@ _SETTINGS_COLUMNS = (
     "notify_on_stillstand_movement",
     "notify_on_left_behind",
     "notify_on_autonomous_movement",
+    "movement_min_confidence",
 )
 
 
@@ -791,6 +795,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 notify_on_stillstand_movement = %s,
                 notify_on_left_behind = %s,
                 notify_on_autonomous_movement = %s,
+                movement_min_confidence = %s,
                 updated_at = now()
             WHERE id = 1
             """,
@@ -810,6 +815,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.notify_on_stillstand_movement,
                 settings.notify_on_left_behind,
                 settings.notify_on_autonomous_movement,
+                settings.movement_min_confidence,
             ),
         )
     conn.commit()

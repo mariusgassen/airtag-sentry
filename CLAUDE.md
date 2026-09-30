@@ -54,7 +54,7 @@ just the selected AirTag's name, falling back to "AirTags" - so future
 per-AirTag meta (battery level, last-seen time, an alert badge, etc.) has
 an obvious place to go without a layout change.
 
-## Hard constraint: AirTags and owner devices get the same user-facing features
+## Constraint: AirTags and owner devices get the same user-facing features (where the data allows)
 
 An AirTag (`airtag_sentry`'s original object, tracked via `FindMy.py`) and a
 tracked owner device (`owner_tracking.py`'s Apple devices, via `pyicloud`)
@@ -90,6 +90,15 @@ API response and arrive newest-first (`recorded_at` is what
 "older"/"newer" step in the *opposite* index direction from the AirTag
 case). Mirror the *feature and UI*, not the implementation line-for-line -
 but never skip a side because its plumbing is different.
+
+**Exception: genuinely missing data.** If one source simply doesn't provide
+the data a feature needs, that side may go without it - don't fabricate or
+approximate an equivalent just for symmetry. Keep parity everywhere the data
+does exist. Current case: AirTag reports carry a FindMy.py `confidence`
+(1-3), owner devices only a `horizontal_accuracy` - so the confidence badge
+(`AccuracyRow`) and the `movement_min_confidence` alert filter are AirTag-only,
+while the accuracy-radius overlay (`AccuracyCircle`) and accuracy-adjusted
+distances apply to both.
 
 ## Hard constraint: "you left it" and "it left you" are different alerts
 

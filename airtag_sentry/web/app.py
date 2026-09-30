@@ -289,6 +289,7 @@ class SettingsIn(BaseModel):
     notify_on_stillstand_movement: bool
     notify_on_left_behind: bool
     notify_on_autonomous_movement: bool
+    movement_min_confidence: int = Field(ge=1, le=3)
 
 
 class NamedPlaceIn(BaseModel):

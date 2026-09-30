@@ -118,6 +118,18 @@ export function SettingsTracking({ settings, errors, update }: Props) {
           error={errors.movement_max_speed_kmh}
           onChange={(v) => update({ movement_max_speed_kmh: v })}
         />
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--divider)] px-4 py-3">
+          <span className="flex-1 text-[0.95rem]">Min. Zuverlässigkeit für Alarme</span>
+          <select
+            value={settings.movement_min_confidence}
+            onChange={(e) => update({ movement_min_confidence: Number(e.target.value) }, { immediate: true })}
+            className="rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-2 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+          >
+            <option value={1}>Alle</option>
+            <option value={2}>Mittel und höher</option>
+            <option value={3}>Nur hoch</option>
+          </select>
+        </div>
       </Section>
 
       <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">

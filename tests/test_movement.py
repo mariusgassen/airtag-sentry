@@ -1,9 +1,11 @@
+import dataclasses
 import datetime as dt
 
 from airtag_sentry.db import OwnerLocation, Report
 from airtag_sentry.movement import (
     MovementConfig,
     device_already_reunited,
+    effective_accuracy,
     evaluate_away,
     evaluate_device_away,
     evaluate_movement,
@@ -280,3 +282,31 @@ def test_is_object_displaced_true_for_real_movement():
 def test_is_object_displaced_discounts_combined_accuracy_radius():
     # ~100m raw distance, entirely absorbed by the two points' noise margins.
     assert is_object_displaced(52.5, 13.4, 100.0, 52.5009, 13.4, 100.0, CFG) is False
+
+
+def _conf_report(hours_ago: float, lat: float, lon: float, confidence: int | None, accuracy: float | None = 5.0) -> Report:
+    return dataclasses.replace(_report(hours_ago, lat, lon, accuracy), confidence=confidence)
+
+
+def test_effective_accuracy_widens_for_low_confidence():
+    assert effective_accuracy(_conf_report(0, 0, 0, 3, 10.0)) == 10.0
+    assert effective_accuracy(_conf_report(0, 0, 0, 2, 10.0)) == 15.0
+    assert effective_accuracy(_conf_report(0, 0, 0, 1, 10.0)) == 20.0
+    assert effective_accuracy(_conf_report(0, 0, 0, None, 10.0)) == 10.0
+    assert effective_accuracy(_conf_report(0, 0, 0, 1, None)) is None
+
+
+def test_low_confidence_prior_is_not_a_movement_baseline():
+    cfg = dataclasses.replace(CFG, min_confidence=2)
+    prior = [_conf_report(2, 52.5, 13.4, 1)]
+    new = _conf_report(0, 52.6, 13.4, 3)  # ~11 km away
+    assert evaluate_movement(new, prior, cfg) is None  # nothing trustworthy to compare against
+    assert evaluate_movement(new, prior, CFG) is not None  # filter off (min_confidence=1)
+
+
+def test_low_confidence_gets_stricter_speed_limit():
+    cfg = dataclasses.replace(CFG, min_confidence=2)
+    prior = _conf_report(1, 52.5, 13.4, 3)
+    far = (52.5 + 150 / 111.2, 13.4)  # ~150 km in 1 h: fine at 200 km/h, not at 100
+    assert not is_speed_outlier(_conf_report(0, *far, 3), prior, cfg)
+    assert is_speed_outlier(_conf_report(0, *far, 1), prior, cfg)
