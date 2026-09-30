@@ -23,6 +23,10 @@ class MovementConfig:
     away_distance_threshold_meters: float
     owner_location_max_age_minutes: float
     max_speed_kmh: float
+    # AirTag reports with a FindMy.py confidence (1-3) below this are kept and
+    # shown, but never drive an alert/anchor, and get a stricter speed limit
+    # (see is_low_confidence). 1 = off. Owner devices report no confidence.
+    min_confidence: int = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -40,6 +44,24 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return EARTH_RADIUS_METERS * c
+
+
+# A lower-confidence fix's stated accuracy radius is less trustworthy, so it's
+# widened before discounting distance - FindMy.py's confidence is 1-3. A
+# missing confidence (None) gets no widening.
+_CONFIDENCE_ACCURACY_FACTOR = {3: 1.0, 2: 1.5, 1: 2.0}
+
+
+def effective_accuracy(report: Report) -> float | None:
+    """`report.accuracy` widened for low confidence - what the movement
+    checks should use in place of the raw accuracy for an AirTag report."""
+    if report.accuracy is None:
+        return None
+    return report.accuracy * _CONFIDENCE_ACCURACY_FACTOR.get(report.confidence, 1.0)
+
+
+def is_low_confidence(report: Report, cfg: MovementConfig) -> bool:
+    return report.confidence is not None and report.confidence < cfg.min_confidence
 
 
 def _accuracy_adjusted_distance(distance: float, accuracy1: float | None, accuracy2: float | None) -> float:
@@ -106,7 +128,9 @@ def is_speed_outlier(new_report: Report, prior_report: Report | None, cfg: Movem
     speed = implied_speed_kmh(
         prior_report.lat, prior_report.lon, prior_report.timestamp, new_report.lat, new_report.lon, new_report.timestamp
     )
-    return speed > cfg.max_speed_kmh
+    # A low-confidence fix is held to half the speed limit: more likely a bad relay.
+    limit = cfg.max_speed_kmh / 2 if is_low_confidence(new_report, cfg) else cfg.max_speed_kmh
+    return speed > limit
 
 
 def _stillstand_anchor(prior_reports: list[Report], cfg: MovementConfig) -> Report:
@@ -114,7 +138,9 @@ def _stillstand_anchor(prior_reports: list[Report], cfg: MovementConfig) -> Repo
     anchor = prior_reports[-1]
     for report in reversed(prior_reports[:-1]):
         step_distance = _accuracy_adjusted_distance(
-            haversine_distance(report.lat, report.lon, anchor.lat, anchor.lon), report.accuracy, anchor.accuracy
+            haversine_distance(report.lat, report.lon, anchor.lat, anchor.lon),
+            effective_accuracy(report),
+            effective_accuracy(anchor),
         )
         if step_distance > cfg.distance_threshold_meters:
             break
@@ -132,12 +158,15 @@ def evaluate_movement(
     `prior_reports` must be sorted ascending and contain only reports already in
     the DB before `new_report` was inserted (i.e. not including `new_report` itself).
     """
+    # Low-confidence fixes neither serve as the comparison baseline nor as
+    # the stillstand anchor - they'd make a noisy relay look like movement.
+    prior_reports = [r for r in prior_reports if not is_low_confidence(r, cfg)]
     if not prior_reports:
         return None
 
     last = prior_reports[-1]
     raw_distance = haversine_distance(new_report.lat, new_report.lon, last.lat, last.lon)
-    distance = _accuracy_adjusted_distance(raw_distance, new_report.accuracy, last.accuracy)
+    distance = _accuracy_adjusted_distance(raw_distance, effective_accuracy(new_report), effective_accuracy(last))
 
     if distance > cfg.distance_threshold_meters:
         return MovementAlert(reason="distance_threshold", distance_meters=distance)
@@ -184,7 +213,7 @@ def evaluate_away(
     raw_distance = haversine_distance(
         new_report.lat, new_report.lon, owner_location.lat, owner_location.lon
     )
-    distance = _accuracy_adjusted_distance(raw_distance, new_report.accuracy, owner_location.horizontal_accuracy)
+    distance = _accuracy_adjusted_distance(raw_distance, effective_accuracy(new_report), owner_location.horizontal_accuracy)
     return distance if distance > cfg.away_distance_threshold_meters else None
 
 
@@ -209,7 +238,7 @@ def owner_already_reunited(
         new_report.lat, new_report.lon, current_owner_location.lat, current_owner_location.lon
     )
     distance = _accuracy_adjusted_distance(
-        raw_distance, new_report.accuracy, current_owner_location.horizontal_accuracy
+        raw_distance, effective_accuracy(new_report), current_owner_location.horizontal_accuracy
     )
     return distance <= cfg.away_distance_threshold_meters
 

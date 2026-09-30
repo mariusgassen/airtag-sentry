@@ -66,6 +66,9 @@ export interface AppSettings {
   // catch) are independently toggleable. See CLAUDE.md.
   notify_on_left_behind: boolean
   notify_on_autonomous_movement: boolean
+  // FindMy.py report confidence (1-3) below which an AirTag report never
+  // drives an alert; 1 = off. See movement.is_low_confidence.
+  movement_min_confidence: number
 }
 
 export interface OwnerDevice {

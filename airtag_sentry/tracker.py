@@ -46,9 +46,11 @@ from airtag_sentry.geocode import format_location_line, reverse_geocode
 from airtag_sentry.movement import (
     MovementConfig,
     device_already_reunited,
+    effective_accuracy,
     evaluate_away,
     evaluate_device_away,
     evaluate_movement,
+    is_low_confidence,
     is_object_displaced,
     is_speed_outlier,
     owner_already_reunited,
@@ -284,6 +286,7 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
         away_distance_threshold_meters=settings.movement_away_distance_meters,
         owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
         max_speed_kmh=settings.movement_max_speed_kmh,
+        min_confidence=settings.movement_min_confidence,
     )
 
     for location in latest_owner_device_locations(conn):
@@ -446,6 +449,7 @@ def _poll_airtag(
         away_distance_threshold_meters=settings.movement_away_distance_meters,
         owner_location_max_age_minutes=settings.owner_location_max_age_minutes,
         max_speed_kmh=settings.movement_max_speed_kmh,
+        min_confidence=settings.movement_min_confidence,
     )
 
     # Flag reports whose implied speed from the last physically-plausible
@@ -496,6 +500,14 @@ def _poll_airtag(
                     "[%s] Report at %s flagged as a speed outlier - skipping alert evaluation.",
                     airtag.id,
                     report.timestamp,
+                )
+                continue
+            if is_low_confidence(report, movement_cfg):
+                logger.info(
+                    "[%s] Report at %s has low confidence (%s) - skipping alert evaluation.",
+                    airtag.id,
+                    report.timestamp,
+                    report.confidence,
                 )
                 continue
 
@@ -549,10 +561,10 @@ def _poll_airtag(
             object_moved = bool(prior_reports) and is_object_displaced(
                 report.lat,
                 report.lon,
-                report.accuracy,
+                effective_accuracy(report),
                 prior_reports[-1].lat,
                 prior_reports[-1].lon,
-                prior_reports[-1].accuracy,
+                effective_accuracy(prior_reports[-1]),
                 movement_cfg,
             )
             reason = "autonomous_movement" if object_moved else "left_behind"

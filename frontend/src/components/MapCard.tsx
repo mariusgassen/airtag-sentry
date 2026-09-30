@@ -340,6 +340,34 @@ export function AddressLine({ lat, lon, skipIfSame }: { lat: number; lon: number
   )
 }
 
+/** Translucent radius showing a fix's position uncertainty (AirTag
+ * `accuracy` / device `horizontal_accuracy`) - the map shows a location as a
+ * point, but what's really known is "somewhere within this circle". Renders
+ * nothing without a usable accuracy. Exported for DeviceMapCard.tsx. */
+export function AccuracyCircle({ position, accuracy, color }: { position: [number, number]; accuracy: number | null | undefined; color: string }) {
+  if (!accuracy || accuracy <= 0) return null
+  return (
+    <Circle
+      center={position}
+      radius={accuracy}
+      interactive={false}
+      pathOptions={{ color, weight: 1, fillColor: color, fillOpacity: 0.15 }}
+    />
+  )
+}
+
+const CONFIDENCE_LABELS: Record<number, string> = { 1: 'niedrig', 2: 'mittel', 3: 'hoch' }
+
+/** Accuracy radius (+ AirTag-only confidence) for a marker popup. Owner
+ * devices report no confidence, so `confidence` is simply omitted there. */
+export function AccuracyRow({ accuracy, confidence }: { accuracy?: number | null; confidence?: number | null }) {
+  const parts: string[] = []
+  if (accuracy != null) parts.push(`Genauigkeit ±${Math.round(accuracy)} m`)
+  if (confidence != null && CONFIDENCE_LABELS[confidence]) parts.push(`Zuverlässigkeit ${CONFIDENCE_LABELS[confidence]}`)
+  if (parts.length === 0) return null
+  return <InfoRow icon={<LocationArrowIcon className="h-3.5 w-3.5" />}>{parts.join(' · ')}</InfoRow>
+}
+
 /** Battery reading for a marker popup, same info AirtagDetail.tsx/
  * DeviceDetail.tsx's headers already show - the popup was the one place
  * left without it (tasks/roadmap.md #9). Renders nothing for `null` (no
@@ -778,6 +806,8 @@ export function MapCard({
     [displayed?.lat, displayed?.lon],
   )
   const animatedPosition = useAnimatedLatLng(displayedPosition)
+  // The raw report behind the displayed stay (stays don't carry accuracy/confidence).
+  const displayedReport = displayed ? reports.find((r) => r.id === displayed.anchor_id) : undefined
   const [showOwnerTrail, setShowOwnerTrail] = useState(false)
   const routedPositions = useRoutedTrail(positions)
 
@@ -803,6 +833,7 @@ export function MapCard({
           onSelect={onSelectReport ? (s) => onSelectReport(s.anchor_id) : undefined}
         />
         <OwnerTrails histories={ownerLocationHistories} visible={showOwnerTrail} />
+        <AccuracyCircle position={displayedPosition} accuracy={displayedReport?.accuracy} color={trailColor} />
         <SelectedPin position={animatedPosition} icon={airtagPinIcon(airtag)} label={displayed.label}>
           <div className={POPUP_WIDTH_CLASS}>
             <PopupHeader
@@ -832,6 +863,7 @@ export function MapCard({
                 correction matched, so the label itself already *is* the raw
                 address (see stays.py's resolve_label). */}
             <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} skipIfSame={displayed.label} />
+            <AccuracyRow accuracy={displayedReport?.accuracy} confidence={displayedReport?.confidence} />
             <BatteryRow level={displayed.battery_level} />
           </div>
         </SelectedPin>

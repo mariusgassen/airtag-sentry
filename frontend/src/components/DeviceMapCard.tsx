@@ -6,6 +6,8 @@ import { useAnimatedLatLng } from '../hooks/useAnimatedLatLng'
 import { useRoutedTrail } from '../hooks/useRoutedTrail'
 import { airtagPinIcon, deviceColor, stayMarkerRadius } from '../mapIcons'
 import {
+  AccuracyCircle,
+  AccuracyRow,
   AddPlaceButton,
   AddressLine,
   AppTileLayer,
@@ -68,6 +70,10 @@ export function DeviceMapCard({
     [displayed?.lat, displayed?.lon],
   )
   const animatedPosition = useAnimatedLatLng(displayedPosition)
+  // The raw fix behind the displayed stay (stays don't carry accuracy).
+  const displayedLocation = displayed
+    ? locations.find((l) => new Date(l.recorded_at).getTime() === new Date(displayed.anchor_recorded_at).getTime())
+    : undefined
   const routedPositions = useRoutedTrail(positions)
 
   if (positions.length === 0 || !displayed) {
@@ -91,6 +97,7 @@ export function DeviceMapCard({
         getRadius={(s) => stayMarkerRadius(s.count)}
         onSelect={onSelectLocation ? (s) => onSelectLocation(s.anchor_recorded_at) : undefined}
       />
+      <AccuracyCircle position={displayedPosition} accuracy={displayedLocation?.horizontal_accuracy} color={trailColor} />
       <SelectedPin position={animatedPosition} icon={airtagPinIcon(device)} label={displayed.label}>
         <div className={POPUP_WIDTH_CLASS}>
           <PopupHeader
@@ -117,6 +124,7 @@ export function DeviceMapCard({
               popup - shown even alongside a resolved label, skipped only when
               the label itself already is the raw address. */}
           <AddressLine lat={displayedPosition[0]} lon={displayedPosition[1]} skipIfSame={displayed.label} />
+          <AccuracyRow accuracy={displayedLocation?.horizontal_accuracy} />
           <BatteryRow level={displayed.battery_level} status={displayed.battery_status} reported={displayed.battery_reported} />
         </div>
       </SelectedPin>
