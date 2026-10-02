@@ -4,6 +4,7 @@ import { capitalize, deviceLabel, formatClusterRange, formatDayHeading, formatRe
 import { mapsUrl } from '../maps'
 import { staticMapTileUrl } from '../staticMapTile'
 import { AirtagAvatar } from './AirtagAvatar'
+import { HistoryStepper } from './AirtagDetail'
 import { DeviceAvatar } from './DeviceAvatar'
 import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
@@ -188,6 +189,9 @@ export function TimelinePage({
   onSelectVisit,
   rangeDays,
   onRangeChange,
+  stepOlder,
+  stepNewer,
+  stepPosition,
 }: {
   visits: TimelineVisit[]
   airtags: Airtag[]
@@ -202,6 +206,16 @@ export function TimelinePage({
   // App.tsx).
   rangeDays: TimelineRange
   onRangeChange: (range: TimelineRange) => void
+  // Desktop-sidebar stepper (HistoryStepper, see AirtagDetail.tsx) for
+  // whichever object `filter` currently narrows the feed to - App.tsx
+  // already computes these for the mobile title bar's own stepper
+  // (md:hidden there), but that's the only place they used to render,
+  // leaving the desktop layout - which has no title bar at all - with no
+  // way to step through a filtered object's history. Mirrors
+  // AirtagDetail/DeviceDetail's own header exactly.
+  stepOlder?: (() => void) | null
+  stepNewer?: (() => void) | null
+  stepPosition?: { current: number; total: number } | null
 }) {
   const filtered = filter ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id) : visits
   const rangeFiltered =
@@ -210,8 +224,9 @@ export function TimelinePage({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="px-4 pb-2 pt-[0.9rem]">
+      <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Zeitachse</h1>
+        <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} stepPosition={stepPosition} />
       </div>
       {(airtags.length > 0 || devices.length > 0) && (
         <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
