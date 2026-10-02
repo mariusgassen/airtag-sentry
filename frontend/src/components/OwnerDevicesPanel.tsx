@@ -94,6 +94,8 @@ export function OwnerDevicesPanel() {
 
   return (
     <div className="px-3">
+      {connected && (
+        <>
       <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
         Eigene Geräte
       </p>
@@ -109,7 +111,7 @@ export function OwnerDevicesPanel() {
               Erneut versuchen
             </button>
           </div>
-        ) : !connected ? null : devices === null ? (
+        ) : devices === null ? (
           <p className="px-4 py-3 text-sm text-[var(--text-secondary)]">Lädt…</p>
         ) : devices.length === 0 ? (
           <p className="px-4 py-3 text-sm text-[var(--text-secondary)]">Keine Geräte gefunden.</p>
@@ -135,14 +137,25 @@ export function OwnerDevicesPanel() {
             />
           ))
         )}
+      </Section>
+        </>
+      )}
+      {airtags.length > 0 && (
+        <>
+      <p className="mb-2 mt-6 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+        AirTags
+      </p>
+      <Section>
         {airtags.map((a) => (
           <Row
             key={a.id}
-            label={`${a.name} (AirTag)`}
+            label={a.name}
             trailing={<Switch checked={a.enabled} onChange={() => toggleAirtag(a)} />}
           />
         ))}
       </Section>
+        </>
+      )}
     </div>
   )
 }
