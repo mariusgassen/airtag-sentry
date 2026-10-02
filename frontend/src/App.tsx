@@ -870,7 +870,17 @@ export default function App() {
           // first place - confirmed live: after the escape, this element's
           // own scrollTop read a nonzero value despite no user-facing
           // scrollbar ever having existed for it.
-          className="sheet pointer-events-auto flex flex-col overflow-clip rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:flex-1 md:rounded-none md:shadow-none"
+          // md:min-h-0: on desktop this box is sized by flex-grow (md:flex-1)
+          // against the sidebar's fixed height, not an explicit mobile
+          // height - but `clip` (unlike `hidden`/`auto`) doesn't make
+          // Chromium treat its automatic minimum size as 0, so without this
+          // the flex algorithm let it grow to its *content's* full height
+          // instead of shrinking to the space actually available, pushing
+          // everything past the sidebar's top edge and leaving nothing left
+          // for a child list's own overflow-y-auto to scroll (confirmed via
+          // computed-style measurement - a plain min-width/height override
+          // is the documented escape hatch for exactly this flex quirk).
+          className="sheet pointer-events-auto flex flex-col overflow-clip rounded-t-2xl bg-[var(--bg)] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] md:h-auto md:min-h-0 md:flex-1 md:rounded-none md:shadow-none"
           data-state={sheetState}
         >
           <button
@@ -910,6 +920,9 @@ export default function App() {
                 onSelectVisit={handleSelectVisit}
                 rangeDays={timelineRangeDays}
                 onRangeChange={setTimelineRangeDays}
+                stepOlder={stepOlder}
+                stepNewer={stepNewer}
+                stepPosition={stepPosition}
               />
             ) : activeTab === 'settings' ? (
               <SettingsPanel

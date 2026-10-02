@@ -141,20 +141,32 @@ export function MapClickHandler({ onMapClick }: { onMapClick?: () => void }) {
 
 export function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap()
+  // The background auto-refresh (App.tsx's AUTO_REFRESH_MS) re-fetches
+  // reports/locations every 20s and calls setReports/setOwnerLocationHistories
+  // with a freshly-parsed array even when nothing actually moved - a new
+  // array reference, not new data. `positions` is memoized per-reference by
+  // its callers (MapCard.tsx/DeviceMapCard.tsx), so without this it still
+  // re-fires on every one of those ticks, snapping back out to the whole
+  // trail's zoom and discarding any manual zoom-in the user just did. Only
+  // the actual point values - not the array's identity - should decide
+  // whether there's a real new extent to fit.
+  const lastFitted = useRef<string | null>(null)
   useEffect(() => {
-    if (positions.length > 0) {
-      // animate: false - PanToSelection (a sibling, run right after on the
-      // same data change) always follows this with its own animated pan.
-      // Leaflet's Map.setView _stop()s any in-progress animation before
-      // starting a new one, and reads the *current* zoom to do it - so an
-      // animated fitBounds here, still mid-flight toward its target zoom
-      // when PanToSelection's panTo interrupts it a moment later, gets its
-      // zoom change silently discarded (the map settles at the zoom it
-      // started from, not the one fitBounds computed) even though its pan
-      // committed instantly and its center looked briefly correct. Applying
-      // this one instantly means there's nothing left to interrupt.
-      map.fitBounds(positions, { padding: [24, 24], animate: false })
-    }
+    if (positions.length === 0) return
+    const key = JSON.stringify(positions)
+    if (key === lastFitted.current) return
+    lastFitted.current = key
+    // animate: false - PanToSelection (a sibling, run right after on the
+    // same data change) always follows this with its own animated pan.
+    // Leaflet's Map.setView _stop()s any in-progress animation before
+    // starting a new one, and reads the *current* zoom to do it - so an
+    // animated fitBounds here, still mid-flight toward its target zoom
+    // when PanToSelection's panTo interrupts it a moment later, gets its
+    // zoom change silently discarded (the map settles at the zoom it
+    // started from, not the one fitBounds computed) even though its pan
+    // committed instantly and its center looked briefly correct. Applying
+    // this one instantly means there's nothing left to interrupt.
+    map.fitBounds(positions, { padding: [24, 24], animate: false })
   }, [map, positions])
   return null
 }
