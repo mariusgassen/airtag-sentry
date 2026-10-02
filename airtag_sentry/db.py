@@ -33,6 +33,9 @@ class AirtagRecord:
     # - lower sorts first. Mirrors OwnerDevice.sort_order; compare=False for
     # the same reason (presentation-only, not part of an AirTag's identity).
     sort_order: int = dataclasses.field(default=0, compare=False)
+    # False = hidden: not polled, not listed anywhere, but key and history are
+    # kept. Mirrors OwnerDevice.enabled.
+    enabled: bool = True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -276,7 +279,7 @@ def get_conn(database_url: str) -> Iterator[psycopg.Connection]:
         yield conn
 
 
-_AIRTAG_COLUMNS = "id, name, icon, color, away_alert_enabled, sort_order"
+_AIRTAG_COLUMNS = "id, name, icon, color, away_alert_enabled, sort_order, enabled"
 
 
 def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> AirtagRecord:
@@ -294,9 +297,10 @@ def create_airtag(conn: psycopg.Connection, airtag_id: str, name: str) -> Airtag
     return AirtagRecord(*row)
 
 
-def list_airtags(conn: psycopg.Connection) -> list[AirtagRecord]:
+def list_airtags(conn: psycopg.Connection, only_enabled: bool = False) -> list[AirtagRecord]:
+    where = "WHERE enabled" if only_enabled else ""
     with conn.cursor() as cur:
-        cur.execute(f"SELECT {_AIRTAG_COLUMNS} FROM airtags ORDER BY sort_order, created_at ASC")
+        cur.execute(f"SELECT {_AIRTAG_COLUMNS} FROM airtags {where} ORDER BY sort_order, created_at ASC")
         return [AirtagRecord(*row) for row in cur.fetchall()]
 
 
@@ -344,6 +348,18 @@ def set_airtag_away_alert_enabled(conn: psycopg.Connection, airtag_id: str, enab
     with conn.cursor() as cur:
         cur.execute(
             f"UPDATE airtags SET away_alert_enabled = %s WHERE id = %s RETURNING {_AIRTAG_COLUMNS}",
+            (enabled, airtag_id),
+        )
+        row = cur.fetchone()
+    conn.commit()
+    return AirtagRecord(*row) if row else None
+
+
+def set_airtag_enabled(conn: psycopg.Connection, airtag_id: str, enabled: bool) -> AirtagRecord | None:
+    """Mirrors set_owner_device_enabled."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE airtags SET enabled = %s WHERE id = %s RETURNING {_AIRTAG_COLUMNS}",
             (enabled, airtag_id),
         )
         row = cur.fetchone()

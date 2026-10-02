@@ -132,7 +132,7 @@ def _handle_message(conn, bot_token: str, chat_id: str, message: dict, tz: dt.tz
         _send_message(bot_token, chat_id, _HELP_TEXT)
     elif command == "/list":
         devices = [d for d in list_owner_devices(conn) if d.enabled]
-        _send_message(bot_token, chat_id, _format_list(devices, list_airtags(conn)))
+        _send_message(bot_token, chat_id, _format_list(devices, list_airtags(conn, only_enabled=True)))
     elif command == "/where":
         _handle_where(conn, bot_token, chat_id, arg, tz)
     else:
@@ -163,7 +163,7 @@ def _where_items(conn) -> list[_WhereItem]:
     """Devices (primary first) then AirTags - same ordering as /list's
     _format_list, so the picker and search match what /list shows."""
     devices = sorted((d for d in list_owner_devices(conn) if d.enabled), key=lambda d: not d.is_primary)
-    airtags = list_airtags(conn)
+    airtags = list_airtags(conn, only_enabled=True)
     return [("device", d) for d in devices] + [("airtag", a) for a in airtags]
 
 
