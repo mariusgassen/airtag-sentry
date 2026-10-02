@@ -7,6 +7,9 @@ export interface Airtag {
   // Whether this AirTag raises a "moved without you" alert - mirrors
   // OwnerDevice's own away_alert_enabled. See AirtagDetail.tsx.
   away_alert_enabled: boolean
+  // False = hidden (not polled/listed), key and history kept. Settings ->
+  // Apple-Konten -> Eigene Geräte toggles it, mirroring OwnerDevice.enabled.
+  enabled: boolean
 }
 
 export interface Report {
@@ -290,6 +293,15 @@ export async function setAirtagAppearance(
     await apiFetch(`/api/airtags/${encodeURIComponent(id)}/appearance`, {
       method: 'PATCH',
       body: JSON.stringify({ icon, color }),
+    })
+  ).json()
+}
+
+export async function setAirtagEnabled(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }> {
+  return (
+    await apiFetch(`/api/airtags/${encodeURIComponent(id)}/enabled`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
     })
   ).json()
 }

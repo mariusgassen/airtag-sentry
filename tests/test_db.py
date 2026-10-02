@@ -50,6 +50,7 @@ from airtag_sentry.db import (
     round_coord,
     set_airtag_appearance,
     set_airtag_away_alert_enabled,
+    set_airtag_enabled,
     set_airtag_key,
     set_owner_apple_credentials,
     set_owner_apple_sync_status,
@@ -216,6 +217,17 @@ def test_set_airtag_away_alert_enabled_round_trip(conn):
 
     restored = set_airtag_away_alert_enabled(conn, "bike", True)
     assert restored.away_alert_enabled is True
+
+
+def test_set_airtag_enabled_hides_from_enabled_listing(conn):
+    create_airtag(conn, "pods", "AirPods")
+
+    assert set_airtag_enabled(conn, "pods", False).enabled is False
+    assert "pods" in [a.id for a in list_airtags(conn)]
+    assert "pods" not in [a.id for a in list_airtags(conn, only_enabled=True)]
+
+    set_airtag_enabled(conn, "pods", True)
+    assert "pods" in [a.id for a in list_airtags(conn, only_enabled=True)]
 
 
 def test_set_airtag_away_alert_enabled_returns_none_for_unknown_id(conn):

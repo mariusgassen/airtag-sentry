@@ -395,7 +395,7 @@ def poll_once(cfg: Config) -> bool:
                     return True
 
                 account = restore_account(cfg)
-                for airtag in list_airtags(conn):
+                for airtag in list_airtags(conn, only_enabled=True):
                     try:
                         _poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha_publisher)
                     except Exception:

@@ -75,6 +75,7 @@ from airtag_sentry.db import (
     rename_airtag,
     set_airtag_appearance,
     set_airtag_away_alert_enabled,
+    set_airtag_enabled,
     set_airtag_key,
     set_airtags_order,
     set_carto_credentials,
@@ -464,7 +465,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 status_code=404, detail="No AirTags configured yet - add one via the dashboard."
             )
         if airtag_id is None:
-            return airtags[0].id
+            return next((a.id for a in airtags if a.enabled), airtags[0].id)
         if airtag_id not in {a.id for a in airtags}:
             raise HTTPException(status_code=404, detail=f"Unknown airtag_id '{airtag_id}'")
         return airtag_id
@@ -682,6 +683,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "icon": a.icon,
                 "color": a.color,
                 "away_alert_enabled": a.away_alert_enabled,
+                "enabled": a.enabled,
             }
             for a in airtags
         ]
@@ -707,6 +709,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "icon": record.icon,
             "color": record.color,
             "away_alert_enabled": record.away_alert_enabled,
+            "enabled": record.enabled,
         }
 
     @app.patch("/api/airtags/{airtag_id}")
@@ -738,6 +741,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             _resolve_airtag_id(conn, airtag_id)
             record = set_airtag_away_alert_enabled(conn, airtag_id, body.enabled)
         return {"id": record.id, "away_alert_enabled": record.away_alert_enabled}
+
+    @app.patch("/api/airtags/{airtag_id}/enabled")
+    def set_airtag_enabled_route(airtag_id: str, body: AwayAlertIn):
+        """Hide/unhide an AirTag (not polled, not listed) without deleting it -
+        mirrors PUT /api/owner-devices."""
+        with get_conn(cfg.database_url) as conn:
+            _resolve_airtag_id(conn, airtag_id)
+            record = set_airtag_enabled(conn, airtag_id, body.enabled)
+        return {"id": record.id, "enabled": record.enabled}
 
     @app.put("/api/airtags/order")
     def set_airtags_order_route(body: AirtagOrderIn):
@@ -1175,7 +1187,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             places = list_named_places(conn)
             visits: list[dict[str, Any]] = []
 
-            for airtag in list_airtags(conn):
+            for airtag in list_airtags(conn, only_enabled=True):
                 reports = fetch_reports(conn, airtag.id, limit=None)
                 if since is not None:
                     reports = [r for r in reports if r.timestamp >= since]
@@ -1568,7 +1580,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 raise HTTPException(status_code=401, detail="Unauthorized")
 
             objects = []
-            for airtag in list_airtags(conn):
+            for airtag in list_airtags(conn, only_enabled=True):
                 reports = fetch_reports(conn, airtag.id, limit=1)
                 if not reports:
                     continue

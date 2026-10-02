@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { OwnerDevice } from '../api'
+import type { Airtag, OwnerDevice } from '../api'
 import {
   clearOwnerDevicePrimary,
+  getAirtags,
   getOwnerAppleStatus,
   getOwnerDevices,
+  setAirtagEnabled,
   setOwnerDeviceEnabled,
   setOwnerDevicePrimary,
 } from '../api'
@@ -19,12 +21,18 @@ import { StarIcon } from './icons'
  * This panel only manages *which* devices are tracked - a tracked device's
  * location and history show up in the main Objekte list once selected
  * there (ObjectsList.tsx / DeviceDetail.tsx), not here. AirPods don't show
- * up here - they're tracked the same way an AirTag is, via the Manage
- * AirTags key-upload flow. */
+ * up as devices - they're tracked the same way an AirTag is, via the Manage
+ * AirTags key-upload flow - so AirTags get their own show/hide switches below
+ * the devices, for ones that stop updating without needing to be deleted. */
 export function OwnerDevicesPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [devices, setDevices] = useState<OwnerDevice[] | null>(null)
   const [devicesError, setDevicesError] = useState<string | null>(null)
+  const [airtags, setAirtags] = useState<Airtag[]>([])
+
+  useEffect(() => {
+    getAirtags().then(setAirtags).catch(() => {})
+  }, [])
 
   useEffect(() => {
     getOwnerAppleStatus().then((s) => setConnected(s.connected))
@@ -58,6 +66,15 @@ export function OwnerDevicesPanel() {
     }
   }
 
+  async function toggleAirtag(airtag: Airtag) {
+    try {
+      const updated = await setAirtagEnabled(airtag.id, !airtag.enabled)
+      setAirtags((as) => as.map((a) => (a.id === updated.id ? { ...a, enabled: updated.enabled } : a)))
+    } catch (err) {
+      alert('Ändern fehlgeschlagen: ' + (err as Error).message)
+    }
+  }
+
   async function togglePrimary(device: OwnerDevice) {
     try {
       if (device.is_primary) {
@@ -73,7 +90,7 @@ export function OwnerDevicesPanel() {
     }
   }
 
-  if (!connected) return null
+  if (!connected && airtags.length === 0) return null
 
   return (
     <div className="px-3">
@@ -92,7 +109,7 @@ export function OwnerDevicesPanel() {
               Erneut versuchen
             </button>
           </div>
-        ) : devices === null ? (
+        ) : !connected ? null : devices === null ? (
           <p className="px-4 py-3 text-sm text-[var(--text-secondary)]">Lädt…</p>
         ) : devices.length === 0 ? (
           <p className="px-4 py-3 text-sm text-[var(--text-secondary)]">Keine Geräte gefunden.</p>
@@ -118,6 +135,13 @@ export function OwnerDevicesPanel() {
             />
           ))
         )}
+        {airtags.map((a) => (
+          <Row
+            key={a.id}
+            label={`${a.name} (AirTag)`}
+            trailing={<Switch checked={a.enabled} onChange={() => toggleAirtag(a)} />}
+          />
+        ))}
       </Section>
     </div>
   )

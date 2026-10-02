@@ -191,7 +191,8 @@ export default function App() {
   const dragHandledClick = useRef(false)
 
   const refreshAirtags = useCallback(async () => {
-    const list = await getAirtags()
+    // Hidden AirTags (Settings -> Eigene Geräte) stay out of every view here.
+    const list = (await getAirtags()).filter((a) => a.enabled)
     setAirtags(list)
     setCurrentId((prev) => (prev && list.some((a) => a.id === prev) ? prev : (list[0]?.id ?? null)))
 

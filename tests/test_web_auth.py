@@ -539,7 +539,7 @@ def test_ha_state_returns_airtags_and_owner_devices_for_correct_token(client, mo
         "get_ha_api_token",
         lambda _conn: HaApiToken(token_hash=token_hash, created_at=dt.datetime.now(dt.timezone.utc)),
     )
-    monkeypatch.setattr(app_module, "list_airtags", lambda _conn: [AirtagRecord(id="bike", name="Fahrrad")])
+    monkeypatch.setattr(app_module, "list_airtags", lambda _conn, **_kw: [AirtagRecord(id="bike", name="Fahrrad")])
     monkeypatch.setattr(
         app_module,
         "fetch_reports",
