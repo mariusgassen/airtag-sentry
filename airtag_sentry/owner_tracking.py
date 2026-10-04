@@ -266,12 +266,25 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
         api.devices.refresh(locate=True)
         if not any(_location_is_stale(d.location if d.location_available else None) for d in api.devices):
             break
+        logger.info("Owner locate attempt %d/%d: still waiting on a fresh fix from Apple.", attempt + 1, _LOCATE_ATTEMPTS)
         if attempt < _LOCATE_ATTEMPTS - 1:
             time.sleep(_LOCATE_RETRY_DELAY_SECONDS)
     snapshot = []
     available = 0
     for device in api.devices:
         location = device.location if device.location_available else None
+        if location is not None:
+            logger.debug(
+                "Owner device '%s' (%s): location from Apple timeStamp=%s isOld=%s locationFinished=%s "
+                "positionType=%s horizontalAccuracy=%s.",
+                device.name,
+                device.id,
+                location.get("timeStamp"),
+                location.get("isOld"),
+                location.get("locationFinished"),
+                location.get("positionType"),
+                location.get("horizontalAccuracy"),
+            )
         if _location_is_stale(location):
             # Still Apple's cached fix after retrying - recording it would stamp
             # an old position (e.g. where AirPods were hours ago) as "now".
