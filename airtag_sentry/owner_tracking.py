@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import time
 from typing import Any
 
 from airtag_sentry import keystore
@@ -220,6 +221,18 @@ def _connect(cfg: Config, conn):
     return _build_api(creds.apple_id, password, cfg.apple.owner_session_dir, creds.include_family_devices)
 
 
+# Apple answers a locate request asynchronously: the response right after
+# refresh(locate=True) usually still carries the last cached fix flagged
+# `isOld` (or `locationFinished` False) while the device is being pinged.
+# icloud.com/find re-polls until the fresh fix lands, so do the same briefly.
+_LOCATE_ATTEMPTS = 4
+_LOCATE_RETRY_DELAY_SECONDS = 5
+
+
+def _location_is_stale(location: dict[str, Any] | None) -> bool:
+    return location is not None and (location.get("isOld") is True or location.get("locationFinished") is False)
+
+
 def _snapshot_devices(api) -> list[dict[str, Any]]:
     """One pass over api.devices, collected into plain data.
 
@@ -249,11 +262,21 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
     `_server_ctx` exists (it does, after the first access) - call it explicitly
     rather than relying on the constructor's implicit first call.
     """
-    api.devices.refresh(locate=True)
+    for attempt in range(_LOCATE_ATTEMPTS):
+        api.devices.refresh(locate=True)
+        if not any(_location_is_stale(d.location if d.location_available else None) for d in api.devices):
+            break
+        if attempt < _LOCATE_ATTEMPTS - 1:
+            time.sleep(_LOCATE_RETRY_DELAY_SECONDS)
     snapshot = []
     available = 0
     for device in api.devices:
         location = device.location if device.location_available else None
+        if _location_is_stale(location):
+            # Still Apple's cached fix after retrying - recording it would stamp
+            # an old position (e.g. where AirPods were hours ago) as "now".
+            logger.info("Owner device '%s' (%s): only a stale cached location from Apple, skipping.", device.name, device.id)
+            location = None
         if location is not None:
             available += 1
         else:

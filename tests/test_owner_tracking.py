@@ -402,3 +402,14 @@ def test_pyicloud_imports_cleanly():
     with ModuleNotFoundError as soon as `from pyicloud import PyiCloudService`
     ran."""
     import pyicloud  # noqa: F401
+
+
+def test_snapshot_devices_drops_stale_cached_location_after_retrying(monkeypatch):
+    monkeypatch.setattr(owner_tracking.time, "sleep", lambda _s: None)
+    stale = {"latitude": 1.0, "longitude": 2.0, "isOld": True}
+    api = _FakeApi([_FakeDevice("d1", "AirPods", "AirPods", stale)])
+
+    snapshot = owner_tracking._snapshot_devices(api)
+
+    assert snapshot[0]["location"] is None
+    assert len(api.devices.refresh_calls) == owner_tracking._LOCATE_ATTEMPTS
