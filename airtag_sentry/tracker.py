@@ -9,6 +9,7 @@ import datetime as dt
 import json
 import logging
 import threading
+import time
 
 from findmy import FindMyAccessory, KeyPair
 
@@ -309,6 +310,7 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
         )
         away_distance = evaluate_device_away(location, primary_location, movement_cfg)
         if away_distance is None:
+            logger.debug("[device %s] Not away from the primary device - no alert.", device.id)
             continue
 
         object_moved = previous is not None and is_object_displaced(
@@ -321,6 +323,7 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
             movement_cfg,
         )
         reason = "autonomous_movement" if object_moved else "left_behind"
+        logger.info("[device %s] Away alert '%s' at %.0f m from the primary device.", device.id, reason, away_distance)
         record_alert(
             conn,
             DbAlert(
@@ -331,11 +334,14 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
             ),
         )
         if not _should_notify(settings, reason):
+            logger.info("[device %s] '%s' recorded but push disabled in settings.", device.id, reason)
             continue
         current_primary_location = primary_owner_device_latest_location(conn)
         if device_already_reunited(location, current_primary_location, movement_cfg):
+            logger.info("[device %s] '%s' not pushed - owner is already back near it.", device.id, reason)
             continue
         if reason == "left_behind" and _at_named_place(conn, location.lat, location.lon):
+            logger.info("[device %s] '%s' not pushed - left at a named place.", device.id, reason)
             continue  # left at a known place (home, office, ...) - routine, not worth a push
 
         name = device.display_name or device.name
@@ -356,6 +362,7 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
             cfg.display_timezone,
         )
         notify_all(notifiers, _ALERT_TITLES[reason], message)
+        logger.info("[device %s] '%s' push sent.", device.id, reason)
 
 
 # Guards against two poll_once() calls racing each other - the scheduled
@@ -381,6 +388,8 @@ def poll_once(cfg: Config) -> bool:
     if not _poll_lock.acquire(blocking=False):
         logger.info("Skipping poll - one is already in progress.")
         return False
+    started = time.monotonic()
+    logger.info("Poll started.")
     try:
         with get_conn(cfg.database_url) as conn:
             settings = get_settings(conn)
@@ -395,7 +404,9 @@ def poll_once(cfg: Config) -> bool:
                     return True
 
                 account = restore_account(cfg)
-                for airtag in list_airtags(conn, only_enabled=True):
+                airtags = list_airtags(conn, only_enabled=True)
+                logger.info("Polling %d enabled AirTag(s).", len(airtags))
+                for airtag in airtags:
                     try:
                         _poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha_publisher)
                     except Exception:
@@ -407,6 +418,7 @@ def poll_once(cfg: Config) -> bool:
                     ha_publisher.close()
     finally:
         _poll_lock.release()
+        logger.info("Poll finished in %.1fs.", time.monotonic() - started)
     return True
 
 
@@ -514,6 +526,7 @@ def _poll_airtag(
             prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
             alert = evaluate_movement(report, prior_reports, movement_cfg)
             if alert is not None:
+                logger.info("[%s] Movement alert '%s' (%.0f m).", airtag.id, alert.reason, alert.distance_meters)
                 record_alert(
                     conn,
                     DbAlert(
@@ -530,6 +543,9 @@ def _poll_airtag(
                         f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
                     )
                     notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+                    logger.info("[%s] '%s' push sent.", airtag.id, alert.reason)
+                else:
+                    logger.info("[%s] '%s' recorded but push disabled in settings.", airtag.id, alert.reason)
 
             if not airtag.away_alert_enabled:
                 continue
@@ -543,6 +559,7 @@ def _poll_airtag(
             )
             away_distance = evaluate_away(report, owner_location, movement_cfg)
             if away_distance is None:
+                logger.debug("[%s] Report at %s not away from the owner - no alert.", airtag.id, report.timestamp)
                 continue
 
             if prior_reports:
@@ -556,6 +573,7 @@ def _poll_airtag(
                 previous_report = prior_reports[-1]
                 previous_owner_location = primary_owner_device_location_near(conn, previous_report.timestamp)
                 if evaluate_away(previous_report, previous_owner_location, movement_cfg) is not None:
+                    logger.debug("[%s] Already away as of the previous report - not a new event.", airtag.id)
                     continue  # already away as of the last report too - not a new event
 
             object_moved = bool(prior_reports) and is_object_displaced(
@@ -568,6 +586,7 @@ def _poll_airtag(
                 movement_cfg,
             )
             reason = "autonomous_movement" if object_moved else "left_behind"
+            logger.info("[%s] Away alert '%s' at %.0f m from the owner.", airtag.id, reason, away_distance)
             record_alert(
                 conn,
                 DbAlert(
@@ -578,10 +597,13 @@ def _poll_airtag(
                 ),
             )
             if not _should_notify(settings, reason):
+                logger.info("[%s] '%s' recorded but push disabled in settings.", airtag.id, reason)
                 continue
             if owner_already_reunited(report, primary_owner_device_latest_location(conn), movement_cfg):
+                logger.info("[%s] '%s' not pushed - owner is already back near it.", airtag.id, reason)
                 continue
             if reason == "left_behind" and _at_named_place(conn, report.lat, report.lon):
+                logger.info("[%s] '%s' not pushed - left at a named place.", airtag.id, reason)
                 continue  # left at a known place (home, office, ...) - routine, not worth a push
 
             address = reverse_geocode(report.lat, report.lon).address
@@ -601,5 +623,6 @@ def _poll_airtag(
                 cfg.display_timezone,
             )
             notify_all(notifiers, _ALERT_TITLES[reason], away_message)
+            logger.info("[%s] '%s' push sent.", airtag.id, reason)
 
     _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted if not r.is_outlier])

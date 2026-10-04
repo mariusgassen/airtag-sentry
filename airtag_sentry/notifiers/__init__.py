@@ -36,8 +36,11 @@ def build_notifiers(cfg: Config, conn) -> list[Notifier]:
 
 
 def notify_all(notifiers: list[Notifier], title: str, message: str) -> None:
+    if not notifiers:
+        logger.warning("No notification channel configured - dropping '%s'.", title)
     for notifier in notifiers:
         try:
             notifier.send(title, message)
+            logger.info("Notifier %r sent '%s'.", notifier, title)
         except Exception:
             logger.exception("Notifier %r failed to send", notifier)

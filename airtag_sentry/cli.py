@@ -14,12 +14,20 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 
 from airtag_sentry.config import load_config
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # LOG_LEVEL=DEBUG only affects this app's own loggers - third-party libs
+    # (pyicloud, httpx, urllib3) stay at INFO so DEBUG doesn't dump their
+    # request/response bodies, which can contain tokens.
+    log_level = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+    if log_level not in logging.getLevelNamesMapping():
+        log_level = "INFO"
+    logging.getLogger("airtag_sentry").setLevel(log_level)
 
     parser = argparse.ArgumentParser(prog="airtag_sentry")
     sub = parser.add_subparsers(dest="command", required=True)
