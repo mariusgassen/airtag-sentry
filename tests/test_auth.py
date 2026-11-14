@@ -73,3 +73,72 @@ def test_import_session_rejects_malformed_session_json(tmp_path):
         auth.import_session(cfg, {"not": "a valid session"})
 
     assert not auth.is_connected(cfg)
+
+
+def test_has_valid_session_checks_login_state(tmp_path):
+    import json
+
+    store_path = tmp_path / "account.json"
+    cfg = _cfg(store_path)
+
+    assert auth.has_valid_session(cfg) is False
+
+    store_path.write_text("{not-json")
+    assert auth.has_valid_session(cfg) is False
+
+    expired = {
+        **_VALID_SESSION_JSON,
+        "login": {"state": LoginState.REQUIRE_2FA.value, "data": {}},
+    }
+    store_path.write_text(json.dumps(expired))
+    assert auth.is_connected(cfg) is True
+    assert auth.has_valid_session(cfg) is False
+
+    store_path.write_text(json.dumps(_VALID_SESSION_JSON))
+    assert auth.has_valid_session(cfg) is True
+
+
+def test_close_account_runs_async_close_and_closes_event_loop():
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    closed = []
+
+    class _FakeAccount:
+        def __init__(self):
+            self._evt_loop = loop
+
+        async def close(self):
+            closed.append(True)
+
+    auth.close_account(_FakeAccount())
+    assert closed == [True]
+    assert loop.is_closed()
+
+
+def test_cancel_login_and_disconnect_close_pending_account(tmp_path):
+    import time
+
+    closed = []
+
+    class _FakePendingAccount:
+        def close(self):
+            closed.append(True)
+
+    auth._pending_account = _FakePendingAccount()
+    auth._pending_started_at = time.monotonic()
+    assert auth.is_login_in_progress() is True
+
+    auth.cancel_login()
+    assert closed == [True]
+    assert auth.is_login_in_progress() is False
+
+    store_path = tmp_path / "account.json"
+    store_path.write_text("{}")
+    auth._pending_account = _FakePendingAccount()
+    auth._pending_started_at = time.monotonic()
+    auth.disconnect(_cfg(store_path))
+    assert closed == [True, True]
+    assert not store_path.exists()
+    assert auth.is_login_in_progress() is False
+

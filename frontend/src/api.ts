@@ -213,6 +213,10 @@ const REQUEST_TIMEOUT_MS = 10_000
 // triggers since it never calls poll-now.
 const POLL_NOW_TIMEOUT_MS = 60_000
 
+// Interactive Apple SRP/2FA handshakes (plus pyicloud HSA2 bridge startup)
+// routinely exceed the 10 s default timeout.
+const APPLE_AUTH_TIMEOUT_MS = 45_000
+
 async function apiFetch(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
@@ -471,25 +475,45 @@ export async function playOwnerDeviceSound(id: string): Promise<void> {
   })
 }
 
-export async function getAppleStatus(): Promise<{ connected: boolean }> {
+export async function getAppleStatus(): Promise<{
+  connected: boolean
+  reauth_required: boolean
+  last_sync_error: string | null
+}> {
   return (await apiFetch('/api/apple/status')).json()
 }
 
 export async function appleLogin(email: string, password: string): Promise<AppleLoginResult> {
   return (
-    await apiFetch('/api/apple/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+    await apiFetch(
+      '/api/apple/login',
+      { method: 'POST', body: JSON.stringify({ email, password }) },
+      APPLE_AUTH_TIMEOUT_MS,
+    )
   ).json()
 }
 
 export async function appleSelectTwoFactorMethod(methodIndex: number): Promise<void> {
-  await apiFetch('/api/apple/2fa/select', {
-    method: 'POST',
-    body: JSON.stringify({ method_index: methodIndex }),
-  })
+  await apiFetch(
+    '/api/apple/2fa/select',
+    {
+      method: 'POST',
+      body: JSON.stringify({ method_index: methodIndex }),
+    },
+    APPLE_AUTH_TIMEOUT_MS,
+  )
 }
 
 export async function appleSubmitTwoFactorCode(code: string): Promise<void> {
-  await apiFetch('/api/apple/2fa/submit', { method: 'POST', body: JSON.stringify({ code }) })
+  await apiFetch(
+    '/api/apple/2fa/submit',
+    { method: 'POST', body: JSON.stringify({ code }) },
+    APPLE_AUTH_TIMEOUT_MS,
+  )
+}
+
+export async function appleCancelLogin(): Promise<void> {
+  await apiFetch('/api/apple/cancel', { method: 'POST' })
 }
 
 export async function appleImportSession(sessionJson: unknown): Promise<void> {
@@ -505,12 +529,14 @@ export async function appleDisconnect(): Promise<void> {
 
 export async function getOwnerAppleStatus(): Promise<{
   connected: boolean
+  apple_id: string | null
   primary_device_id: string | null
   primary_device_name: string | null
   // The most recent background poll's live Apple call failure (a lapsed
   // session, a transient network error, ...), if any - cleared again on the
   // next successful sync.
   last_sync_error: string | null
+  reauth_required: boolean
   // Current Family Sharing filter, settable via ownerAppleSetIncludeFamily
   // without a re-login - see owner_tracking.set_include_family.
   include_family_devices: boolean
@@ -524,15 +550,27 @@ export async function ownerAppleLogin(
   includeFamily = false,
 ): Promise<AppleLoginResult> {
   return (
-    await apiFetch('/api/apple/owner/login', {
-      method: 'POST',
-      body: JSON.stringify({ apple_id: appleId, password, include_family: includeFamily }),
-    })
+    await apiFetch(
+      '/api/apple/owner/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ apple_id: appleId, password, include_family: includeFamily }),
+      },
+      APPLE_AUTH_TIMEOUT_MS,
+    )
   ).json()
 }
 
 export async function ownerAppleSubmitTwoFactorCode(code: string): Promise<void> {
-  await apiFetch('/api/apple/owner/2fa/submit', { method: 'POST', body: JSON.stringify({ code }) })
+  await apiFetch(
+    '/api/apple/owner/2fa/submit',
+    { method: 'POST', body: JSON.stringify({ code }) },
+    APPLE_AUTH_TIMEOUT_MS,
+  )
+}
+
+export async function ownerAppleCancelLogin(): Promise<void> {
+  await apiFetch('/api/apple/owner/cancel', { method: 'POST' })
 }
 
 export async function ownerAppleDisconnect(): Promise<void> {
