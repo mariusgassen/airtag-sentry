@@ -111,6 +111,18 @@ class OwnerAppleCredentials:
     # instead of only ever being logged.
     last_sync_at: dt.datetime | None = None
     last_sync_error: str | None = None
+    # True when Apple explicitly requested 2FA / re-authentication on a
+    # background poll. Unlike a transient network error, polling again would
+    # either fail immediately or trigger another 2FA prompt on the user's phone,
+    # so background sync skips until the user re-authenticates via the UI.
+    reauth_required: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class AirtagAppleSyncStatus:
+    last_sync_at: dt.datetime | None = None
+    last_sync_error: str | None = None
+    reauth_required: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -553,17 +565,18 @@ def set_owner_apple_credentials(
         cur.execute(
             """
             INSERT INTO owner_apple_credentials
-                (id, apple_id, encrypted_password, include_family_devices, updated_at, last_sync_at, last_sync_error)
-            VALUES (1, %s, %s, %s, now(), NULL, NULL)
+                (id, apple_id, encrypted_password, include_family_devices, updated_at, last_sync_at, last_sync_error, reauth_required)
+            VALUES (1, %s, %s, %s, now(), NULL, NULL, FALSE)
             ON CONFLICT (id) DO UPDATE
                 SET apple_id = EXCLUDED.apple_id,
                     encrypted_password = EXCLUDED.encrypted_password,
                     include_family_devices = EXCLUDED.include_family_devices,
                     updated_at = now(),
                     -- A fresh login shouldn't carry forward a previous
-                    -- connection's stale sync error.
+                    -- connection's stale sync error or reauth pause.
                     last_sync_at = NULL,
-                    last_sync_error = NULL
+                    last_sync_error = NULL,
+                    reauth_required = FALSE
             """,
             (apple_id, encrypted_password, include_family_devices),
         )
@@ -588,22 +601,28 @@ def set_owner_include_family_devices(conn: psycopg.Connection, include_family_de
 def get_owner_apple_credentials(conn: psycopg.Connection) -> OwnerAppleCredentials | None:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT apple_id, encrypted_password, include_family_devices, last_sync_at, last_sync_error "
+            "SELECT apple_id, encrypted_password, include_family_devices, last_sync_at, last_sync_error, reauth_required "
             "FROM owner_apple_credentials WHERE id = 1"
         )
         row = cur.fetchone()
         return OwnerAppleCredentials(*row) if row else None
 
 
-def set_owner_apple_sync_status(conn: psycopg.Connection, synced_at: dt.datetime, error: str | None) -> None:
+def set_owner_apple_sync_status(
+    conn: psycopg.Connection,
+    synced_at: dt.datetime,
+    error: str | None,
+    *,
+    reauth_required: bool = False,
+) -> None:
     """Records the outcome of one live Apple device-listing attempt (success or
-    failure) - see OwnerAppleCredentials.last_sync_at/last_sync_error. A no-op if
-    owner tracking was disconnected in the meantime (no credentials row left to
-    update)."""
+    failure) - see OwnerAppleCredentials.last_sync_at/last_sync_error/reauth_required.
+    A no-op if owner tracking was disconnected in the meantime (no credentials
+    row left to update)."""
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE owner_apple_credentials SET last_sync_at = %s, last_sync_error = %s WHERE id = 1",
-            (synced_at, error),
+            "UPDATE owner_apple_credentials SET last_sync_at = %s, last_sync_error = %s, reauth_required = %s WHERE id = 1",
+            (synced_at, error, reauth_required),
         )
     conn.commit()
 
@@ -611,6 +630,44 @@ def set_owner_apple_sync_status(conn: psycopg.Connection, synced_at: dt.datetime
 def delete_owner_apple_credentials(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("DELETE FROM owner_apple_credentials WHERE id = 1")
+    conn.commit()
+
+
+def get_airtag_apple_sync_status(conn: psycopg.Connection) -> AirtagAppleSyncStatus | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT last_sync_at, last_sync_error, reauth_required "
+            "FROM airtag_apple_sync_status WHERE id = 1"
+        )
+        row = cur.fetchone()
+        return AirtagAppleSyncStatus(*row) if row else None
+
+
+def set_airtag_apple_sync_status(
+    conn: psycopg.Connection,
+    synced_at: dt.datetime,
+    error: str | None,
+    *,
+    reauth_required: bool = False,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO airtag_apple_sync_status (id, last_sync_at, last_sync_error, reauth_required)
+            VALUES (1, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE
+                SET last_sync_at = EXCLUDED.last_sync_at,
+                    last_sync_error = EXCLUDED.last_sync_error,
+                    reauth_required = EXCLUDED.reauth_required
+            """,
+            (synced_at, error, reauth_required),
+        )
+    conn.commit()
+
+
+def clear_airtag_apple_sync_status(conn: psycopg.Connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM airtag_apple_sync_status WHERE id = 1")
     conn.commit()
 
 

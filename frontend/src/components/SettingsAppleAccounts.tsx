@@ -1,4 +1,5 @@
 import {
+  appleCancelLogin,
   appleDisconnect,
   appleImportSession,
   appleLogin,
@@ -6,6 +7,7 @@ import {
   appleSubmitTwoFactorCode,
   getAppleStatus,
   getOwnerAppleStatus,
+  ownerAppleCancelLogin,
   ownerAppleDisconnect,
   ownerAppleLogin,
   ownerAppleSetIncludeFamily,
@@ -21,6 +23,7 @@ const AIRTAG_APPLE_ADAPTER: AppleConnectAdapter = {
   importSession: appleImportSession,
   selectMethod: appleSelectTwoFactorMethod,
   submitCode: appleSubmitTwoFactorCode,
+  cancelLogin: appleCancelLogin,
   disconnect: appleDisconnect,
 }
 
@@ -28,6 +31,7 @@ const OWNER_APPLE_ADAPTER: AppleConnectAdapter = {
   getStatus: getOwnerAppleStatus,
   login: ownerAppleLogin,
   submitCode: ownerAppleSubmitTwoFactorCode,
+  cancelLogin: ownerAppleCancelLogin,
   disconnect: ownerAppleDisconnect,
   familySharingToggle: true,
   setFamilySharing: ownerAppleSetIncludeFamily,

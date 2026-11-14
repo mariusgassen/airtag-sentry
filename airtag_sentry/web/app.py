@@ -44,6 +44,7 @@ from airtag_sentry.db import (
     PushSubscription,
     StoredKey,
     add_push_subscription,
+    clear_airtag_apple_sync_status,
     create_airtag,
     create_named_place,
     delete_airtag,
@@ -56,6 +57,7 @@ from airtag_sentry.db import (
     delete_telegram_credentials,
     fetch_owner_device_location_history,
     fetch_reports,
+    get_airtag_apple_sync_status,
     get_carto_credentials,
     get_conn,
     get_geocoded_point,
@@ -1257,7 +1259,21 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/apple/status")
     def apple_status():
         """Whether the AirTag-tracking Apple session (see auth.py) is connected."""
-        return {"connected": auth.is_connected(cfg)}
+        connected = auth.is_connected(cfg)
+        if not connected:
+            return {"connected": False, "reauth_required": False, "last_sync_error": None}
+        with get_conn(cfg.database_url) as conn:
+            sync_status = get_airtag_apple_sync_status(conn)
+        session_valid = auth.has_valid_session(cfg)
+        reauth_required = (sync_status.reauth_required if sync_status else False) or not session_valid
+        last_sync_error = sync_status.last_sync_error if sync_status else None
+        if reauth_required and not last_sync_error:
+            last_sync_error = "Apple-Sitzung abgelaufen – erneute Anmeldung erforderlich."
+        return {
+            "connected": True,
+            "reauth_required": reauth_required,
+            "last_sync_error": last_sync_error,
+        }
 
     @app.post("/api/apple/login")
     def apple_login(body: AppleLoginIn):
@@ -1266,6 +1282,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         except Exception as exc:
             logger.exception("Apple login failed.")
             raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
+        if not result.requires_2fa:
+            with get_conn(cfg.database_url) as conn:
+                clear_airtag_apple_sync_status(conn)
         return dataclasses.asdict(result)
 
     @app.post("/api/apple/2fa/select")
@@ -1284,6 +1303,13 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         except Exception as exc:
             logger.exception("Apple 2FA code submission failed.")
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with get_conn(cfg.database_url) as conn:
+            clear_airtag_apple_sync_status(conn)
+        return {"ok": True}
+
+    @app.post("/api/apple/cancel")
+    def apple_cancel():
+        auth.cancel_login()
         return {"ok": True}
 
     @app.post("/api/apple/session")
@@ -1294,11 +1320,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             auth.import_session(cfg, body.session_json)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with get_conn(cfg.database_url) as conn:
+            clear_airtag_apple_sync_status(conn)
         return {"ok": True}
 
     @app.delete("/api/apple")
     def apple_disconnect():
         auth.disconnect(cfg)
+        with get_conn(cfg.database_url) as conn:
+            clear_airtag_apple_sync_status(conn)
         return {"ok": True}
 
     @app.get("/api/apple/owner/status")
@@ -1331,10 +1361,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"ok": True}
 
+    @app.post("/api/apple/owner/cancel")
+    def owner_apple_cancel():
+        owner_tracking.cancel_owner_login()
+        return {"ok": True}
+
     @app.delete("/api/apple/owner")
     def owner_apple_disconnect():
         with get_conn(cfg.database_url) as conn:
-            owner_tracking.disconnect(conn)
+            owner_tracking.disconnect(cfg, conn)
         return {"ok": True}
 
     @app.patch("/api/apple/owner/family")

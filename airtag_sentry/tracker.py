@@ -11,10 +11,16 @@ import logging
 import threading
 import time
 
-from findmy import FindMyAccessory, KeyPair
+from findmy import FindMyAccessory, KeyPair, LoginState
+from findmy.errors import InvalidCredentialsError, InvalidStateError, UnauthorizedError
 
 from airtag_sentry import keystore
-from airtag_sentry.auth import is_connected, restore_account
+from airtag_sentry.auth import (
+    close_account as close_airtag_account,
+    is_connected,
+    is_login_in_progress as is_airtag_login_in_progress,
+    restore_account,
+)
 from airtag_sentry.config import Config
 from airtag_sentry.db import (
     Alert as DbAlert,
@@ -27,6 +33,7 @@ from airtag_sentry.db import (
     count_reports,
     fetch_owner_device_location_history,
     fetch_reports_before,
+    get_airtag_apple_sync_status,
     get_airtag_key,
     get_conn,
     get_geocoded_point,
@@ -41,6 +48,7 @@ from airtag_sentry.db import (
     record_alert,
     record_owner_device_location,
     round_coord,
+    set_airtag_apple_sync_status,
     store_geocoded_point,
 )
 from airtag_sentry.geocode import format_location_line, reverse_geocode
@@ -186,21 +194,21 @@ def _geocode_new_points(conn, points: list[tuple[float, float]]) -> None:
             store_geocoded_point(conn, lat, lon, result.address, result.poi_name)
 
 
-def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublisher | None) -> None:
+def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublisher | None) -> bool:
     """Best-effort refresh of every enabled owner device's location. Never allowed
     to break AirTag polling - a failure here just means this poll's away-correlation
     falls back to whatever was recorded last time (or skips it, if nothing ever was).
     fetch_owner_device_locations() itself returns [] immediately if owner tracking
     was never connected via the dashboard, so no separate "is it configured" check
-    is needed here."""
+    is needed here. Returns False when the live Apple sync failed."""
     try:
         locations = fetch_owner_device_locations(cfg, conn)
     except Exception:
         logger.exception("Failed to fetch owner device locations this poll.")
-        return
+        return False
     if not locations:
         logger.info("No owner device locations available this poll.")
-        return
+        return True
     devices_by_id = {d.id: d for d in list_owner_devices(conn)} if ha_publisher is not None else {}
     for location in locations:
         record_owner_device_location(conn, location)
@@ -219,10 +227,16 @@ def _update_owner_devices(cfg: Config, conn, ha_publisher: HomeAssistantPublishe
             except Exception:
                 logger.exception("Failed to publish owner device '%s' to Home Assistant.", location.device_id)
     _geocode_new_points(conn, [(loc.lat, loc.lon) for loc in locations])
+    return True
 
 
 def _owner_location_for_away_check(
-    cfg: Config, conn, near_timestamp: dt.datetime, max_age_minutes: float
+    cfg: Config,
+    conn,
+    near_timestamp: dt.datetime,
+    max_age_minutes: float,
+    *,
+    allow_live_fetch: bool = True,
 ) -> OwnerLocation | None:
     """The primary owner device's reading closest to `near_timestamp`, doing one
     on-demand live Apple fetch first if what's already recorded is missing or
@@ -236,6 +250,8 @@ def _owner_location_for_away_check(
     location = primary_owner_device_location_near(conn, near_timestamp)
     if location is not None and abs(near_timestamp - location.recorded_at) <= dt.timedelta(minutes=max_age_minutes):
         return location
+    if not allow_live_fetch:
+        return location
 
     try:
         fresh_locations = fetch_owner_device_locations(cfg, conn)
@@ -247,7 +263,14 @@ def _owner_location_for_away_check(
     return primary_owner_device_location_near(conn, near_timestamp)
 
 
-def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSettings) -> None:
+def _evaluate_device_away_alerts(
+    cfg: Config,
+    conn,
+    notifiers,
+    settings: AppSettings,
+    *,
+    allow_live_fetch: bool = True,
+) -> None:
     """"Left behind" / "autonomous movement" alerts for non-primary owner
     devices (a laptop, AirPods) - the device-side counterpart to
     _poll_airtag's away-check for AirTags (see CLAUDE.md's AirTag/device
@@ -306,7 +329,11 @@ def _evaluate_device_away_alerts(cfg: Config, conn, notifiers, settings: AppSett
                 continue  # already away last poll too - not a new "left without" event
 
         primary_location = _owner_location_for_away_check(
-            cfg, conn, location.recorded_at, movement_cfg.owner_location_max_age_minutes
+            cfg,
+            conn,
+            location.recorded_at,
+            movement_cfg.owner_location_max_age_minutes,
+            allow_live_fetch=allow_live_fetch,
         )
         away_distance = evaluate_device_away(location, primary_location, movement_cfg)
         if away_distance is None:
@@ -396,23 +423,81 @@ def poll_once(cfg: Config) -> bool:
             notifiers = build_notifiers(cfg, conn)
             ha_publisher = build_ha_publisher(cfg, conn)
             try:
-                _update_owner_devices(cfg, conn, ha_publisher)
-                _evaluate_device_away_alerts(cfg, conn, notifiers, settings)
+                owner_sync_ok = _update_owner_devices(cfg, conn, ha_publisher) is not False
+                if owner_sync_ok:
+                    _evaluate_device_away_alerts(cfg, conn, notifiers, settings)
+                else:
+                    _evaluate_device_away_alerts(cfg, conn, notifiers, settings, allow_live_fetch=False)
 
                 if not is_connected(cfg):
                     logger.info("AirTag tracking not connected - skipping AirTag poll this cycle.")
                     return True
 
+                if is_airtag_login_in_progress():
+                    logger.info("AirTag Apple login in progress - skipping AirTag poll this cycle.")
+                    return True
+
+                airtag_sync = get_airtag_apple_sync_status(conn)
+                if airtag_sync is not None and airtag_sync.reauth_required:
+                    logger.info("AirTag Apple session requires re-authentication - skipping AirTag poll.")
+                    return True
+
                 account = restore_account(cfg)
-                airtags = list_airtags(conn, only_enabled=True)
-                logger.info("Polling %d enabled AirTag(s).", len(airtags))
-                for airtag in airtags:
-                    try:
-                        _poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha_publisher)
-                    except Exception:
-                        logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
-                    finally:
-                        account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
+                try:
+                    if getattr(account, "login_state", LoginState.LOGGED_IN) != LoginState.LOGGED_IN:
+                        now = dt.datetime.now(dt.timezone.utc)
+                        set_airtag_apple_sync_status(
+                            conn,
+                            now,
+                            "Apple-Sitzung abgelaufen – erneute Anmeldung mit 2FA erforderlich.",
+                            reauth_required=True,
+                        )
+                        logger.warning("Restored AirTag Apple session is not logged in (state=%s).", account.login_state)
+                        return True
+
+                    airtags = list_airtags(conn, only_enabled=True)
+                    logger.info("Polling %d enabled AirTag(s).", len(airtags))
+                    auth_failed = False
+                    last_error: str | None = None
+                    for airtag in airtags:
+                        try:
+                            _poll_airtag(
+                                cfg,
+                                account,
+                                airtag,
+                                conn,
+                                notifiers,
+                                settings,
+                                ha_publisher,
+                                allow_live_owner_fetch=owner_sync_ok,
+                            )
+                        except (UnauthorizedError, InvalidCredentialsError, InvalidStateError) as exc:
+                            auth_failed = True
+                            now = dt.datetime.now(dt.timezone.utc)
+                            set_airtag_apple_sync_status(conn, now, str(exc), reauth_required=True)
+                            logger.warning(
+                                "AirTag Apple session expired or requires re-authentication: %s",
+                                exc,
+                            )
+                            break
+                        except Exception as exc:
+                            last_error = str(exc)
+                            logger.exception("Poll failed for airtag '%s' (%s)", airtag.id, airtag.name)
+
+                    now = dt.datetime.now(dt.timezone.utc)
+                    if not auth_failed:
+                        if getattr(account, "login_state", LoginState.LOGGED_IN) == LoginState.LOGGED_IN:
+                            account.to_json(cfg.apple.store_path)  # tokens can rotate on any call
+                            set_airtag_apple_sync_status(conn, now, last_error, reauth_required=False)
+                        else:
+                            set_airtag_apple_sync_status(
+                                conn,
+                                now,
+                                "Apple-Sitzung abgelaufen – erneute Anmeldung mit 2FA erforderlich.",
+                                reauth_required=True,
+                            )
+                finally:
+                    close_airtag_account(account)
             finally:
                 if ha_publisher is not None:
                     ha_publisher.close()
@@ -430,6 +515,8 @@ def _poll_airtag(
     notifiers,
     settings: AppSettings,
     ha_publisher: HomeAssistantPublisher | None,
+    *,
+    allow_live_owner_fetch: bool = True,
 ) -> None:
     key = _load_key(cfg, conn, airtag.id)
     location_reports = account.fetch_location_history(key)
@@ -555,7 +642,11 @@ def _poll_airtag(
             # position, or "you left it behind" could never be detected (see
             # CLAUDE.md's "you left it" vs "it left you" constraint).
             owner_location = _owner_location_for_away_check(
-                cfg, conn, report.timestamp, movement_cfg.owner_location_max_age_minutes
+                cfg,
+                conn,
+                report.timestamp,
+                movement_cfg.owner_location_max_age_minutes,
+                allow_live_fetch=allow_live_owner_fetch,
             )
             away_distance = evaluate_away(report, owner_location, movement_cfg)
             if away_distance is None:
