@@ -37,7 +37,7 @@ _USER_AGENT = "AirTagSentry (self-hosted dashboard, reverse-geocode)"
 _SEARCH_RESULT_LIMIT = 5
 
 _lock = threading.Lock()
-_last_call = 0.0
+_next_allowed = 0.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,23 +53,34 @@ class GeocodeSearchResult:
     lon: float
 
 
+def _wait_for_rate_limit() -> None:
+    """Reserve the next 1 req/sec slot under _lock and release it before
+    sleeping or doing HTTP I/O, so a slow or timed-out Nominatim call from the
+    background poller never stalls an interactive dashboard request behind it."""
+    global _next_allowed
+    if _MIN_INTERVAL_SECONDS <= 0:
+        return
+    with _lock:
+        now = time.monotonic()
+        scheduled = max(now, _next_allowed)
+        _next_allowed = scheduled + _MIN_INTERVAL_SECONDS
+        wait = scheduled - now
+    if wait > 0:
+        time.sleep(wait)
+
+
 def _rate_limited_get(url: str, params: dict[str, Any], timeout: float) -> Any | None:
     """Shared rate limiter for both Nominatim endpoints - they're the same
     host under the same 1 request/sec usage-policy cap, so reverse and
-    forward lookups queue behind one shared `_last_call`/`_lock` rather than
+    forward lookups queue behind one shared `_next_allowed`/`_lock` rather than
     each getting their own budget."""
-    global _last_call
-    with _lock:
-        wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call)
-        if wait > 0:
-            time.sleep(wait)
-        try:
-            resp = requests.get(url, params=params, headers={"User-Agent": _USER_AGENT}, timeout=timeout)
-            _last_call = time.monotonic()
-            resp.raise_for_status()
-            return resp.json()
-        except (requests.RequestException, ValueError):
-            return None
+    _wait_for_rate_limit()
+    try:
+        resp = requests.get(url, params=params, headers={"User-Agent": _USER_AGENT}, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
+    except (requests.RequestException, ValueError):
+        return None
 
 
 def _compact_address(address: dict[str, str] | None) -> str | None:

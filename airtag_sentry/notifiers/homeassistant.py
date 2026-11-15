@@ -19,6 +19,7 @@ import dataclasses
 import json
 import logging
 import re
+import time
 
 import paho.mqtt.client as mqtt
 
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 _DISCOVERY_PREFIX = "homeassistant"
 _STATE_PREFIX = "airtag_sentry"
 _UNSAFE_ID_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
+_PUBLISH_FLUSH_TIMEOUT_SECONDS = 5.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -49,12 +51,31 @@ class HomeAssistantPublisher:
             self._client.username_pw_set(config.username, config.password)
         if config.use_tls:
             self._client.tls_set()
+        self._pending: list[mqtt.MQTTMessageInfo] = []
         self._client.connect(config.host, config.port, keepalive=10)
         self._client.loop_start()
 
     def close(self) -> None:
-        self._client.loop_stop()
-        self._client.disconnect()
+        # Flush QoS-1 messages while the network loop thread is still active so
+        # PUBACKs can complete, then disconnect cleanly before loop_stop().
+        deadline = time.monotonic() + _PUBLISH_FLUSH_TIMEOUT_SECONDS
+        for index, info in enumerate(self._pending):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "Timed out flushing %d remaining Home Assistant MQTT message(s).",
+                    len(self._pending) - index,
+                )
+                break
+            try:
+                info.wait_for_publish(timeout=remaining)
+            except Exception:
+                logger.warning("Failed to flush Home Assistant MQTT message before close.", exc_info=True)
+        self._pending.clear()
+        try:
+            self._client.disconnect()
+        finally:
+            self._client.loop_stop()
 
     def publish_airtag(
         self,
@@ -108,7 +129,7 @@ class HomeAssistantPublisher:
         # source_type "gps" makes Home Assistant derive home/not_home (or a
         # zone name) from the lat/lon attributes itself - this literal state
         # value is required by the schema but otherwise ignored by HA.
-        self._client.publish(state_topic, "not_home", retain=True, qos=1)
+        self._publish(state_topic, "not_home")
         self._publish_json(attributes_topic, {"latitude": lat, "longitude": lon, "gps_accuracy": accuracy})
 
     def _publish_battery_sensor(self, unique_id: str, battery_percent: int) -> None:
@@ -126,7 +147,7 @@ class HomeAssistantPublisher:
                 "device": device,
             },
         )
-        self._client.publish(state_topic, str(battery_percent), retain=True, qos=1)
+        self._publish(state_topic, str(battery_percent))
 
     def _publish_text_sensor(self, unique_id: str, label: str, value: str) -> None:
         device = {"identifiers": [unique_id]}
@@ -142,10 +163,15 @@ class HomeAssistantPublisher:
                 "device": device,
             },
         )
-        self._client.publish(state_topic, value, retain=True, qos=1)
+        self._publish(state_topic, value)
 
     def _publish_json(self, topic: str, payload: dict) -> None:
-        self._client.publish(topic, json.dumps(payload), retain=True, qos=1)
+        self._publish(topic, json.dumps(payload))
+
+    def _publish(self, topic: str, payload: str) -> None:
+        info = self._client.publish(topic, payload, retain=True, qos=1)
+        if info is not None:
+            self._pending.append(info)
 
 
 def build_ha_publisher(cfg: Config, conn) -> HomeAssistantPublisher | None:
