@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from typing import Iterator
 
 import psycopg
 
@@ -389,37 +389,56 @@ def delete_airtag(conn: psycopg.Connection, airtag_id: str) -> None:
 
 
 def insert_reports(conn: psycopg.Connection, reports: list[Report]) -> list[Report]:
-    """Insert reports, skipping ones whose timestamp already exists.
+    """Insert reports in a single batch statement, skipping ones whose timestamp
+    already exists.
 
     Returns only the reports that were actually newly inserted, sorted ascending -
     this is what movement detection and alerting should look at.
     """
-    inserted: list[Report] = []
+    if not reports:
+        return []
+    deduped: list[Report] = []
+    seen_keys: set[tuple[str, dt.datetime]] = set()
+    for report in sorted(reports, key=lambda r: r.timestamp):
+        key = (report.airtag_id, report.timestamp)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped.append(report)
+
     with conn.cursor() as cur:
-        for report in sorted(reports, key=lambda r: r.timestamp):
-            cur.execute(
-                """
-                INSERT INTO location_reports
-                    (airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level, is_outlier)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (airtag_id, "timestamp") DO NOTHING
-                RETURNING id, airtag_id, timestamp, lat, lon, accuracy, confidence, battery_level, is_outlier
-                """,
-                (
-                    report.airtag_id,
-                    report.timestamp,
-                    report.lat,
-                    report.lon,
-                    report.accuracy,
-                    report.confidence,
-                    report.battery_level,
-                    report.is_outlier,
-                ),
+        cur.execute(
+            """
+            INSERT INTO location_reports
+                (airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level, is_outlier)
+            SELECT *
+            FROM UNNEST(
+                %s::text[],
+                %s::timestamptz[],
+                %s::double precision[],
+                %s::double precision[],
+                %s::double precision[],
+                %s::smallint[],
+                %s::text[],
+                %s::boolean[]
             )
-            row = cur.fetchone()
-            if row is not None:
-                inserted.append(Report(*row))
+            ON CONFLICT (airtag_id, "timestamp") DO NOTHING
+            RETURNING id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level, is_outlier
+            """,
+            (
+                [r.airtag_id for r in deduped],
+                [r.timestamp for r in deduped],
+                [r.lat for r in deduped],
+                [r.lon for r in deduped],
+                [r.accuracy for r in deduped],
+                [r.confidence for r in deduped],
+                [r.battery_level for r in deduped],
+                [r.is_outlier for r in deduped],
+            ),
+        )
+        inserted = [Report(*row) for row in cur.fetchall()]
     conn.commit()
+    inserted.sort(key=lambda r: r.timestamp)
     return inserted
 
 
@@ -433,25 +452,33 @@ def count_reports(conn: psycopg.Connection, airtag_id: str) -> int:
 _REPORT_COLUMNS = 'id, airtag_id, "timestamp", lat, lon, accuracy, confidence, battery_level, is_outlier'
 
 
-def fetch_reports(conn: psycopg.Connection, airtag_id: str, limit: int | None = None) -> list[Report]:
+def fetch_reports(
+    conn: psycopg.Connection,
+    airtag_id: str,
+    limit: int | None = None,
+    since: dt.datetime | None = None,
+) -> list[Report]:
     """Never returns is_outlier reports - see Report.is_outlier. Callers that
     need the raw, unfiltered history (currently none) would need a separate
     query."""
-    query = (
-        f"SELECT {_REPORT_COLUMNS} FROM location_reports "
-        'WHERE airtag_id = %s AND NOT is_outlier ORDER BY "timestamp" ASC'
-    )
-    params: tuple = (airtag_id,)
+    conditions = ["airtag_id = %s", "NOT is_outlier"]
+    params: list = [airtag_id]
+    if since is not None:
+        conditions.append('"timestamp" >= %s')
+        params.append(since)
+    where = " AND ".join(conditions)
     if limit is not None:
         query = (
             f"SELECT {_REPORT_COLUMNS} FROM ("
             f"SELECT {_REPORT_COLUMNS} FROM location_reports "
-            'WHERE airtag_id = %s AND NOT is_outlier ORDER BY "timestamp" DESC LIMIT %s'
-            ") sub ORDER BY \"timestamp\" ASC"
+            f'WHERE {where} ORDER BY "timestamp" DESC LIMIT %s'
+            ') sub ORDER BY "timestamp" ASC'
         )
-        params = (airtag_id, limit)
+        params.append(limit)
+    else:
+        query = f'SELECT {_REPORT_COLUMNS} FROM location_reports WHERE {where} ORDER BY "timestamp" ASC'
     with conn.cursor() as cur:
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
         return [Report(*row) for row in cur.fetchall()]
 
 
@@ -1170,18 +1197,45 @@ def primary_owner_device_location_near(conn: psycopg.Connection, timestamp: dt.d
     reading that matters is the one from around when the report's own
     timestamp says the tag was there - not whatever the owner's latest
     location happens to be by the time the report is processed.
+
+    Uses two index seeks on (device_id, recorded_at DESC) (closest before-or-at
+    and closest strictly-after `timestamp`) instead of sorting every historical
+    row by ABS(EXTRACT(EPOCH ...)).
     """
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
-                odl.battery_level, odl.battery_status, odl.battery_reported
-            FROM owner_device_locations odl
-            JOIN owner_devices od ON od.id = odl.device_id
-            WHERE od.is_primary
-            ORDER BY ABS(EXTRACT(EPOCH FROM (odl.recorded_at - %s))) ASC LIMIT 1
+            WITH primary_dev AS (
+                SELECT id FROM owner_devices WHERE is_primary LIMIT 1
+            ),
+            candidates AS (
+                (
+                    SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
+                        odl.battery_level, odl.battery_status, odl.battery_reported
+                    FROM owner_device_locations odl
+                    WHERE odl.device_id = (SELECT id FROM primary_dev)
+                      AND odl.recorded_at <= %s
+                    ORDER BY odl.recorded_at DESC
+                    LIMIT 1
+                )
+                UNION ALL
+                (
+                    SELECT odl.id, odl.device_id, odl.recorded_at, odl.lat, odl.lon, odl.horizontal_accuracy,
+                        odl.battery_level, odl.battery_status, odl.battery_reported
+                    FROM owner_device_locations odl
+                    WHERE odl.device_id = (SELECT id FROM primary_dev)
+                      AND odl.recorded_at > %s
+                    ORDER BY odl.recorded_at ASC
+                    LIMIT 1
+                )
+            )
+            SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy,
+                battery_level, battery_status, battery_reported
+            FROM candidates
+            ORDER BY ABS(EXTRACT(EPOCH FROM (recorded_at - %s))) ASC
+            LIMIT 1
             """,
-            (timestamp,),
+            (timestamp, timestamp, timestamp),
         )
         row = cur.fetchone()
         return OwnerLocation(*row) if row else None
@@ -1211,20 +1265,28 @@ def primary_owner_device_latest_location(conn: psycopg.Connection) -> OwnerLocat
 
 
 def fetch_owner_device_location_history(
-    conn: psycopg.Connection, device_id: str, limit: int | None = 200
+    conn: psycopg.Connection,
+    device_id: str,
+    limit: int | None = 200,
+    since: dt.datetime | None = None,
 ) -> list[OwnerLocation]:
+    conditions = ["device_id = %s"]
+    params: list = [device_id]
+    if since is not None:
+        conditions.append("recorded_at >= %s")
+        params.append(since)
+    where = " AND ".join(conditions)
     query = (
         "SELECT id, device_id, recorded_at, lat, lon, horizontal_accuracy, battery_level, battery_status, "
         "battery_reported "
-        "FROM owner_device_locations WHERE device_id = %s "
+        f"FROM owner_device_locations WHERE {where} "
         "ORDER BY recorded_at DESC"
     )
-    params: tuple = (device_id,)
     if limit is not None:
         query += " LIMIT %s"
-        params = (device_id, limit)
+        params.append(limit)
     with conn.cursor() as cur:
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
         return [OwnerLocation(*row) for row in cur.fetchall()]
 
 
@@ -1286,6 +1348,28 @@ def get_geocoded_point(conn: psycopg.Connection, lat: float, lon: float) -> Geoc
         return GeocodedPoint(*row) if row else None
 
 
+def get_geocoded_points_map(
+    conn: psycopg.Connection, coords: Iterable[tuple[float, float]]
+) -> dict[tuple[float, float], GeocodedPoint]:
+    """Batch lookup for geocoded_points keyed by round_coord(lat, lon)."""
+    rounded = list({round_coord(lat, lon) for lat, lon in coords})
+    if not rounded:
+        return {}
+    lats = [lat for lat, _ in rounded]
+    lons = [lon for _, lon in rounded]
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT gp.lat_rounded, gp.lon_rounded, gp.address, gp.poi_name
+            FROM geocoded_points gp
+            JOIN UNNEST(%s::double precision[], %s::double precision[]) AS k(lat_r, lon_r)
+              ON gp.lat_rounded = k.lat_r AND gp.lon_rounded = k.lon_r
+            """,
+            (lats, lons),
+        )
+        return {(row[0], row[1]): GeocodedPoint(*row) for row in cur.fetchall()}
+
+
 def store_geocoded_point(
     conn: psycopg.Connection, lat: float, lon: float, address: str | None, poi_name: str | None
 ) -> GeocodedPoint:
@@ -1315,6 +1399,28 @@ def get_place_label_correction(conn: psycopg.Connection, lat: float, lon: float)
         )
         row = cur.fetchone()
         return row[0] if row else None
+
+
+def get_place_label_corrections_map(
+    conn: psycopg.Connection, coords: Iterable[tuple[float, float]]
+) -> dict[tuple[float, float], str]:
+    """Batch lookup for place_label_corrections keyed by round_coord(lat, lon)."""
+    rounded = list({round_coord(lat, lon) for lat, lon in coords})
+    if not rounded:
+        return {}
+    lats = [lat for lat, _ in rounded]
+    lons = [lon for _, lon in rounded]
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT c.lat_rounded, c.lon_rounded, c.corrected_name
+            FROM place_label_corrections c
+            JOIN UNNEST(%s::double precision[], %s::double precision[]) AS k(lat_r, lon_r)
+              ON c.lat_rounded = k.lat_r AND c.lon_rounded = k.lon_r
+            """,
+            (lats, lons),
+        )
+        return {(row[0], row[1]): row[2] for row in cur.fetchall()}
 
 
 def set_place_label_correction(conn: psycopg.Connection, lat: float, lon: float, corrected_name: str) -> None:

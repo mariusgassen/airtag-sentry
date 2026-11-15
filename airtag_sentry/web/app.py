@@ -41,6 +41,7 @@ from airtag_sentry.notifiers import build_notifiers
 from airtag_sentry.routing import route_along_roads
 from airtag_sentry.db import (
     AppSettings,
+    GeocodedPoint,
     PushSubscription,
     StoredKey,
     add_push_subscription,
@@ -60,11 +61,11 @@ from airtag_sentry.db import (
     get_airtag_apple_sync_status,
     get_carto_credentials,
     get_conn,
-    get_geocoded_point,
+    get_geocoded_points_map,
     get_ha_api_token,
     get_mqtt_credentials,
     get_owner_apple_credentials,
-    get_place_label_correction,
+    get_place_label_corrections_map,
     get_settings,
     get_telegram_credentials,
     latest_alert,
@@ -77,6 +78,7 @@ from airtag_sentry.db import (
     list_owner_devices as db_list_owner_devices,
     remove_push_subscription,
     rename_airtag,
+    round_coord,
     set_airtag_appearance,
     set_airtag_away_alert_enabled,
     set_airtag_enabled,
@@ -432,9 +434,25 @@ def _slugify(name: str) -> str:
     return slug or "airtag"
 
 
-def _stay_place_details(conn, place, lat: float, lon: float) -> dict[str, str | None]:
-    correction = get_place_label_correction(conn, lat, lon)
-    geocoded = get_geocoded_point(conn, lat, lon)
+def _load_stay_lookup_maps(
+    conn, coords: list[tuple[float, float]]
+) -> tuple[dict[tuple[float, float], str], dict[tuple[float, float], GeocodedPoint]]:
+    return (
+        get_place_label_corrections_map(conn, coords),
+        get_geocoded_points_map(conn, coords),
+    )
+
+
+def _stay_place_details(
+    place,
+    lat: float,
+    lon: float,
+    corrections: dict[tuple[float, float], str],
+    geocodes: dict[tuple[float, float], GeocodedPoint],
+) -> dict[str, str | None]:
+    key = round_coord(lat, lon)
+    correction = corrections.get(key)
+    geocoded = geocodes.get(key)
     poi_name = geocoded.poi_name if geocoded else None
     address = geocoded.address if geocoded else None
     return {
@@ -442,10 +460,6 @@ def _stay_place_details(conn, place, lat: float, lon: float) -> dict[str, str | 
         "address": address,
         "poi_name": poi_name,
     }
-
-
-def _stay_label(conn, place, lat: float, lon: float) -> str | None:
-    return _stay_place_details(conn, place, lat, lon)["label"]
 
 
 def _hash_ha_token(token: str) -> str:
@@ -834,6 +848,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             radius = get_settings(conn).history_cluster_radius_meters
             places = list_named_places(conn)
             clusters = cluster_by_proximity(reports, lambda r: (r.lat, r.lon), radius)
+            corrections, geocodes = _load_stay_lookup_maps(conn, [(c.anchor.lat, c.anchor.lon) for c in clusters])
             stays = []
             for c in clusters:
                 place = match_place(c.anchor.lat, c.anchor.lon, places)
@@ -845,7 +860,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                         "count": len(c.points),
                         "lat": c.anchor.lat,
                         "lon": c.anchor.lon,
-                        "label": _stay_label(conn, place, c.anchor.lat, c.anchor.lon),
+                        "label": _stay_place_details(place, c.anchor.lat, c.anchor.lon, corrections, geocodes)["label"],
                         "place_id": place.id if place else None,
                         "battery_level": c.anchor.battery_level,
                     }
@@ -1208,6 +1223,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             radius = get_settings(conn).history_cluster_radius_meters
             places = list_named_places(conn)
             clusters = cluster_by_proximity(locations, lambda loc: (loc.lat, loc.lon), radius)
+            corrections, geocodes = _load_stay_lookup_maps(conn, [(c.anchor.lat, c.anchor.lon) for c in clusters])
             stays = []
             for c in clusters:
                 place = match_place(c.anchor.lat, c.anchor.lon, places)
@@ -1222,7 +1238,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                         "count": len(c.points),
                         "lat": c.anchor.lat,
                         "lon": c.anchor.lon,
-                        "label": _stay_label(conn, place, c.anchor.lat, c.anchor.lon),
+                        "label": _stay_place_details(place, c.anchor.lat, c.anchor.lon, corrections, geocodes)["label"],
                         "place_id": place.id if place else None,
                         "battery_level": c.anchor.battery_level,
                         "battery_status": c.anchor.battery_status,
@@ -1298,71 +1314,81 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             radius = get_settings(conn).history_cluster_radius_meters
             places = list_named_places(conn)
-            visits: list[dict[str, Any]] = []
+            pending_visits: list[tuple[dict[str, Any], Any, float, float]] = []
 
             for airtag in list_airtags(conn, only_enabled=True):
-                reports = fetch_reports(conn, airtag.id, limit=None)
-                if since is not None:
-                    reports = [r for r in reports if r.timestamp >= since]
+                reports = fetch_reports(conn, airtag.id, limit=None, since=since)
                 for c in cluster_by_proximity(reports, lambda r: (r.lat, r.lon), radius):
                     place = match_place(c.anchor.lat, c.anchor.lon, places)
-                    details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
-                    visits.append(
-                        {
-                            "object_type": "airtag",
-                            "object_id": airtag.id,
-                            "object_name": airtag.name,
-                            "object_icon": airtag.icon,
-                            "object_color": airtag.color,
-                            "object_device_type": None,
-                            # Lets a click on this visit deep-link into
-                            # AirtagDetail/MapCard's existing selectedReportId
-                            # navigation, same anchor GET /api/reports returns.
-                            "anchor_id": c.anchor.id,
-                            "anchor_recorded_at": None,
-                            "start": c.points[0].timestamp.isoformat(),
-                            "end": c.points[-1].timestamp.isoformat(),
-                            "count": len(c.points),
-                            "lat": c.anchor.lat,
-                            "lon": c.anchor.lon,
-                            "place_id": place.id if place else None,
-                            **details,
-                        }
+                    pending_visits.append(
+                        (
+                            {
+                                "object_type": "airtag",
+                                "object_id": airtag.id,
+                                "object_name": airtag.name,
+                                "object_icon": airtag.icon,
+                                "object_color": airtag.color,
+                                "object_device_type": None,
+                                # Lets a click on this visit deep-link into
+                                # AirtagDetail/MapCard's existing selectedReportId
+                                # navigation, same anchor GET /api/reports returns.
+                                "anchor_id": c.anchor.id,
+                                "anchor_recorded_at": None,
+                                "start": c.points[0].timestamp.isoformat(),
+                                "end": c.points[-1].timestamp.isoformat(),
+                                "count": len(c.points),
+                                "lat": c.anchor.lat,
+                                "lon": c.anchor.lon,
+                                "place_id": place.id if place else None,
+                            },
+                            place,
+                            c.anchor.lat,
+                            c.anchor.lon,
+                        )
                     )
 
             for device in db_list_owner_devices(conn):
                 if not device.enabled:
                     continue
-                locations = fetch_owner_device_location_history(conn, device.id, limit=None)
-                if since is not None:
-                    locations = [loc for loc in locations if loc.recorded_at >= since]
+                locations = fetch_owner_device_location_history(conn, device.id, limit=None, since=since)
                 for c in cluster_by_proximity(locations, lambda loc: (loc.lat, loc.lon), radius):
                     place = match_place(c.anchor.lat, c.anchor.lon, places)
-                    details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
                     # locations are newest-first (see CLAUDE.md's asymmetry),
                     # so the earliest point in the stay is the last one.
-                    visits.append(
-                        {
-                            "object_type": "device",
-                            "object_id": device.id,
-                            "object_name": device.display_name or device.name,
-                            "object_icon": device.icon,
-                            "object_color": device.color,
-                            "object_device_type": device.device_type,
-                            # Same deep-link idea as the AirTag branch, but
-                            # keyed by recorded_at - see DeviceDetail/
-                            # DeviceMapCard's selectedLocationKey.
-                            "anchor_id": None,
-                            "anchor_recorded_at": c.anchor.recorded_at.isoformat(),
-                            "start": c.points[-1].recorded_at.isoformat(),
-                            "end": c.points[0].recorded_at.isoformat(),
-                            "count": len(c.points),
-                            "lat": c.anchor.lat,
-                            "lon": c.anchor.lon,
-                            "place_id": place.id if place else None,
-                            **details,
-                        }
+                    pending_visits.append(
+                        (
+                            {
+                                "object_type": "device",
+                                "object_id": device.id,
+                                "object_name": device.display_name or device.name,
+                                "object_icon": device.icon,
+                                "object_color": device.color,
+                                "object_device_type": device.device_type,
+                                # Same deep-link idea as the AirTag branch, but
+                                # keyed by recorded_at - see DeviceDetail/
+                                # DeviceMapCard's selectedLocationKey.
+                                "anchor_id": None,
+                                "anchor_recorded_at": c.anchor.recorded_at.isoformat(),
+                                "start": c.points[-1].recorded_at.isoformat(),
+                                "end": c.points[0].recorded_at.isoformat(),
+                                "count": len(c.points),
+                                "lat": c.anchor.lat,
+                                "lon": c.anchor.lon,
+                                "place_id": place.id if place else None,
+                            },
+                            place,
+                            c.anchor.lat,
+                            c.anchor.lon,
+                        )
                     )
+
+            corrections, geocodes = _load_stay_lookup_maps(
+                conn, [(lat, lon) for _, _, lat, lon in pending_visits]
+            )
+            visits = [
+                {**visit, **_stay_place_details(place, lat, lon, corrections, geocodes)}
+                for visit, place, lat, lon in pending_visits
+            ]
 
         visits.sort(key=lambda v: v["start"], reverse=True)
         return {"visits": visits}
