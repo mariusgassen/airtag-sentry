@@ -19,16 +19,16 @@ COPY airtag_sentry ./airtag_sentry
 COPY --from=frontend-build /repo/airtag_sentry/web/static ./airtag_sentry/web/static
 COPY alembic.ini ./
 COPY alembic ./alembic
+COPY docker-entrypoint.sh ./
 
 RUN pip install --no-cache-dir . \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
     && mkdir -p /app/data \
-    && chown -R appuser:appuser /app
-
-USER appuser
+    && chown -R appuser:appuser /app \
+    && chmod +x /app/docker-entrypoint.sh
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=5)"]
 
-ENTRYPOINT ["python", "-m", "airtag_sentry"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["serve"]
