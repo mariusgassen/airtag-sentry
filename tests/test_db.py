@@ -5,6 +5,7 @@ import psycopg
 import pytest
 
 from airtag_sentry.db import (
+    AirtagAppleSyncStatus,
     Alert,
     AppSettings,
     GeocodedPoint,
@@ -13,6 +14,7 @@ from airtag_sentry.db import (
     OwnerLocation,
     Report,
     StoredKey,
+    clear_airtag_apple_sync_status,
     create_airtag,
     create_named_place,
     delete_airtag,
@@ -25,6 +27,7 @@ from airtag_sentry.db import (
     delete_place_label_correction,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
+    get_airtag_apple_sync_status,
     get_airtag_key,
     get_carto_credentials,
     get_conn,
@@ -49,6 +52,7 @@ from airtag_sentry.db import (
     rename_owner_device,
     round_coord,
     set_airtag_appearance,
+    set_airtag_apple_sync_status,
     set_airtag_away_alert_enabled,
     set_airtag_enabled,
     set_airtag_key,
@@ -87,9 +91,9 @@ def conn():
             with connection.cursor() as cur:
                 cur.execute(
                     "TRUNCATE airtags, location_reports, alerts, push_subscriptions, airtag_keys, "
-                    "owner_devices, owner_device_locations, owner_apple_credentials, telegram_settings, "
-                    "mqtt_settings, ha_api_tokens, named_places, geocoded_points, place_label_corrections, "
-                    "carto_settings "
+                    "owner_devices, owner_device_locations, owner_apple_credentials, airtag_apple_sync_status, "
+                    "telegram_settings, mqtt_settings, ha_api_tokens, named_places, geocoded_points, "
+                    "place_label_corrections, carto_settings "
                     "RESTART IDENTITY CASCADE"
                 )
                 # settings is a singleton row (id pinned to 1), not per-test data -
@@ -107,7 +111,12 @@ def conn():
                         movement_max_speed_kmh = 200,
                         history_cluster_radius_meters = 50,
                         color_palette = 'pastel',
-                        map_tile_provider = 'auto'
+                        map_tile_provider = 'auto',
+                        notify_on_distance_threshold = true,
+                        notify_on_stillstand_movement = true,
+                        notify_on_left_behind = true,
+                        notify_on_autonomous_movement = true,
+                        movement_min_confidence = 1
                     WHERE id = 1
                     """
                 )
@@ -150,6 +159,7 @@ def test_schema_creates_tables(conn):
         "owner_devices",
         "owner_device_locations",
         "owner_apple_credentials",
+        "airtag_apple_sync_status",
         "telegram_settings",
         "mqtt_settings",
         "ha_api_tokens",
@@ -686,18 +696,21 @@ def test_owner_apple_sync_status_records_and_clears_error(conn):
     set_owner_apple_credentials(conn, "owner@example.com", "enc1")
     assert get_owner_apple_credentials(conn).last_sync_at is None
     assert get_owner_apple_credentials(conn).last_sync_error is None
+    assert get_owner_apple_credentials(conn).reauth_required is False
 
-    set_owner_apple_sync_status(conn, _SEEN_AT, "Invalid email/password combination.")
+    set_owner_apple_sync_status(conn, _SEEN_AT, "Invalid email/password combination.", reauth_required=True)
     stored = get_owner_apple_credentials(conn)
     assert stored.last_sync_at == _SEEN_AT
     assert stored.last_sync_error == "Invalid email/password combination."
+    assert stored.reauth_required is True
 
-    # The next successful sync clears the error but still advances last_sync_at.
+    # The next successful sync clears the error and reauth_required but still advances last_sync_at.
     later = _SEEN_AT + dt.timedelta(minutes=15)
     set_owner_apple_sync_status(conn, later, None)
     stored = get_owner_apple_credentials(conn)
     assert stored.last_sync_at == later
     assert stored.last_sync_error is None
+    assert stored.reauth_required is False
 
 
 def test_reconnecting_owner_apple_account_clears_a_stale_sync_error(conn):
@@ -705,12 +718,31 @@ def test_reconnecting_owner_apple_account_clears_a_stale_sync_error(conn):
     otherwise reconnecting after fixing a bad password would still show the
     old failure until the next poll happens to succeed."""
     set_owner_apple_credentials(conn, "owner@example.com", "enc1")
-    set_owner_apple_sync_status(conn, _SEEN_AT, "Invalid email/password combination.")
+    set_owner_apple_sync_status(conn, _SEEN_AT, "Invalid email/password combination.", reauth_required=True)
 
     set_owner_apple_credentials(conn, "owner@example.com", "enc2")
     stored = get_owner_apple_credentials(conn)
     assert stored.last_sync_at is None
     assert stored.last_sync_error is None
+    assert stored.reauth_required is False
+
+
+def test_airtag_apple_sync_status_round_trip(conn):
+    assert get_airtag_apple_sync_status(conn) is None
+
+    set_airtag_apple_sync_status(conn, _SEEN_AT, "Session expired", reauth_required=True)
+    assert get_airtag_apple_sync_status(conn) == AirtagAppleSyncStatus(
+        last_sync_at=_SEEN_AT, last_sync_error="Session expired", reauth_required=True
+    )
+
+    later = _SEEN_AT + dt.timedelta(minutes=10)
+    set_airtag_apple_sync_status(conn, later, None, reauth_required=False)
+    assert get_airtag_apple_sync_status(conn) == AirtagAppleSyncStatus(
+        last_sync_at=later, last_sync_error=None, reauth_required=False
+    )
+
+    clear_airtag_apple_sync_status(conn)
+    assert get_airtag_apple_sync_status(conn) is None
 
 
 def test_set_owner_include_family_devices_updates_existing_account_without_password(conn):

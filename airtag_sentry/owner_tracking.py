@@ -47,7 +47,10 @@ connected.
 from __future__ import annotations
 
 import datetime as dt
+import inspect
 import logging
+from pathlib import Path
+import threading
 import time
 from typing import Any
 
@@ -75,24 +78,144 @@ from airtag_sentry.db import (
 
 logger = logging.getLogger(__name__)
 
+_PENDING_LOGIN_TTL_SECONDS = 600.0
+
+_pending_lock = threading.Lock()
+_session_lock = threading.Lock()
 _pending_api = None
 _pending_apple_id: str | None = None
 _pending_password: str | None = None
 _pending_include_family: bool = False
+_pending_started_at: float | None = None
+_login_in_progress_count = 0
 
 
-def _build_api(apple_id: str, password: str, session_dir: str, include_family: bool = False):
+class OwnerReauthRequiredError(RuntimeError):
+    """Raised when a background owner-device poll encounters a 2FA requirement."""
+
+
+def _cleanup_api_bridge(api) -> None:
+    """Close any active HSA2 websocket and stop the FMIP monitor thread without
+    triggering lazy .devices network calls."""
+    if api is None:
+        return
+    clear_bridge = getattr(api, "_clear_trusted_device_bridge_state", None)
+    if callable(clear_bridge):
+        try:
+            clear_bridge()
+        except Exception:
+            logger.debug("Ignoring error while closing pyicloud HSA2 bridge.", exc_info=True)
+    devices_mgr = getattr(api, "_devices", None)
+    stop_event = getattr(devices_mgr, "stop_event", None)
+    if stop_event is not None:
+        try:
+            stop_event.set()
+        except Exception:
+            logger.debug("Ignoring error while stopping pyicloud devices thread.", exc_info=True)
+
+
+def _clear_session_dir(session_dir: str | None) -> None:
+    """Remove stale pyicloud `.session`/`.cookiejar` files before a fresh login
+    or on disconnect so expired tokens/cookies cannot poison a new 2FA flow."""
+    if not session_dir:
+        return
+    path = Path(session_dir)
+    if not path.is_dir():
+        return
+    for pattern in ("*.session", "*.cookiejar"):
+        for file_path in path.glob(pattern):
+            file_path.unlink(missing_ok=True)
+
+
+def _pop_pending_state():
+    global _pending_api, _pending_apple_id, _pending_password, _pending_include_family, _pending_started_at
+    api = _pending_api
+    _pending_api = None
+    _pending_apple_id = None
+    _pending_password = None
+    _pending_include_family = False
+    _pending_started_at = None
+    return api
+
+
+def is_login_in_progress() -> bool:
+    """Whether an interactive owner Apple login/2FA flow is currently active."""
+    expired_api = None
+    with _pending_lock:
+        if _login_in_progress_count > 0:
+            return True
+        if _pending_api is None:
+            return False
+        if (
+            _pending_started_at is not None
+            and (time.monotonic() - _pending_started_at) > _PENDING_LOGIN_TTL_SECONDS
+        ):
+            expired_api = _pop_pending_state()
+        else:
+            return True
+    if expired_api is not None:
+        _cleanup_api_bridge(expired_api)
+    return False
+
+
+def _build_api(
+    apple_id: str,
+    password: str,
+    session_dir: str,
+    include_family: bool = False,
+    *,
+    interactive: bool = True,
+):
     from pyicloud import PyiCloudService
-    from pyicloud.exceptions import PyiCloudFailedLoginException
+    from pyicloud.exceptions import (
+        PyiCloud2FARequiredException,
+        PyiCloud2SARequiredException,
+        PyiCloudAuthRequiredException,
+        PyiCloudFailedLoginException,
+    )
+
+    service_cls = PyiCloudService
+    kwargs: dict[str, Any] = {
+        "cookie_directory": session_dir,
+        "with_family": include_family,
+        "accept_terms": True,
+    }
+    if not interactive:
+        class _NonInteractivePyiCloudService(PyiCloudService):
+            # Never trigger Apple's HSA2 bridge / SMS 2FA delivery during
+            # unattended background polls; fail immediately instead so the user
+            # is not bombarded with 2FA prompts on their phone.
+            def _get_mfa_auth_options(self):
+                raise OwnerReauthRequiredError(
+                    "Apple-Sitzung abgelaufen – erneute Anmeldung mit 2FA erforderlich."
+                )
+
+            def request_2fa_code(self):
+                raise OwnerReauthRequiredError(
+                    "Apple-Sitzung abgelaufen – erneute Anmeldung mit 2FA erforderlich."
+                )
+
+            def _login_with_paused_token(self) -> bool:
+                return False
+
+        service_cls = _NonInteractivePyiCloudService
+        if "refresh_interval" in inspect.signature(PyiCloudService.__init__).parameters:
+            kwargs["refresh_interval"] = None
 
     try:
-        return PyiCloudService(
-            apple_id,
-            password,
-            cookie_directory=session_dir,
-            with_family=include_family,
-            accept_terms=True,
-        )
+        api = service_cls(apple_id, password, **kwargs)
+    except OwnerReauthRequiredError:
+        raise
+    except (
+        PyiCloud2FARequiredException,
+        PyiCloud2SARequiredException,
+        PyiCloudAuthRequiredException,
+    ) as exc:
+        if not interactive:
+            raise OwnerReauthRequiredError(
+                "Apple-Sitzung abgelaufen – erneute Anmeldung mit 2FA erforderlich."
+            ) from exc
+        raise
     except PyiCloudFailedLoginException as exc:
         # Apple's own error here ("-20101: Invalid email/password combination") is
         # the same generic message for a genuinely wrong password AND for the most
@@ -104,6 +227,13 @@ def _build_api(apple_id: str, password: str, session_dir: str, include_family: b
             f"{exc} If you used an app-specific password, use your real Apple ID "
             "password instead - pyicloud doesn't support app-specific passwords."
         ) from exc
+
+    if not interactive and (getattr(api, "requires_2fa", False) or getattr(api, "requires_2sa", False)):
+        _cleanup_api_bridge(api)
+        raise OwnerReauthRequiredError(
+            "Apple-Sitzung abgelaufen – erneute Anmeldung mit 2FA erforderlich."
+        )
+    return api
 
 
 def _persist(cfg: Config, conn, apple_id: str, password: str, include_family: bool) -> None:
@@ -120,40 +250,118 @@ def start_owner_login(cfg: Config, conn, apple_id: str, password: str, include_f
     pyicloud's PyiCloudService with_family flag, which otherwise defaults to True
     and pulls Family Sharing members' devices into api.devices alongside the
     account's own."""
-    global _pending_api, _pending_apple_id, _pending_password, _pending_include_family
+    global _pending_api, _pending_apple_id, _pending_password, _pending_include_family, _pending_started_at
+    global _login_in_progress_count
 
-    api = _build_api(apple_id, password, cfg.apple.owner_session_dir, include_family)
-    if api.requires_2fa:
-        _pending_api = api
-        _pending_apple_id = apple_id
-        _pending_password = password
-        _pending_include_family = include_family
-        return {"requires_2fa": True}
+    with _pending_lock:
+        _login_in_progress_count += 1
+        old_api = _pop_pending_state()
+    if old_api is not None:
+        _cleanup_api_bridge(old_api)
 
-    _persist(cfg, conn, apple_id, password, include_family)
-    return {"requires_2fa": False}
+    try:
+        with _session_lock:
+            _clear_session_dir(cfg.apple.owner_session_dir)
+            api = _build_api(
+                apple_id, password, cfg.apple.owner_session_dir, include_family, interactive=True
+            )
+            if getattr(api, "requires_2fa", False):
+                if getattr(api, "two_factor_delivery_method", None) == "security_key":
+                    _cleanup_api_bridge(api)
+                    raise RuntimeError(
+                        "Apple erfordert einen Hardware-Sicherheitsschlüssel für 2FA, "
+                        "der hier nicht bestätigt werden kann."
+                    )
+                if not getattr(api, "_two_factor_code_requested", False):
+                    try:
+                        delivered = api.request_2fa_code()
+                    except Exception as exc:
+                        _cleanup_api_bridge(api)
+                        raise RuntimeError(
+                            f"2FA-Code konnte nicht von Apple angefordert werden: {exc}"
+                        ) from exc
+                    if not delivered:
+                        _cleanup_api_bridge(api)
+                        raise RuntimeError(
+                            "2FA-Code konnte nicht angefordert werden. Bitte kurz warten und erneut versuchen."
+                        )
+                with _pending_lock:
+                    _pending_api = api
+                    _pending_apple_id = apple_id
+                    _pending_password = password
+                    _pending_include_family = include_family
+                    _pending_started_at = time.monotonic()
+                return {"requires_2fa": True}
+
+            if getattr(api, "requires_2sa", False):
+                _cleanup_api_bridge(api)
+                raise RuntimeError("Ältere Apple-Bestätigung (2SA) wird nicht unterstützt.")
+
+            _persist(cfg, conn, apple_id, password, include_family)
+            _cleanup_api_bridge(api)
+            return {"requires_2fa": False}
+    finally:
+        with _pending_lock:
+            _login_in_progress_count -= 1
+
+
+def cancel_owner_login() -> None:
+    """Cancel any in-progress 2FA login and close its Apple bridge session."""
+    with _pending_lock:
+        old_api = _pop_pending_state()
+    if old_api is not None:
+        _cleanup_api_bridge(old_api)
 
 
 def submit_owner_2fa_code(cfg: Config, conn, code: str) -> None:
     """Complete the login with the received code and persist the encrypted credentials."""
-    global _pending_api, _pending_apple_id, _pending_password, _pending_include_family
-    if _pending_api is None:
+    with _pending_lock:
+        api = _pending_api
+        apple_id = _pending_apple_id
+        password = _pending_password
+        include_family = _pending_include_family
+        started_at = _pending_started_at
+
+    if api is None:
         raise RuntimeError("No owner Apple login in progress.")
 
-    if not _pending_api.validate_2fa_code(code):
-        raise RuntimeError("Invalid 2FA code.")
-    if not _pending_api.is_trusted_session:
-        if not _pending_api.trust_session():
-            logger.warning(
-                "Could not mark the owner-tracking session as trusted - a 2FA code "
-                "may be required again sooner than usual."
-            )
+    if started_at is not None and (time.monotonic() - started_at) > _PENDING_LOGIN_TTL_SECONDS:
+        cancel_owner_login()
+        raise RuntimeError("Owner Apple login session expired - please sign in again.")
 
-    _persist(cfg, conn, _pending_apple_id, _pending_password, _pending_include_family)
-    _pending_api = None
-    _pending_apple_id = None
-    _pending_password = None
-    _pending_include_family = False
+    with _session_lock:
+        was_sms = getattr(api, "two_factor_delivery_method", None) == "sms"
+        try:
+            valid = api.validate_2fa_code(code)
+        except Exception as exc:
+            if not was_sms:
+                with _pending_lock:
+                    if _pending_api is api:
+                        _pop_pending_state()
+                _cleanup_api_bridge(api)
+            raise RuntimeError(f"2FA validation failed: {exc}") from exc
+
+        if not valid:
+            if not was_sms:
+                with _pending_lock:
+                    if _pending_api is api:
+                        _pop_pending_state()
+                _cleanup_api_bridge(api)
+                raise RuntimeError("Invalid 2FA code or expired session - please sign in again.")
+            raise RuntimeError("Invalid 2FA code.")
+
+        if not api.is_trusted_session:
+            if not api.trust_session():
+                logger.warning(
+                    "Could not mark the owner-tracking session as trusted - a 2FA code "
+                    "may be required again sooner than usual."
+                )
+
+        _persist(cfg, conn, apple_id, password, include_family)
+        with _pending_lock:
+            if _pending_api is api:
+                _pop_pending_state()
+        _cleanup_api_bridge(api)
 
 
 def connection_status(conn) -> dict:
@@ -166,17 +374,21 @@ def connection_status(conn) -> dict:
     if creds is None:
         return {
             "connected": False,
+            "apple_id": None,
             "primary_device_id": None,
             "primary_device_name": None,
             "last_sync_error": None,
+            "reauth_required": False,
             "include_family_devices": False,
         }
     primary = next((d for d in db_list_owner_devices(conn) if d.is_primary), None)
     return {
         "connected": True,
+        "apple_id": creds.apple_id,
         "primary_device_id": primary.id if primary else None,
         "primary_device_name": primary.name if primary else None,
         "last_sync_error": creds.last_sync_error,
+        "reauth_required": getattr(creds, "reauth_required", False),
         "include_family_devices": creds.include_family_devices,
     }
 
@@ -206,19 +418,28 @@ def set_include_family(cfg: Config, conn, include_family: bool) -> bool:
     return changed
 
 
-def disconnect(conn) -> None:
+def disconnect(cfg: Config, conn) -> None:
+    cancel_owner_login()
+    with _session_lock:
+        _clear_session_dir(cfg.apple.owner_session_dir)
     delete_owner_apple_credentials(conn)
 
 
 def _connect(cfg: Config, conn):
-    """Builds a live pyicloud session from the stored owner credentials, or None
-    if owner tracking was never connected via the dashboard."""
+    """Builds a live non-interactive pyicloud session from the stored owner
+    credentials, or None if owner tracking was never connected via the dashboard."""
     creds: OwnerAppleCredentials | None = get_owner_apple_credentials(conn)
     if creds is None:
         logger.debug("Owner tracking not connected - no credentials stored.")
         return None
     password = keystore.decrypt(cfg.key_encryption_key, creds.encrypted_password)
-    return _build_api(creds.apple_id, password, cfg.apple.owner_session_dir, creds.include_family_devices)
+    return _build_api(
+        creds.apple_id,
+        password,
+        cfg.apple.owner_session_dir,
+        creds.include_family_devices,
+        interactive=False,
+    )
 
 
 # Apple answers a locate request asynchronously: the response right after
@@ -262,70 +483,72 @@ def _snapshot_devices(api) -> list[dict[str, Any]]:
     `_server_ctx` exists (it does, after the first access) - call it explicitly
     rather than relying on the constructor's implicit first call.
     """
-    for attempt in range(_LOCATE_ATTEMPTS):
-        api.devices.refresh(locate=True)
-        if not any(_location_is_stale(d.location if d.location_available else None) for d in api.devices):
-            break
-        logger.info("Owner locate attempt %d/%d: still waiting on a fresh fix from Apple.", attempt + 1, _LOCATE_ATTEMPTS)
-        if attempt < _LOCATE_ATTEMPTS - 1:
-            time.sleep(_LOCATE_RETRY_DELAY_SECONDS)
-    snapshot = []
-    available = 0
-    for device in api.devices:
-        location = device.location if device.location_available else None
-        if location is not None:
-            logger.debug(
-                "Owner device '%s' (%s): location from Apple timeStamp=%s isOld=%s locationFinished=%s "
-                "positionType=%s horizontalAccuracy=%s.",
-                device.name,
-                device.id,
-                location.get("timeStamp"),
-                location.get("isOld"),
-                location.get("locationFinished"),
-                location.get("positionType"),
-                location.get("horizontalAccuracy"),
+    try:
+        for attempt in range(_LOCATE_ATTEMPTS):
+            api.devices.refresh(locate=True)
+            if not any(_location_is_stale(d.location if d.location_available else None) for d in api.devices):
+                break
+            logger.info("Owner locate attempt %d/%d: still waiting on a fresh fix from Apple.", attempt + 1, _LOCATE_ATTEMPTS)
+            if attempt < _LOCATE_ATTEMPTS - 1:
+                time.sleep(_LOCATE_RETRY_DELAY_SECONDS)
+        snapshot = []
+        available = 0
+        for device in api.devices:
+            location = device.location if device.location_available else None
+            if location is not None:
+                logger.debug(
+                    "Owner device '%s' (%s): location from Apple timeStamp=%s isOld=%s locationFinished=%s "
+                    "positionType=%s horizontalAccuracy=%s.",
+                    device.name,
+                    device.id,
+                    location.get("timeStamp"),
+                    location.get("isOld"),
+                    location.get("locationFinished"),
+                    location.get("positionType"),
+                    location.get("horizontalAccuracy"),
+                )
+            if _location_is_stale(location):
+                # Still Apple's cached fix after retrying - recording it would stamp
+                # an old position (e.g. where AirPods were hours ago) as "now".
+                logger.info("Owner device '%s' (%s): only a stale cached location from Apple, skipping.", device.name, device.id)
+                location = None
+            if location is not None:
+                available += 1
+            else:
+                logger.debug(
+                    "Owner device '%s' (%s): no location this snapshot (feature "
+                    "advertised=%s, content has 'location' key=%s).",
+                    device.name,
+                    device.id,
+                    bool(device.data.get("features", {}).get("LOC", False)),
+                    "location" in device.data,
+                )
+            # batteryLevel is a 0.0-1.0 fraction, batteryStatus a raw Apple string
+            # ("Charging"/"NotCharging"/"Unplugged") - both absent from .data on
+            # devices that don't report battery at all (e.g. Macs). But when Apple
+            # *does* advertise battery support, a round yet to include a real
+            # reading (e.g. this snapshot's own locate-focused refresh, or a
+            # session that hasn't fully checked in) comes back as batteryStatus
+            # "Unknown" paired with a *meaningless* batteryLevel of 0 rather than
+            # an absent key - confirmed against Home Assistant's icloud
+            # integration, which explicitly discards readings in that state for
+            # the same reason. Trusting battery_level at face value here made the
+            # dashboard show a permanent, wrong "0 %" instead of hiding it like a
+            # genuinely absent reading.
+            battery_status = device.data.get("batteryStatus")
+            battery_level = None if battery_status == "Unknown" else device.data.get("batteryLevel")
+            snapshot.append(
+                {
+                    "id": device.id,
+                    "name": device.name,
+                    "device_type": device.device_type,
+                    "location": location,
+                    "battery_level": battery_level,
+                    "battery_status": battery_status,
+                }
             )
-        if _location_is_stale(location):
-            # Still Apple's cached fix after retrying - recording it would stamp
-            # an old position (e.g. where AirPods were hours ago) as "now".
-            logger.info("Owner device '%s' (%s): only a stale cached location from Apple, skipping.", device.name, device.id)
-            location = None
-        if location is not None:
-            available += 1
-        else:
-            logger.debug(
-                "Owner device '%s' (%s): no location this snapshot (feature "
-                "advertised=%s, content has 'location' key=%s).",
-                device.name,
-                device.id,
-                bool(device.data.get("features", {}).get("LOC", False)),
-                "location" in device.data,
-            )
-        # batteryLevel is a 0.0-1.0 fraction, batteryStatus a raw Apple string
-        # ("Charging"/"NotCharging"/"Unplugged") - both absent from .data on
-        # devices that don't report battery at all (e.g. Macs). But when Apple
-        # *does* advertise battery support, a round yet to include a real
-        # reading (e.g. this snapshot's own locate-focused refresh, or a
-        # session that hasn't fully checked in) comes back as batteryStatus
-        # "Unknown" paired with a *meaningless* batteryLevel of 0 rather than
-        # an absent key - confirmed against Home Assistant's icloud
-        # integration, which explicitly discards readings in that state for
-        # the same reason. Trusting battery_level at face value here made the
-        # dashboard show a permanent, wrong "0 %" instead of hiding it like a
-        # genuinely absent reading.
-        battery_status = device.data.get("batteryStatus")
-        battery_level = None if battery_status == "Unknown" else device.data.get("batteryLevel")
-        snapshot.append(
-            {
-                "id": device.id,
-                "name": device.name,
-                "device_type": device.device_type,
-                "location": location,
-                "battery_level": battery_level,
-                "battery_status": battery_status,
-            }
-        )
-    api.devices.stop_event.set()
+    finally:
+        api.devices.stop_event.set()
     logger.info("Fetched %d owner device(s) from Apple, %d with a location.", len(snapshot), available)
     return snapshot
 
@@ -365,18 +588,44 @@ def play_sound(cfg: Config, conn, device_id: str) -> None:
     unreverse-engineered protocol this app has no way to speak. Raises
     RuntimeError if not connected, LookupError if device_id isn't one of the
     account's current devices."""
-    api = _connect(cfg, conn)
-    if api is None:
-        raise RuntimeError("Owner tracking not connected.")
+    with _session_lock:
+        api = _connect(cfg, conn)
+        if api is None:
+            raise RuntimeError("Owner tracking not connected.")
+        try:
+            device = next((d for d in api.devices if d.id == device_id), None)
+            if device is None:
+                raise LookupError(f"Unknown device_id '{device_id}'")
+            device.play_sound()
+        finally:
+            # See _snapshot_devices's docstring: accessing api.devices starts a
+            # background re-poll thread that must be stopped explicitly.
+            api.devices.stop_event.set()
+            _cleanup_api_bridge(api)
+
+
+def _is_reauth_exception(exc: BaseException, api=None) -> bool:
+    if isinstance(exc, OwnerReauthRequiredError):
+        return True
+    if api is not None and (getattr(api, "requires_2fa", False) or getattr(api, "requires_2sa", False)):
+        return True
     try:
-        device = next((d for d in api.devices if d.id == device_id), None)
-        if device is None:
-            raise LookupError(f"Unknown device_id '{device_id}'")
-        device.play_sound()
-    finally:
-        # See _snapshot_devices's docstring: accessing api.devices starts a
-        # background re-poll thread that must be stopped explicitly.
-        api.devices.stop_event.set()
+        from pyicloud.exceptions import (
+            PyiCloud2FARequiredException,
+            PyiCloud2SARequiredException,
+            PyiCloudAuthRequiredException,
+        )
+
+        return isinstance(
+            exc,
+            (
+                PyiCloud2FARequiredException,
+                PyiCloud2SARequiredException,
+                PyiCloudAuthRequiredException,
+            ),
+        )
+    except ImportError:
+        return False
 
 
 def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
@@ -390,21 +639,43 @@ def fetch_owner_device_locations(cfg: Config, conn) -> list[OwnerLocation]:
     see the cleanup step below.
 
     Also records this attempt's outcome on `owner_apple_credentials`
-    (last_sync_at/last_sync_error - see db.set_owner_apple_sync_status), so a
-    lapsed session or a transient Apple/network error surfaces on the
-    dashboard instead of only ever being logged. A failure here still
-    propagates to the caller unchanged (tracker.py's own broad except-and-log
-    around the whole poll) - only the persisting is new."""
-    if get_owner_apple_credentials(conn) is None:
+    (last_sync_at/last_sync_error/reauth_required - see
+    db.set_owner_apple_sync_status), so a lapsed session or a transient
+    Apple/network error surfaces on the dashboard instead of only ever being
+    logged, and expired-session polls stop before triggering interactive 2FA
+    prompts on the user's phone."""
+    if is_login_in_progress():
+        logger.info("Owner Apple login in progress - skipping owner device sync this cycle.")
+        return []
+    creds = get_owner_apple_credentials(conn)
+    if creds is None:
+        return []
+    if getattr(creds, "reauth_required", False):
+        logger.info("Owner Apple session requires re-authentication - skipping owner device sync.")
         return []
 
     now = dt.datetime.now(dt.timezone.utc)
+    api = None
     try:
-        api = _connect(cfg, conn)
-        snapshot = _snapshot_devices(api)
-    except Exception as exc:
-        set_owner_apple_sync_status(conn, now, str(exc))
+        with _session_lock:
+            if is_login_in_progress():
+                logger.info("Owner Apple login in progress - skipping owner device sync this cycle.")
+                return []
+            api = _connect(cfg, conn)
+            if api is None:
+                return []
+            snapshot = _snapshot_devices(api)
+    except OwnerReauthRequiredError as exc:
+        set_owner_apple_sync_status(conn, now, str(exc), reauth_required=True)
         raise
+    except Exception as exc:
+        if _is_reauth_exception(exc, api):
+            set_owner_apple_sync_status(conn, now, str(exc), reauth_required=True)
+        else:
+            set_owner_apple_sync_status(conn, now, str(exc))
+        raise
+    finally:
+        _cleanup_api_bridge(api)
     set_owner_apple_sync_status(conn, now, None)
 
     upsert_owner_devices(

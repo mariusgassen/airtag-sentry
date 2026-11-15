@@ -763,3 +763,86 @@ def test_geocode_search_route_skips_lookup_for_a_short_query(client, monkeypatch
 
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_apple_status_reports_reauth_required_when_sync_failed_or_session_invalid(client, monkeypatch):
+    from airtag_sentry.db import AirtagAppleSyncStatus
+
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+
+    monkeypatch.setattr(app_module.auth, "is_connected", lambda _cfg: False)
+    resp = client.get("/api/apple/status")
+    assert resp.status_code == 200
+    assert resp.json() == {"connected": False, "reauth_required": False, "last_sync_error": None}
+
+    monkeypatch.setattr(app_module.auth, "is_connected", lambda _cfg: True)
+    monkeypatch.setattr(app_module.auth, "has_valid_session", lambda _cfg: False)
+    monkeypatch.setattr(app_module, "get_airtag_apple_sync_status", lambda _conn: None)
+    resp = client.get("/api/apple/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["connected"] is True
+    assert body["reauth_required"] is True
+    assert body["last_sync_error"]
+
+    monkeypatch.setattr(app_module.auth, "has_valid_session", lambda _cfg: True)
+    monkeypatch.setattr(
+        app_module,
+        "get_airtag_apple_sync_status",
+        lambda _conn: AirtagAppleSyncStatus(
+            last_sync_at=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc),
+            last_sync_error="token revoked",
+            reauth_required=True,
+        ),
+    )
+    resp = client.get("/api/apple/status")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "connected": True,
+        "reauth_required": True,
+        "last_sync_error": "token revoked",
+    }
+
+
+def test_apple_cancel_and_disconnect_routes(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+
+    events = []
+    monkeypatch.setattr(app_module.auth, "cancel_login", lambda: events.append("cancel_airtag"))
+    monkeypatch.setattr(app_module.owner_tracking, "cancel_owner_login", lambda: events.append("cancel_owner"))
+    monkeypatch.setattr(app_module.auth, "disconnect", lambda _cfg: events.append("disconnect_airtag"))
+    monkeypatch.setattr(app_module, "clear_airtag_apple_sync_status", lambda _conn: events.append("clear_sync"))
+    monkeypatch.setattr(
+        app_module.owner_tracking,
+        "disconnect",
+        lambda cfg, conn: events.append(("disconnect_owner", cfg is not None, conn is not None)),
+    )
+
+    assert client.post("/api/apple/cancel").status_code == 200
+    assert client.post("/api/apple/owner/cancel").status_code == 200
+    assert client.delete("/api/apple").status_code == 200
+    assert client.delete("/api/apple/owner").status_code == 200
+
+    assert events == [
+        "cancel_airtag",
+        "cancel_owner",
+        "disconnect_airtag",
+        "clear_sync",
+        ("disconnect_owner", True, True),
+    ]
+
+
+def test_apple_2fa_submit_clears_airtag_sync_status(client, monkeypatch):
+    _login(client, monkeypatch)
+    monkeypatch.setattr(app_module, "get_conn", lambda _url: contextlib.nullcontext(Mock()))
+
+    calls = []
+    monkeypatch.setattr(app_module.auth, "submit_2fa_code", lambda _cfg, code: calls.append(("submit", code)))
+    monkeypatch.setattr(app_module, "clear_airtag_apple_sync_status", lambda _conn: calls.append("clear_sync"))
+
+    resp = client.post("/api/apple/2fa/submit", json={"code": "123456"})
+    assert resp.status_code == 200
+    assert calls == [("submit", "123456"), "clear_sync"]
+

@@ -413,3 +413,238 @@ def test_snapshot_devices_drops_stale_cached_location_after_retrying(monkeypatch
 
     assert snapshot[0]["location"] is None
     assert len(api.devices.refresh_calls) == owner_tracking._LOCATE_ATTEMPTS
+
+
+def test_build_api_noninteractive_never_requests_2fa_code(monkeypatch):
+    """Background polling must fail with OwnerReauthRequiredError instead of calling
+    request_2fa_code() / _get_mfa_auth_options() and flooding the user's phone."""
+    request_calls = []
+
+    class _FakePyiCloudService:
+        def __init__(self, apple_id, password, cookie_directory=None, with_family=False, accept_terms=False):
+            self.requires_2fa = False
+            self.requires_2sa = False
+            # Simulate pyicloud's _srp_authentication path when 2FA is needed:
+            self._get_mfa_auth_options()
+            self.request_2fa_code()
+
+        def _get_mfa_auth_options(self):
+            request_calls.append("mfa_options")
+
+        def request_2fa_code(self):
+            request_calls.append("request_2fa")
+
+        def _login_with_paused_token(self):
+            return True
+
+    monkeypatch.setattr("pyicloud.PyiCloudService", _FakePyiCloudService)
+
+    with pytest.raises(owner_tracking.OwnerReauthRequiredError):
+        owner_tracking._build_api("owner@example.com", "pw", "/tmp/unused", interactive=False)
+
+    assert request_calls == []
+
+
+def test_build_api_noninteractive_checks_requires_2fa_flag(monkeypatch):
+    cleared = []
+
+    class _FakePyiCloudService:
+        def __init__(self, apple_id, password, cookie_directory=None, with_family=False, accept_terms=False):
+            self.requires_2fa = True
+            self.requires_2sa = False
+
+        def _clear_trusted_device_bridge_state(self):
+            cleared.append(True)
+
+    monkeypatch.setattr("pyicloud.PyiCloudService", _FakePyiCloudService)
+
+    with pytest.raises(owner_tracking.OwnerReauthRequiredError):
+        owner_tracking._build_api("owner@example.com", "pw", "/tmp/unused", interactive=False)
+
+    assert cleared == [True]
+
+
+def test_fetch_owner_device_locations_records_reauth_required_and_pauses(monkeypatch):
+    creds = owner_tracking.OwnerAppleCredentials(
+        apple_id="owner@example.com",
+        encrypted_password="enc",
+        include_family_devices=False,
+        last_sync_at=None,
+        last_sync_error=None,
+        reauth_required=False,
+    )
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: creds)
+    monkeypatch.setattr(
+        owner_tracking,
+        "_connect",
+        lambda cfg, conn: (_ for _ in ()).throw(
+            owner_tracking.OwnerReauthRequiredError("2FA required")
+        ),
+    )
+
+    recorded = []
+    monkeypatch.setattr(
+        owner_tracking,
+        "set_owner_apple_sync_status",
+        lambda conn, synced_at, error, *, reauth_required=False: recorded.append((error, reauth_required)),
+    )
+
+    with pytest.raises(owner_tracking.OwnerReauthRequiredError):
+        owner_tracking.fetch_owner_device_locations(cfg=None, conn=None)
+
+    assert recorded == [("2FA required", True)]
+
+    # Once reauth_required is persisted on creds, subsequent polls must skip without calling _connect.
+    paused_creds = owner_tracking.OwnerAppleCredentials(
+        apple_id="owner@example.com",
+        encrypted_password="enc",
+        include_family_devices=False,
+        last_sync_at=None,
+        last_sync_error="2FA required",
+        reauth_required=True,
+    )
+    monkeypatch.setattr(owner_tracking, "get_owner_apple_credentials", lambda conn: paused_creds)
+    monkeypatch.setattr(
+        owner_tracking,
+        "_connect",
+        lambda cfg, conn: (_ for _ in ()).throw(AssertionError("must not reconnect while reauth_required=True")),
+    )
+    assert owner_tracking.fetch_owner_device_locations(cfg=None, conn=None) == []
+
+
+def test_fetch_owner_device_locations_skips_while_login_in_progress(monkeypatch):
+    monkeypatch.setattr(owner_tracking, "is_login_in_progress", lambda: True)
+    monkeypatch.setattr(
+        owner_tracking,
+        "get_owner_apple_credentials",
+        lambda conn: (_ for _ in ()).throw(AssertionError("must skip before reading creds")),
+    )
+    assert owner_tracking.fetch_owner_device_locations(cfg=None, conn=None) == []
+
+
+def test_start_owner_login_clears_stale_session_and_closes_previous_bridge(monkeypatch, tmp_path):
+    import types
+
+    session_dir = tmp_path / "owner_session"
+    session_dir.mkdir()
+    stale_session = session_dir / "old.session"
+    stale_cookie = session_dir / "old.cookiejar"
+    other_file = session_dir / "keep.txt"
+    stale_session.write_text("{}")
+    stale_cookie.write_text("cookies")
+    other_file.write_text("keep")
+
+    cfg = types.SimpleNamespace(
+        apple=types.SimpleNamespace(owner_session_dir=str(session_dir)),
+        key_encryption_key=b"unused",
+    )
+
+    closed = []
+
+    class _FakeLoginApi:
+        def __init__(self, tag, *, requires_2fa=True, delivered=True):
+            self.tag = tag
+            self.requires_2fa = requires_2fa
+            self.requires_2sa = False
+            self.two_factor_delivery_method = "trusted_device"
+            self._two_factor_code_requested = False
+            self._delivered = delivered
+            self.is_trusted_session = True
+            self.validate_result = False
+
+        def request_2fa_code(self):
+            return self._delivered
+
+        def validate_2fa_code(self, code):
+            return self.validate_result
+
+        def _clear_trusted_device_bridge_state(self):
+            closed.append(self.tag)
+
+    old_api = _FakeLoginApi("old")
+    owner_tracking._pending_api = old_api
+    owner_tracking._pending_started_at = owner_tracking.time.monotonic()
+
+    new_api = _FakeLoginApi("new", requires_2fa=True, delivered=True)
+    monkeypatch.setattr(owner_tracking, "_build_api", lambda *a, **k: new_api)
+
+    try:
+        res = owner_tracking.start_owner_login(cfg, None, "owner@example.com", "pw", include_family=True)
+        assert res == {"requires_2fa": True}
+        assert not stale_session.exists()
+        assert not stale_cookie.exists()
+        assert other_file.exists()
+        assert closed == ["old"]
+        assert owner_tracking.is_login_in_progress() is True
+
+        # Failed non-SMS 2FA code closes the bridge and clears pending state (pyicloud closes bridge on return).
+        with pytest.raises(RuntimeError, match="Invalid 2FA code or expired session"):
+            owner_tracking.submit_owner_2fa_code(cfg, None, "000000")
+        assert closed == ["old", "new"]
+        assert owner_tracking.is_login_in_progress() is False
+    finally:
+        owner_tracking.cancel_owner_login()
+
+
+def test_start_owner_login_raises_when_2fa_delivery_fails(monkeypatch, tmp_path):
+    import types
+
+    cfg = types.SimpleNamespace(
+        apple=types.SimpleNamespace(owner_session_dir=str(tmp_path)),
+        key_encryption_key=b"unused",
+    )
+    closed = []
+
+    class _UndeliveredApi:
+        requires_2fa = True
+        requires_2sa = False
+        two_factor_delivery_method = "trusted_device"
+        _two_factor_code_requested = False
+
+        def request_2fa_code(self):
+            return False
+
+        def _clear_trusted_device_bridge_state(self):
+            closed.append(True)
+
+    monkeypatch.setattr(owner_tracking, "_build_api", lambda *a, **k: _UndeliveredApi())
+
+    try:
+        with pytest.raises(RuntimeError, match="2FA-Code konnte nicht angefordert werden"):
+            owner_tracking.start_owner_login(cfg, None, "owner@example.com", "pw")
+        assert closed == [True]
+        assert owner_tracking.is_login_in_progress() is False
+    finally:
+        owner_tracking.cancel_owner_login()
+
+
+def test_disconnect_clears_session_dir_and_pending_login(monkeypatch, tmp_path):
+    import types
+
+    session_dir = tmp_path / "owner_session"
+    session_dir.mkdir()
+    stale = session_dir / "abc.session"
+    stale.write_text("{}")
+    cfg = types.SimpleNamespace(apple=types.SimpleNamespace(owner_session_dir=str(session_dir)))
+
+    deleted = []
+    monkeypatch.setattr(owner_tracking, "delete_owner_apple_credentials", lambda conn: deleted.append(True))
+
+    closed = []
+
+    class _Pending:
+        def _clear_trusted_device_bridge_state(self):
+            closed.append(True)
+
+    owner_tracking._pending_api = _Pending()
+    owner_tracking._pending_started_at = owner_tracking.time.monotonic()
+
+    try:
+        owner_tracking.disconnect(cfg, object())
+        assert closed == [True]
+        assert not stale.exists()
+        assert deleted == [True]
+        assert owner_tracking.is_login_in_progress() is False
+    finally:
+        owner_tracking.cancel_owner_login()
+

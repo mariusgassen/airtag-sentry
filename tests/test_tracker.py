@@ -631,3 +631,144 @@ def test_evaluate_device_away_alerts_suppresses_notification_when_already_reunit
     with conn.cursor() as cur:
         cur.execute("SELECT reason, owner_device_id FROM alerts")
         assert cur.fetchall() == [("left_behind", "laptop")]  # but still recorded
+
+
+def test_poll_once_does_not_retry_owner_fetch_after_initial_failure(monkeypatch):
+    """When _update_owner_devices fails (e.g. lapsed Apple session), poll_once
+    must pass allow_live_fetch=False to _evaluate_device_away_alerts and
+    _poll_airtag so a single poll cycle cannot hit Apple multiple times."""
+    from findmy import LoginState
+
+    @contextlib.contextmanager
+    def fake_get_conn(_url):
+        yield object()
+
+    monkeypatch.setattr(tracker, "get_conn", fake_get_conn)
+    monkeypatch.setattr(tracker, "get_settings", lambda conn: _settings())
+    monkeypatch.setattr(tracker, "build_notifiers", lambda cfg, conn: [])
+    monkeypatch.setattr(tracker, "build_ha_publisher", lambda cfg, conn: None)
+    monkeypatch.setattr(tracker, "_update_owner_devices", lambda cfg, conn, ha: False)
+
+    seen_flags = {}
+
+    def fake_eval_devices(cfg, conn, notifiers, settings, *, allow_live_fetch=True):
+        seen_flags["devices_allow_live_fetch"] = allow_live_fetch
+
+    def fake_poll_airtag(cfg, account, airtag, conn, notifiers, settings, ha, *, allow_live_owner_fetch=True):
+        seen_flags["airtag_allow_live_owner_fetch"] = allow_live_owner_fetch
+
+    class _FakeAccount:
+        login_state = LoginState.LOGGED_IN
+
+        def to_json(self, path):
+            pass
+
+    monkeypatch.setattr(tracker, "_evaluate_device_away_alerts", fake_eval_devices)
+    monkeypatch.setattr(tracker, "is_connected", lambda cfg: True)
+    monkeypatch.setattr(tracker, "is_airtag_login_in_progress", lambda: False)
+    monkeypatch.setattr(tracker, "get_airtag_apple_sync_status", lambda conn: None)
+    monkeypatch.setattr(tracker, "restore_account", lambda cfg: _FakeAccount())
+    monkeypatch.setattr(tracker, "close_airtag_account", lambda acc: None)
+    monkeypatch.setattr(tracker, "list_airtags", lambda conn, only_enabled=True: [types.SimpleNamespace(id="a1", name="Keys")])
+    monkeypatch.setattr(tracker, "_poll_airtag", fake_poll_airtag)
+    monkeypatch.setattr(tracker, "set_airtag_apple_sync_status", lambda *a, **k: None)
+
+    cfg = types.SimpleNamespace(database_url="unused", apple=types.SimpleNamespace(store_path="unused"))
+    assert tracker.poll_once(cfg) is True
+    assert seen_flags == {"devices_allow_live_fetch": False, "airtag_allow_live_owner_fetch": False}
+
+
+def test_poll_once_records_airtag_reauth_required_without_overwriting_session(monkeypatch):
+    from findmy import LoginState
+    from findmy.errors import UnauthorizedError
+
+    @contextlib.contextmanager
+    def fake_get_conn(_url):
+        yield object()
+
+    monkeypatch.setattr(tracker, "get_conn", fake_get_conn)
+    monkeypatch.setattr(tracker, "get_settings", lambda conn: _settings())
+    monkeypatch.setattr(tracker, "build_notifiers", lambda cfg, conn: [])
+    monkeypatch.setattr(tracker, "build_ha_publisher", lambda cfg, conn: None)
+    monkeypatch.setattr(tracker, "_update_owner_devices", lambda cfg, conn, ha: True)
+    monkeypatch.setattr(tracker, "_evaluate_device_away_alerts", lambda *a, **k: None)
+    monkeypatch.setattr(tracker, "is_connected", lambda cfg: True)
+    monkeypatch.setattr(tracker, "is_airtag_login_in_progress", lambda: False)
+    monkeypatch.setattr(tracker, "get_airtag_apple_sync_status", lambda conn: None)
+
+    class _FakeAccount:
+        login_state = LoginState.LOGGED_IN
+        to_json_calls = 0
+
+        def to_json(self, path):
+            self.to_json_calls += 1
+
+    account = _FakeAccount()
+    closed = []
+    monkeypatch.setattr(tracker, "restore_account", lambda cfg: account)
+    monkeypatch.setattr(tracker, "close_airtag_account", lambda acc: closed.append(acc))
+    monkeypatch.setattr(
+        tracker,
+        "list_airtags",
+        lambda conn, only_enabled=True: [
+            types.SimpleNamespace(id="a1", name="Tag 1"),
+            types.SimpleNamespace(id="a2", name="Tag 2"),
+        ],
+    )
+
+    polled = []
+
+    def fail_first_airtag(cfg, acc, airtag, *a, **k):
+        polled.append(airtag.id)
+        raise UnauthorizedError("token expired")
+
+    monkeypatch.setattr(tracker, "_poll_airtag", fail_first_airtag)
+
+    sync_updates = []
+    monkeypatch.setattr(
+        tracker,
+        "set_airtag_apple_sync_status",
+        lambda conn, synced_at, error, *, reauth_required=False: sync_updates.append((error, reauth_required)),
+    )
+
+    cfg = types.SimpleNamespace(database_url="unused", apple=types.SimpleNamespace(store_path="unused"))
+    assert tracker.poll_once(cfg) is True
+
+    assert polled == ["a1"]  # broke out before polling Tag 2
+    assert account.to_json_calls == 0  # did NOT overwrite session with REQUIRE_2FA state
+    assert closed == [account]
+    assert len(sync_updates) == 1
+    assert sync_updates[0][1] is True
+
+
+def test_poll_once_skips_airtag_poll_when_reauth_required_or_login_in_progress(monkeypatch):
+    @contextlib.contextmanager
+    def fake_get_conn(_url):
+        yield object()
+
+    monkeypatch.setattr(tracker, "get_conn", fake_get_conn)
+    monkeypatch.setattr(tracker, "get_settings", lambda conn: _settings())
+    monkeypatch.setattr(tracker, "build_notifiers", lambda cfg, conn: [])
+    monkeypatch.setattr(tracker, "build_ha_publisher", lambda cfg, conn: None)
+    monkeypatch.setattr(tracker, "_update_owner_devices", lambda cfg, conn, ha: True)
+    monkeypatch.setattr(tracker, "_evaluate_device_away_alerts", lambda *a, **k: None)
+    monkeypatch.setattr(tracker, "is_connected", lambda cfg: True)
+    monkeypatch.setattr(
+        tracker,
+        "restore_account",
+        lambda cfg: (_ for _ in ()).throw(AssertionError("restore_account must not be called")),
+    )
+
+    cfg = types.SimpleNamespace(database_url="unused")
+
+    monkeypatch.setattr(tracker, "is_airtag_login_in_progress", lambda: True)
+    assert tracker.poll_once(cfg) is True
+
+    monkeypatch.setattr(tracker, "is_airtag_login_in_progress", lambda: False)
+    monkeypatch.setattr(
+        tracker,
+        "get_airtag_apple_sync_status",
+        lambda conn: types.SimpleNamespace(reauth_required=True),
+    )
+    assert tracker.poll_once(cfg) is True
+

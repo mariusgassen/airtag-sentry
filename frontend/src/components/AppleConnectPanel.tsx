@@ -9,15 +9,16 @@ type Step = 'credentials' | 'select-method' | 'code'
 export interface AppleConnectAdapter {
   getStatus: () => Promise<{
     connected: boolean
+    apple_id?: string | null
     // Only meaningful for the owner-tracking adapter - which of its
     // (possibly several) devices is currently primary, see
     // OwnerDevicesPanel.tsx and owner_tracking.set_device_primary().
     primary_device_id?: string | null
     primary_device_name?: string | null
-    // Only meaningful for the owner-tracking adapter - the background
-    // poller's most recent live-Apple-call failure (lapsed session,
+    // Most recent background poll's live-Apple-call failure (lapsed session,
     // transient network error, ...), cleared again on the next success.
     last_sync_error?: string | null
+    reauth_required?: boolean
     // Only meaningful for the owner-tracking adapter - current Family Sharing
     // filter, see familySharingToggle/setFamilySharing below.
     include_family_devices?: boolean
@@ -42,6 +43,7 @@ export interface AppleConnectAdapter {
   // (owner tracking/pyicloud) - the wizard skips straight to the code step.
   selectMethod?: (methodIndex: number) => Promise<void>
   submitCode: (code: string) => Promise<void>
+  cancelLogin?: () => Promise<void>
   disconnect: () => Promise<void>
 }
 
@@ -55,8 +57,10 @@ const METHOD_LABEL = (m: AppleTwoFactorMethod) =>
 
 export function AppleConnectPanel({ title, adapter }: Props) {
   const [connected, setConnected] = useState<boolean | null>(null)
+  const [savedAppleId, setSavedAppleId] = useState<string | null>(null)
   const [primaryDeviceName, setPrimaryDeviceName] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [reauthRequired, setReauthRequired] = useState(false)
   const [familySharing, setFamilySharingState] = useState(false)
   const [familySharingBusy, setFamilySharingBusy] = useState(false)
   const [open, setOpen] = useState(false)
@@ -69,21 +73,21 @@ export function AppleConnectPanel({ title, adapter }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  function applyStatus(s: Awaited<ReturnType<AppleConnectAdapter['getStatus']>>) {
+    setConnected(s.connected)
+    setSavedAppleId(s.apple_id ?? null)
+    setPrimaryDeviceName(s.primary_device_name ?? null)
+    setSyncError(s.last_sync_error ?? null)
+    setReauthRequired(Boolean(s.reauth_required))
+    setFamilySharingState(s.include_family_devices ?? false)
+  }
+
   useEffect(() => {
-    adapter.getStatus().then((s) => {
-      setConnected(s.connected)
-      setPrimaryDeviceName(s.primary_device_name ?? null)
-      setSyncError(s.last_sync_error ?? null)
-      setFamilySharingState(s.include_family_devices ?? false)
-    })
+    adapter.getStatus().then(applyStatus)
   }, [adapter])
 
   async function refreshStatus() {
-    const s = await adapter.getStatus()
-    setConnected(s.connected)
-    setPrimaryDeviceName(s.primary_device_name ?? null)
-    setSyncError(s.last_sync_error ?? null)
-    setFamilySharingState(s.include_family_devices ?? false)
+    applyStatus(await adapter.getStatus())
   }
 
   async function handleToggleFamilySharing() {
@@ -97,14 +101,34 @@ export function AppleConnectPanel({ title, adapter }: Props) {
     }
   }
 
-  function reset() {
+  function reset(prefillFromSaved = false) {
     setStep('credentials')
-    setEmail('')
+    setEmail(prefillFromSaved && savedAppleId ? savedAppleId : '')
     setPassword('')
-    setIncludeFamily(false)
+    setIncludeFamily(prefillFromSaved ? familySharing : false)
     setMethods([])
     setCode('')
     setError(null)
+  }
+
+  function openRelogin() {
+    reset(true)
+    setOpen(true)
+  }
+
+  async function handleCancelWizard() {
+    setSaving(true)
+    try {
+      await adapter.cancelLogin?.().catch(() => {})
+    } finally {
+      setSaving(false)
+    }
+    if (connected) {
+      setOpen(false)
+      reset(false)
+    } else {
+      reset(false)
+    }
   }
 
   async function handleLogin() {
@@ -191,6 +215,8 @@ export function AppleConnectPanel({ title, adapter }: Props) {
 
   async function handleDisconnect() {
     if (!confirm(`"${title}" wirklich trennen?`)) return
+    setOpen(false)
+    reset()
     await adapter.disconnect()
     await refreshStatus()
   }
@@ -202,13 +228,23 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         label={title}
         trailing={
           <span className="flex items-center gap-2">
-            <span className={`text-sm ${connected ? 'text-[var(--success)]' : 'text-[var(--text-secondary)]'}`}>
+            <span
+              className={`text-sm ${
+                connected && reauthRequired
+                  ? 'text-[var(--destructive)]'
+                  : connected
+                    ? 'text-[var(--success)]'
+                    : 'text-[var(--text-secondary)]'
+              }`}
+            >
               {connected === null
                 ? '…'
                 : connected
-                  ? primaryDeviceName
-                    ? `Verbunden · ${primaryDeviceName}`
-                    : 'Verbunden'
+                  ? reauthRequired
+                    ? 'Erneute Anmeldung nötig'
+                    : primaryDeviceName
+                      ? `Verbunden · ${primaryDeviceName}`
+                      : 'Verbunden'
                   : 'Nicht verbunden'}
             </span>
             {!connected && <ChevronRightIcon className={`h-4 w-4 text-[var(--text-secondary)] transition-transform ${open ? 'rotate-90' : ''}`} />}
@@ -228,8 +264,19 @@ export function AppleConnectPanel({ title, adapter }: Props) {
       {connected && (
         <div className="border-t border-[var(--divider)] p-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm">Verbunden</span>
-            <Switch checked onChange={handleDisconnect} />
+            <span className="text-sm">{reauthRequired ? 'Sitzung abgelaufen' : 'Verbunden'}</span>
+            <div className="flex items-center gap-3">
+              {!open && (
+                <button
+                  type="button"
+                  onClick={openRelogin}
+                  className="rounded-lg bg-[var(--accent)] px-2.5 py-1 text-[0.78rem] font-medium text-white"
+                >
+                  Erneut anmelden
+                </button>
+              )}
+              <Switch checked onChange={handleDisconnect} />
+            </div>
           </div>
           {adapter.setFamilySharing && (
             <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--divider)] pt-3">
@@ -245,7 +292,7 @@ export function AppleConnectPanel({ title, adapter }: Props) {
         </div>
       )}
 
-      {open && !connected && (
+      {open && (
         <div className="border-t border-[var(--divider)] p-3">
           {step === 'credentials' && (
             <>
@@ -275,14 +322,26 @@ export function AppleConnectPanel({ title, adapter }: Props) {
                   Auch mit mir geteilte Geräte (Familienfreigabe) einbeziehen
                 </label>
               )}
-              <button
-                type="button"
-                onClick={handleLogin}
-                disabled={saving}
-                className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-              >
-                Anmelden
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLogin}
+                  disabled={saving}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {saving ? 'Wird angemeldet…' : 'Anmelden'}
+                </button>
+                {connected && (
+                  <button
+                    type="button"
+                    onClick={handleCancelWizard}
+                    disabled={saving}
+                    className="rounded-lg border border-[var(--divider)] px-3 py-1.5 text-sm text-[var(--text-secondary)] disabled:opacity-60"
+                  >
+                    Abbrechen
+                  </button>
+                )}
+              </div>
 
               {adapter.importSession && (
                 <div className="mt-3 border-t border-[var(--divider)] pt-3">
@@ -319,6 +378,14 @@ export function AppleConnectPanel({ title, adapter }: Props) {
                   {METHOD_LABEL(m)}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={handleCancelWizard}
+                disabled={saving}
+                className="self-start rounded-lg border border-[var(--divider)] px-3 py-1.5 text-sm text-[var(--text-secondary)] disabled:opacity-60"
+              >
+                Zurück
+              </button>
             </div>
           )}
 
@@ -333,14 +400,24 @@ export function AppleConnectPanel({ title, adapter }: Props) {
                 onKeyDown={(e) => e.key === 'Enter' && handleSubmitCode()}
                 className="mb-2 w-full rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
               />
-              <button
-                type="button"
-                onClick={handleSubmitCode}
-                disabled={saving}
-                className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-              >
-                Bestätigen
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSubmitCode}
+                  disabled={saving}
+                  className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {saving ? 'Wird bestätigt…' : 'Bestätigen'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelWizard}
+                  disabled={saving}
+                  className="rounded-lg border border-[var(--divider)] px-3 py-1.5 text-sm text-[var(--text-secondary)] disabled:opacity-60"
+                >
+                  Zurück
+                </button>
+              </div>
             </>
           )}
 
