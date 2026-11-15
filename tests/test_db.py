@@ -27,15 +27,18 @@ from airtag_sentry.db import (
     delete_place_label_correction,
     delete_telegram_credentials,
     fetch_owner_device_location_history,
+    fetch_reports,
     get_airtag_apple_sync_status,
     get_airtag_key,
     get_carto_credentials,
     get_conn,
     get_geocoded_point,
+    get_geocoded_points_map,
     get_ha_api_token,
     get_mqtt_credentials,
     get_owner_apple_credentials,
     get_place_label_correction,
+    get_place_label_corrections_map,
     get_settings,
     get_telegram_credentials,
     insert_reports,
@@ -1062,3 +1065,62 @@ def test_prune_old_history_cleans_reports_locations_and_referencing_alerts(conn)
     assert [r.id for r in fetch_reports(conn, "bike")] == [recent_report.id]
     assert [loc.id for loc in fetch_owner_device_location_history(conn, "mac-1")] == [recent_loc.id]
 
+def test_insert_reports_deduplicates_duplicate_timestamps_within_single_batch(conn):
+    t = "2026-01-01T10:00:00"
+    inserted = insert_reports(
+        conn,
+        [
+            _report(t, 52.5, 13.4, airtag_id="bike"),
+            _report(t, 52.6, 13.5, airtag_id="bike"),
+            _report("2026-01-01T11:00:00", 52.7, 13.6, airtag_id="bike"),
+        ],
+    )
+    assert len(inserted) == 2
+    assert inserted[0].lat == 52.5
+    assert inserted[1].lat == 52.7
+
+
+def test_fetch_reports_and_device_history_filter_by_since(conn):
+    t2 = dt.datetime(2026, 1, 2, 10, 0, tzinfo=dt.timezone.utc)
+    insert_reports(
+        conn,
+        [
+            _report("2026-01-01T10:00:00", 52.5, 13.4, airtag_id="bike"),
+            _report("2026-01-02T10:00:00", 52.6, 13.5, airtag_id="bike"),
+        ],
+    )
+    assert [r.timestamp for r in fetch_reports(conn, "bike", since=t2)] == [t2]
+
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook", "device_type": "Mac"}], seen_at=_SEEN_AT)
+    record_owner_device_location(conn, _owner_location("mac-1", "2026-01-01T10:00", 52.5, 13.4))
+    record_owner_device_location(conn, _owner_location("mac-1", "2026-01-02T10:00", 52.6, 13.5))
+    filtered = fetch_owner_device_location_history(conn, "mac-1", limit=None, since=t2)
+    assert [loc.recorded_at for loc in filtered] == [t2]
+
+
+def test_primary_owner_device_location_near_handles_before_after_and_exact_edges(conn):
+    upsert_owner_devices(conn, [{"id": "iphone", "name": "iPhone", "device_type": "iPhone"}], seen_at=_SEEN_AT)
+    set_owner_device_primary(conn, "iphone")
+    early = record_owner_device_location(conn, _owner_location("iphone", "2026-01-01T10:00", 52.5, 13.4))
+    late = record_owner_device_location(conn, _owner_location("iphone", "2026-01-01T12:00", 52.6, 13.5))
+
+    assert primary_owner_device_location_near(conn, dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)) == early
+    assert primary_owner_device_location_near(conn, dt.datetime(2026, 1, 1, 13, 0, tzinfo=dt.timezone.utc)) == late
+    assert primary_owner_device_location_near(conn, dt.datetime(2026, 1, 1, 11, 45, tzinfo=dt.timezone.utc)) == late
+    assert primary_owner_device_location_near(conn, dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc)) == early
+
+
+def test_batch_geocoded_points_and_corrections_maps(conn):
+    store_geocoded_point(conn, 49.8728, 8.6512, "12 Main St", "REWE")
+    store_geocoded_point(conn, 52.5, 13.4, "Alexanderplatz 1", None)
+    set_place_label_correction(conn, 49.8728, 8.6512, "Corner Store")
+
+    assert get_geocoded_points_map(conn, []) == {}
+    assert get_place_label_corrections_map(conn, []) == {}
+
+    geocodes = get_geocoded_points_map(conn, [(49.8728001, 8.6512001), (52.5, 13.4), (48.1, 11.5)])
+    assert set(geocodes.keys()) == {round_coord(49.8728, 8.6512), round_coord(52.5, 13.4)}
+    assert geocodes[round_coord(49.8728, 8.6512)].poi_name == "REWE"
+
+    corrections = get_place_label_corrections_map(conn, [(49.8728001, 8.6512001), (52.5, 13.4)])
+    assert corrections == {round_coord(49.8728, 8.6512): "Corner Store"}

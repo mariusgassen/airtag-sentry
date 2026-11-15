@@ -4,6 +4,7 @@ movement check -> notify -> publish to Home Assistant.
 
 from __future__ import annotations
 
+import bisect
 import dataclasses
 import datetime as dt
 import json
@@ -37,7 +38,7 @@ from airtag_sentry.db import (
     get_airtag_apple_sync_status,
     get_airtag_key,
     get_conn,
-    get_geocoded_point,
+    get_geocoded_points_map,
     get_settings,
     insert_reports,
     latest_owner_device_locations,
@@ -179,13 +180,14 @@ def _geocode_new_points(conn, points: list[tuple[float, float]]) -> None:
     pings only trigger one real Nominatim call. Runs on the background
     scheduler thread, never blocking the web app - a failed lookup just
     leaves that coordinate ungeocoded until it's seen again."""
-    seen: set[tuple[float, float]] = set()
+    unique_by_key: dict[tuple[float, float], tuple[float, float]] = {}
     for lat, lon in points:
-        key = round_coord(lat, lon)
-        if key in seen:
-            continue
-        seen.add(key)
-        if get_geocoded_point(conn, lat, lon) is not None:
+        unique_by_key.setdefault(round_coord(lat, lon), (lat, lon))
+    if not unique_by_key:
+        return
+    cached = get_geocoded_points_map(conn, unique_by_key.values())
+    for key, (lat, lon) in unique_by_key.items():
+        if key in cached:
             continue
         try:
             result = reverse_geocode(lat, lon)
@@ -625,6 +627,8 @@ def _poll_airtag(
             len(newly_inserted),
         )
     else:
+        all_prior: list[Report] | None = None
+        prior_timestamps: list[dt.datetime] = []
         for report in newly_inserted:
             if report.is_outlier:
                 logger.info(
@@ -642,7 +646,10 @@ def _poll_airtag(
                 )
                 continue
 
-            prior_reports = fetch_reports_before(conn, airtag.id, report.timestamp)
+            if all_prior is None:
+                all_prior = fetch_reports_before(conn, airtag.id, newly_inserted[-1].timestamp)
+                prior_timestamps = [r.timestamp for r in all_prior]
+            prior_reports = all_prior[: bisect.bisect_left(prior_timestamps, report.timestamp)]
             alert = evaluate_movement(report, prior_reports, movement_cfg)
             if alert is not None:
                 logger.info("[%s] Movement alert '%s' (%.0f m).", airtag.id, alert.reason, alert.distance_meters)

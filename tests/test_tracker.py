@@ -883,3 +883,56 @@ def test_poll_airtag_publishes_persisted_report_to_ha_when_apple_returns_empty(m
     tracker._poll_airtag(_fake_cfg(), account, airtag, object(), [], _settings(), ha_publisher)
 
     ha_publisher.publish_airtag.assert_called_once_with("keys", "Schluessel", 52.5, 13.4, 15.0, "medium")
+
+
+def test_poll_airtag_batches_prior_report_queries_for_multiple_new_reports(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from airtag_sentry.db import Report
+
+    t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
+    t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    t2 = dt.datetime(2026, 1, 1, 10, 0, tzinfo=dt.timezone.utc)
+    raw_reports = [
+        types.SimpleNamespace(
+            timestamp=t1, latitude=52.5, longitude=13.4, horizontal_accuracy=5.0, confidence=3, status=0
+        ),
+        types.SimpleNamespace(
+            timestamp=t2, latitude=52.505, longitude=13.4, horizontal_accuracy=5.0, confidence=3, status=0
+        ),
+    ]
+    inserted = [
+        Report(id=2, airtag_id="keys", timestamp=t1, lat=52.5, lon=13.4, accuracy=5.0, confidence=3),
+        Report(id=3, airtag_id="keys", timestamp=t2, lat=52.505, lon=13.4, accuracy=5.0, confidence=3),
+    ]
+    prior = [
+        Report(id=1, airtag_id="keys", timestamp=t0, lat=52.5, lon=13.4, accuracy=5.0, confidence=3),
+        inserted[0],
+    ]
+    account = MagicMock()
+    account.fetch_location_history.return_value = raw_reports
+
+    fetch_before_calls = []
+
+    def fake_fetch_before(conn, airtag_id, timestamp):
+        fetch_before_calls.append(timestamp)
+        return [r for r in prior if r.timestamp < timestamp]
+
+    monkeypatch.setattr(tracker, "_load_key", lambda cfg, conn, airtag_id: object())
+    monkeypatch.setattr(tracker, "fetch_reports_before", fake_fetch_before)
+    monkeypatch.setattr(tracker, "count_reports", lambda conn, airtag_id: 1)
+    monkeypatch.setattr(tracker, "insert_reports", lambda conn, reports: inserted)
+    recorded_alerts = []
+    monkeypatch.setattr(tracker, "record_alert", lambda conn, alert: recorded_alerts.append(alert))
+    monkeypatch.setattr(tracker, "get_or_fetch_geocode", lambda conn, lat, lon: GeocodeResult(address=None, poi_name=None))
+    monkeypatch.setattr(tracker, "notify_all", lambda *a, **k: None)
+    monkeypatch.setattr(tracker, "_geocode_new_points", lambda conn, pts: None)
+
+    airtag = types.SimpleNamespace(id="keys", name="Keys", away_alert_enabled=False)
+    tracker._poll_airtag(_fake_cfg(), account, airtag, object(), [], _settings(), None)
+
+    # Once before loop for outlier detection (t1) + once lazily for t1..t2 alert evaluation
+    assert fetch_before_calls == [t1, t2]
+    assert len(recorded_alerts) == 1
+    assert recorded_alerts[0].report_id == 3
+
