@@ -436,3 +436,128 @@ def test_statuses_route_returns_bulk_status_map(client, conn, monkeypatch):
     assert body["bike"]["last_alert"] is None
     assert body["bike"]["poll_interval_minutes"] >= 1
 
+
+def test_alerts_route_merges_airtag_and_device_alerts_with_filters(client, conn, monkeypatch):
+    from airtag_sentry.db import Alert, record_alert, set_airtag_enabled
+
+    _login(client, monkeypatch)
+    now = dt.datetime.now(dt.timezone.utc)
+    report_ids = insert_reports(
+        conn,
+        [
+            Report(
+                id=None, airtag_id="bike", timestamp=now - dt.timedelta(days=20),
+                lat=49.8728, lon=8.6512, accuracy=5.0, confidence=3, battery_level="full",
+            ),
+        ],
+    )
+    create_airtag(conn, "hidden-tag", "Hidden")
+    set_airtag_enabled(conn, "hidden-tag", False)
+    hidden_report_ids = insert_reports(
+        conn,
+        [
+            Report(
+                id=None, airtag_id="hidden-tag", timestamp=now - dt.timedelta(hours=2),
+                lat=49.88, lon=8.66, accuracy=5.0, confidence=3, battery_level="full",
+            ),
+        ],
+    )
+    upsert_owner_devices(
+        conn,
+        [
+            {"id": "d1", "name": "iPhone", "device_type": "iPhone"},
+            {"id": "d2", "name": "iPad", "device_type": "iPad"},
+        ],
+        now,
+    )
+    set_owner_device_enabled(conn, "d1", True)
+    loc_id = record_owner_device_location(
+        conn,
+        OwnerLocation(
+            id=None, device_id="d1", recorded_at=now - dt.timedelta(hours=1),
+            lat=49.9, lon=8.7, horizontal_accuracy=5.0,
+        ),
+    )
+    disabled_loc_id = record_owner_device_location(
+        conn,
+        OwnerLocation(
+            id=None, device_id="d2", recorded_at=now - dt.timedelta(minutes=30),
+            lat=49.91, lon=8.71, horizontal_accuracy=5.0,
+        ),
+    )
+
+    record_alert(
+        conn,
+        Alert(
+            reason="left_behind", distance_meters=250.0, report_id=report_ids[0].id, airtag_id="bike",
+        ),
+    )
+    record_alert(
+        conn,
+        Alert(
+            reason="autonomous_movement",
+            distance_meters=120.0,
+            report_id=hidden_report_ids[0].id,
+            airtag_id="hidden-tag",
+        ),
+    )
+    record_alert(
+        conn,
+        Alert(
+            reason="autonomous_movement", distance_meters=340.0, owner_location_id=loc_id.id, owner_device_id="d1",
+        ),
+    )
+    record_alert(
+        conn,
+        Alert(
+            reason="left_behind", distance_meters=400.0, owner_location_id=disabled_loc_id.id, owner_device_id="d2",
+        ),
+    )
+    with conn.cursor() as cur:
+        cur.execute(
+            'UPDATE alerts SET "timestamp" = %s WHERE airtag_id = %s',
+            (now - dt.timedelta(days=20), "bike"),
+        )
+        cur.execute(
+            'UPDATE alerts SET "timestamp" = %s WHERE airtag_id = %s',
+            (now - dt.timedelta(hours=2), "hidden-tag"),
+        )
+        cur.execute(
+            'UPDATE alerts SET "timestamp" = %s WHERE owner_device_id = %s',
+            (now - dt.timedelta(hours=1), "d1"),
+        )
+        cur.execute(
+            'UPDATE alerts SET "timestamp" = %s WHERE owner_device_id = %s',
+            (now - dt.timedelta(minutes=30), "d2"),
+        )
+    conn.commit()
+
+    resp = client.get("/api/alerts")
+    assert resp.status_code == 200
+    alerts = resp.json()["alerts"]
+    assert len(alerts) == 2
+    assert alerts[0]["object_type"] == "device"
+    assert alerts[0]["object_id"] == "d1"
+    assert alerts[0]["anchor_recorded_at"] is not None
+    assert alerts[0]["anchor_id"] is None
+    assert alerts[0]["lat"] == 49.9
+    assert alerts[1]["object_type"] == "airtag"
+    assert alerts[1]["object_id"] == "bike"
+    assert alerts[1]["anchor_id"] == report_ids[0].id
+    assert alerts[1]["anchor_recorded_at"] is None
+    assert alerts[1]["lat"] == 49.8728
+
+    resp_days = client.get("/api/alerts", params={"days": 7})
+    assert resp_days.status_code == 200
+    assert [a["object_id"] for a in resp_days.json()["alerts"]] == ["d1"]
+
+    resp_airtag = client.get("/api/alerts", params={"object_type": "airtag", "object_id": "bike"})
+    assert resp_airtag.status_code == 200
+    assert [a["object_id"] for a in resp_airtag.json()["alerts"]] == ["bike"]
+
+    devices_resp = client.get("/api/owner-devices")
+    assert devices_resp.status_code == 200
+    d1 = next(d for d in devices_resp.json() if d["id"] == "d1")
+    d2 = next(d for d in devices_resp.json() if d["id"] == "d2")
+    assert d1["last_alert"]["reason"] == "autonomous_movement"
+    assert d2["last_alert"]["reason"] == "left_behind"

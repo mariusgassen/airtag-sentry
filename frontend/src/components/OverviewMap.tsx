@@ -8,6 +8,7 @@ import {
   AddPlaceButton,
   AddressLine,
   AppTileLayer,
+  BatteryRow,
   FitBounds,
   FullscreenControl,
   InfoRow,
@@ -17,6 +18,7 @@ import {
   OpenInMapsButton,
   OwnerTrailToggle,
   OwnerTrails,
+  PlaceCircles,
   PopupHeader,
   POPUP_WIDTH_CLASS,
 } from './MapCard'
@@ -74,6 +76,7 @@ export function OverviewMap({
     <div className="relative h-full w-full">
       <MapContainer center={positions[positions.length - 1]} zoom={13} className="h-full w-full">
         <AppTileLayer />
+        <PlaceCircles places={places} />
         <OwnerTrails histories={ownerLocationHistories} visible={showOwnerTrail} />
         <MarkerClusterGroup>
           {located.map(({ airtag, lastReport }) => (
@@ -105,6 +108,7 @@ export function OverviewMap({
                     {capitalize(formatRelative(lastReport.timestamp))}
                   </InfoRow>
                   <AddressLine lat={lastReport.lat} lon={lastReport.lon} />
+                  <BatteryRow level={lastReport.battery_level} />
                   <button
                     type="button"
                     onClick={() => onSelect(airtag.id)}
@@ -145,6 +149,7 @@ export function OverviewMap({
                     {capitalize(formatRelative(loc.recorded_at))}
                   </InfoRow>
                   <AddressLine lat={loc.lat} lon={loc.lon} />
+                  <BatteryRow level={loc.battery_level} status={loc.battery_status} reported={loc.battery_reported} />
                   {onSelectDevice && (
                     <button
                       type="button"

@@ -392,7 +392,12 @@ def _evaluate_device_away_alerts(
             owner_address,
             cfg.display_timezone,
         )
-        notify_all(notifiers, _ALERT_TITLES[reason], message)
+        notify_all(
+            notifiers,
+            _ALERT_TITLES[reason],
+            message,
+            data={"object_type": "device", "object_id": device.id},
+        )
         logger.info("[device %s] '%s' push sent.", device.id, reason)
 
 
@@ -668,7 +673,12 @@ def _poll_airtag(
                         f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
                         f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
                     )
-                    notify_all(notifiers, _ALERT_TITLES[alert.reason], message)
+                    notify_all(
+                        notifiers,
+                        _ALERT_TITLES[alert.reason],
+                        message,
+                        data={"object_type": "airtag", "object_id": airtag.id},
+                    )
                     logger.info("[%s] '%s' push sent.", airtag.id, alert.reason)
                 else:
                     logger.info("[%s] '%s' recorded but push disabled in settings.", airtag.id, alert.reason)
@@ -752,7 +762,12 @@ def _poll_airtag(
                 owner_address,
                 cfg.display_timezone,
             )
-            notify_all(notifiers, _ALERT_TITLES[reason], away_message)
+            notify_all(
+                notifiers,
+                _ALERT_TITLES[reason],
+                away_message,
+                data={"object_type": "airtag", "object_id": airtag.id},
+            )
             logger.info("[%s] '%s' push sent.", airtag.id, reason)
 
     _geocode_new_points(conn, [(r.lat, r.lon) for r in newly_inserted if not r.is_outlier])

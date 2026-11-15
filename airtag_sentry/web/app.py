@@ -70,9 +70,11 @@ from airtag_sentry.db import (
     get_telegram_credentials,
     latest_alert,
     latest_alerts_by_airtag,
+    latest_alerts_by_owner_device,
     latest_owner_device_locations,
     latest_reports_by_airtag,
     list_airtags,
+    list_alerts,
     list_keyed_airtag_ids,
     list_named_places,
     list_owner_devices as db_list_owner_devices,
@@ -1090,14 +1092,21 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         with get_conn(cfg.database_url) as conn:
             devices = db_list_owner_devices(conn)
             creds = get_owner_apple_credentials(conn)
+            alerts_by_id = latest_alerts_by_owner_device(conn)
         last_sync_at = creds.last_sync_at if creds else None
-        return [
-            {
-                **dataclasses.asdict(d),
-                "on_account": last_sync_at is None or d.last_seen_at == last_sync_at,
-            }
-            for d in devices
-        ]
+        results = []
+        for d in devices:
+            alert = alerts_by_id.get(d.id)
+            results.append(
+                {
+                    **dataclasses.asdict(d),
+                    "on_account": last_sync_at is None or d.last_seen_at == last_sync_at,
+                    "last_alert": (
+                        {"reason": alert[0], "timestamp": alert[1].isoformat()} if alert else None
+                    ),
+                }
+            )
+        return results
 
     @app.put("/api/owner-devices")
     def set_owner_device_enabled_route(body: OwnerDeviceEnabledIn):
@@ -1392,6 +1401,47 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
         visits.sort(key=lambda v: v["start"], reverse=True)
         return {"visits": visits}
+
+    @app.get("/api/alerts")
+    def get_alerts_route(
+        days: int | None = Query(default=None, ge=1),
+        object_type: Literal["airtag", "device"] | None = None,
+        object_id: str | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ):
+        """Chronological (newest-first) alert log across AirTags and enabled owner devices."""
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days) if days is not None else None
+        with get_conn(cfg.database_url) as conn:
+            items = list_alerts(
+                conn,
+                object_type=object_type,
+                object_id=object_id,
+                since=since,
+                limit=limit,
+            )
+        return {
+            "alerts": [
+                {
+                    "id": item.id,
+                    "timestamp": item.timestamp.isoformat(),
+                    "reason": item.reason,
+                    "distance_meters": item.distance_meters,
+                    "object_type": item.object_type,
+                    "object_id": item.object_id,
+                    "object_name": item.object_name,
+                    "object_icon": item.object_icon,
+                    "object_color": item.object_color,
+                    "object_device_type": item.object_device_type,
+                    "lat": item.lat,
+                    "lon": item.lon,
+                    "anchor_id": item.anchor_id,
+                    "anchor_recorded_at": (
+                        item.anchor_recorded_at.isoformat() if item.anchor_recorded_at else None
+                    ),
+                }
+                for item in items
+            ]
+        }
 
     @app.get("/api/apple/status")
     def apple_status():

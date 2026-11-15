@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type {
+  AlertEntry,
   AppSettings,
   Airtag,
   LocationHistory,
@@ -18,6 +19,7 @@ import { setCartoApiKey, setMapTileProvider } from './mapTiles'
 import {
   createAirtag,
   getAirtags,
+  getAlerts,
   getCartoStatus,
   getOwnerAppleStatus,
   getOwnerDeviceHistory,
@@ -47,7 +49,7 @@ import type { PlaceSeed } from './components/SettingsPlaces'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
 import { TimelinePage } from './components/TimelinePage'
-import type { TimelineFilter, TimelineRange } from './components/TimelinePage'
+import type { TimelineFilter, TimelineMode, TimelineRange } from './components/TimelinePage'
 import { usePushNotifications } from './hooks/usePushNotifications'
 
 // 'default' is the normal half-height sheet; 'expanded' is near-fullscreen
@@ -87,9 +89,23 @@ function resolveNextSheetState(start: SheetState, delta: number): SheetState {
   return start
 }
 
+function parseDeepLink(search: string): { detail: 'airtag' | 'device'; id: string } | null {
+  const params = new URLSearchParams(search)
+  const type = params.get('type')
+  const id = params.get('id')
+  if ((type === 'airtag' || type === 'device') && id) {
+    return { detail: type, id }
+  }
+  return null
+}
+
+const initialDeepLink = parseDeepLink(window.location.search)
+
 export default function App() {
   const [airtags, setAirtags] = useState<Airtag[]>([])
-  const [currentId, setCurrentId] = useState<string | null>(null)
+  const [currentId, setCurrentId] = useState<string | null>(
+    initialDeepLink?.detail === 'airtag' ? initialDeepLink.id : null,
+  )
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [reports, setReports] = useState<Report[]>([])
   const [reportStays, setReportStays] = useState<ReportStay[]>([])
@@ -128,10 +144,10 @@ export default function App() {
   // wherever they're managed) since they label stays on the map/history list
   // app-wide, same reasoning as ownerLocations above.
   const [places, setPlaces] = useState<Place[]>([])
-  // Cross-object "Zeitachse" feed (see GET /api/timeline) - fetched
-  // independently of the objects/detail selection state below, since it
-  // spans every AirTag/device at once rather than following `currentId`.
+  // Cross-object "Zeitachse" feed (see GET /api/timeline) & alert feed (GET /api/alerts).
   const [timeline, setTimeline] = useState<TimelineVisit[]>([])
+  const [alerts, setAlerts] = useState<AlertEntry[]>([])
+  const [timelineMode, setTimelineMode] = useState<TimelineMode>('visits')
   // Which single object (if any) the Zeitachse tab is currently narrowed to -
   // drives both TimelinePage's own filtering and, below, which map the
   // Zeitachse tab's map pane shows (its own MapCard/DeviceMapCard instead of
@@ -160,7 +176,9 @@ export default function App() {
   // Every *enabled* (tracked) owner device - see ObjectsList.tsx, which is
   // the first place a tracked device becomes visible outside Settings.
   const [ownerDevices, setOwnerDevices] = useState<OwnerDevice[]>([])
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
+    initialDeepLink?.detail === 'device' ? initialDeepLink.id : null,
+  )
   // Which of the current AirTag's `reports` is shown selected on the map/in
   // the history list - null means "no explicit selection" (map falls back
   // to the latest report). Reset whenever `reports` is reloaded (new AirTag,
@@ -180,7 +198,7 @@ export default function App() {
   // Which detail screen (if any) the sheet/map are drilled into - an AirTag's
   // or a tracked device's. Only one of the two `current*Id` values below is
   // ever "the selected one" at a time; this disambiguates which.
-  const [detail, setDetail] = useState<'airtag' | 'device' | null>(null)
+  const [detail, setDetail] = useState<'airtag' | 'device' | null>(initialDeepLink?.detail ?? null)
   const [sheetState, setSheetState] = useState<SheetState>('default')
   const push = usePushNotifications()
   const sheetRef = useRef<HTMLDivElement>(null)
@@ -318,9 +336,14 @@ export default function App() {
     // 'today' is filtered client-side (see TimelinePage.tsx) - fetch
     // everything for it, same as the null/"Alle" case.
     const days = timelineRangeDays === 'today' ? null : timelineRangeDays
-    await getTimeline(days)
-      .then((t) => setTimeline(t.visits))
-      .catch(() => {})
+    await Promise.all([
+      getTimeline(days)
+        .then((t) => setTimeline(t.visits))
+        .catch(() => {}),
+      getAlerts(days)
+        .then((res) => setAlerts(res.alerts))
+        .catch(() => {}),
+    ])
   }, [timelineRangeDays])
 
   useEffect(() => {
@@ -503,6 +526,30 @@ export default function App() {
     setActiveTab('objects')
   }
 
+  useEffect(() => {
+    if (initialDeepLink) {
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+    if (!('serviceWorker' in navigator)) return
+    function onMessage(event: MessageEvent) {
+      const data = event.data as { type?: string; object_type?: string; object_id?: string } | null
+      if (data?.type !== 'SELECT_OBJECT' || !data.object_id) return
+      if (data.object_type === 'airtag') {
+        pendingReportIdRef.current = null
+        setCurrentId(data.object_id)
+        setDetail('airtag')
+        setActiveTab('objects')
+      } else if (data.object_type === 'device') {
+        setSelectedDeviceId(data.object_id)
+        setSelectedDeviceLocationKey(null)
+        setDetail('device')
+        setActiveTab('objects')
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', onMessage)
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage)
+  }, [])
+
   // ObjectsList's edit-mode drag reorder - persists the whole dragged-to
   // order (see api.ts's reorderOwnerDevices / db.py's set_owner_devices_order).
   // Optimistic: reorders the local `ownerDevices` state immediately so the
@@ -596,6 +643,31 @@ export default function App() {
       setTimelineFilter({ type: 'device', id: visit.object_id })
       setSelectedDeviceId(visit.object_id)
       setSelectedDeviceLocationKey(visit.anchor_recorded_at)
+    }
+    setSheetState('minimized')
+  }
+
+  function handleSelectAlert(alert: AlertEntry) {
+    const matchingVisit = timeline.find(
+      (v) =>
+        v.object_type === alert.object_type &&
+        v.object_id === alert.object_id &&
+        ((alert.anchor_id != null && v.anchor_id === alert.anchor_id) ||
+          (alert.anchor_recorded_at != null && v.anchor_recorded_at === alert.anchor_recorded_at) ||
+          (new Date(v.start).getTime() <= new Date(alert.timestamp).getTime() &&
+            new Date(alert.timestamp).getTime() <= new Date(v.end).getTime())),
+    )
+    if (alert.object_type === 'airtag') {
+      const targetId = matchingVisit?.anchor_id ?? alert.anchor_id
+      pendingReportIdRef.current = targetId
+      setTimelineFilter({ type: 'airtag', id: alert.object_id })
+      setCurrentId(alert.object_id)
+      if (targetId != null) setSelectedReportId(targetId)
+    } else {
+      const targetKey = matchingVisit?.anchor_recorded_at ?? alert.anchor_recorded_at
+      setTimelineFilter({ type: 'device', id: alert.object_id })
+      setSelectedDeviceId(alert.object_id)
+      setSelectedDeviceLocationKey(targetKey)
     }
     setSheetState('minimized')
   }
@@ -906,11 +978,15 @@ export default function App() {
             {activeTab === 'timeline' ? (
               <TimelinePage
                 visits={timeline}
+                alerts={alerts}
+                mode={timelineMode}
+                onModeChange={setTimelineMode}
                 airtags={airtags}
                 devices={ownerDevices}
                 filter={timelineFilter}
                 onFilterChange={handleTimelineFilterChange}
                 onSelectVisit={handleSelectVisit}
+                onSelectAlert={handleSelectAlert}
                 rangeDays={timelineRangeDays}
                 onRangeChange={setTimelineRangeDays}
                 stepOlder={stepOlder}
@@ -951,6 +1027,12 @@ export default function App() {
                 }}
                 onViewTimeline={() => {
                   handleTimelineFilterChange({ type: 'airtag', id: currentAirtag.id })
+                  setTimelineMode('visits')
+                  setActiveTab('timeline')
+                }}
+                onViewAlerts={() => {
+                  handleTimelineFilterChange({ type: 'airtag', id: currentAirtag.id })
+                  setTimelineMode('alarms')
                   setActiveTab('timeline')
                 }}
               />
@@ -966,6 +1048,12 @@ export default function App() {
                 onChanged={refreshOwnerDevices}
                 onViewTimeline={() => {
                   handleTimelineFilterChange({ type: 'device', id: selectedDevice.id })
+                  setTimelineMode('visits')
+                  setActiveTab('timeline')
+                }}
+                onViewAlerts={() => {
+                  handleTimelineFilterChange({ type: 'device', id: selectedDevice.id })
+                  setTimelineMode('alarms')
                   setActiveTab('timeline')
                 }}
               />
