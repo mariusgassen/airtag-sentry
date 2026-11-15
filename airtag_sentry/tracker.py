@@ -32,6 +32,7 @@ from airtag_sentry.db import (
     Report,
     count_reports,
     fetch_owner_device_location_history,
+    fetch_reports,
     fetch_reports_before,
     get_airtag_apple_sync_status,
     get_airtag_key,
@@ -52,7 +53,7 @@ from airtag_sentry.db import (
     set_airtag_apple_sync_status,
     store_geocoded_point,
 )
-from airtag_sentry.geocode import format_location_line, reverse_geocode
+from airtag_sentry.geocode import format_location_line, get_or_fetch_geocode, reverse_geocode
 from airtag_sentry.movement import (
     MovementConfig,
     device_already_reunited,
@@ -373,8 +374,8 @@ def _evaluate_device_away_alerts(
             continue  # left at a known place (home, office, ...) - routine, not worth a push
 
         name = device.display_name or device.name
-        address = reverse_geocode(location.lat, location.lon).address
-        owner_address = reverse_geocode(primary_location.lat, primary_location.lon).address
+        address = get_or_fetch_geocode(conn, location.lat, location.lon).address
+        owner_address = get_or_fetch_geocode(conn, primary_location.lat, primary_location.lon).address
         message = _away_message(
             name,
             reason,
@@ -524,6 +525,15 @@ def poll_once(cfg: Config) -> bool:
     return True
 
 
+def _publish_airtag_to_ha(ha_publisher: HomeAssistantPublisher, airtag: AirtagRecord, latest: Report) -> None:
+    try:
+        ha_publisher.publish_airtag(
+            airtag.id, airtag.name, latest.lat, latest.lon, latest.accuracy, latest.battery_level
+        )
+    except Exception:
+        logger.exception("Failed to publish airtag '%s' to Home Assistant.", airtag.id)
+
+
 def _poll_airtag(
     cfg: Config,
     account,
@@ -540,6 +550,10 @@ def _poll_airtag(
 
     if not location_reports:
         logger.info("[%s] No location reports returned this poll.", airtag.id)
+        if ha_publisher is not None:
+            persisted = fetch_reports(conn, airtag.id, limit=1)
+            if persisted:
+                _publish_airtag_to_ha(ha_publisher, airtag, persisted[-1])
         return
 
     reports = [
@@ -586,22 +600,23 @@ def _poll_airtag(
     was_empty = count_reports(conn, airtag.id) == 0
     newly_inserted = insert_reports(conn, reports)
 
+    # Publish on every poll (same cadence as _update_owner_devices), even when
+    # no brand-new report arrived - otherwise newly connected HA brokers stay
+    # missing entities for quiet AirTags until the next crowd-sourced ping.
+    if ha_publisher is not None:
+        kept = [r for r in reports if not r.is_outlier]
+        latest = max(kept, key=lambda r: r.timestamp) if kept else None
+        if latest is None:
+            persisted = fetch_reports(conn, airtag.id, limit=1)
+            latest = persisted[-1] if persisted else None
+        if latest is not None:
+            _publish_airtag_to_ha(ha_publisher, airtag, latest)
+
     if not newly_inserted:
         logger.info("[%s] No new reports (all %d already known).", airtag.id, len(reports))
         return
 
     logger.info("[%s] Inserted %d new report(s).", airtag.id, len(newly_inserted))
-
-    if ha_publisher is not None:
-        kept = [r for r in reports if not r.is_outlier]
-        latest = max(kept, key=lambda r: r.timestamp) if kept else None
-        if latest is not None:
-            try:
-                ha_publisher.publish_airtag(
-                    airtag.id, airtag.name, latest.lat, latest.lon, latest.accuracy, latest.battery_level
-                )
-            except Exception:
-                logger.exception("Failed to publish airtag '%s' to Home Assistant.", airtag.id)
 
     if was_empty and not settings.movement_alert_on_backfill:
         logger.info(
@@ -641,7 +656,7 @@ def _poll_airtag(
                     ),
                 )
                 if _should_notify(settings, alert.reason):
-                    address = reverse_geocode(report.lat, report.lon).address
+                    address = get_or_fetch_geocode(conn, report.lat, report.lon).address
                     message = (
                         f"{airtag.name} hat sich um {alert.distance_meters:.0f} m bewegt.\n"
                         f"{format_location_line(report.lat, report.lon, report.timestamp, address, cfg.display_timezone)}"
@@ -714,8 +729,8 @@ def _poll_airtag(
                 logger.info("[%s] '%s' not pushed - left at a named place.", airtag.id, reason)
                 continue  # left at a known place (home, office, ...) - routine, not worth a push
 
-            address = reverse_geocode(report.lat, report.lon).address
-            owner_address = reverse_geocode(owner_location.lat, owner_location.lon).address
+            address = get_or_fetch_geocode(conn, report.lat, report.lon).address
+            owner_address = get_or_fetch_geocode(conn, owner_location.lat, owner_location.lon).address
             away_message = _away_message(
                 airtag.name,
                 reason,

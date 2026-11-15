@@ -1,6 +1,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from pywebpush import WebPushException
 
 from airtag_sentry.db import MqttCredentials, PushSubscription
@@ -138,3 +139,42 @@ def test_build_ha_publisher_decrypts_password(mock_get_creds, mock_publisher_cls
     mock_decrypt.assert_called_once_with("key", "encrypted")
     config = mock_publisher_cls.call_args.args[0]
     assert config == MqttConfig(host="broker", port=8883, username="user", password="secret", use_tls=True)
+
+
+def test_ha_publisher_close_flushes_pending_publishes_and_disconnects_before_loop_stop():
+    events = []
+    with patch("airtag_sentry.notifiers.homeassistant.mqtt.Client") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        info = MagicMock()
+        info.wait_for_publish.side_effect = lambda timeout=None: events.append("wait")
+        mock_client.publish.return_value = info
+        mock_client.disconnect.side_effect = lambda: events.append("disconnect")
+        mock_client.loop_stop.side_effect = lambda: events.append("loop_stop")
+
+        publisher = HomeAssistantPublisher(
+            MqttConfig(host="broker", port=1883, username=None, password=None, use_tls=False)
+        )
+        publisher.publish_airtag("my-bike", "My Bike", 52.5, 13.4, 5.0, "full")
+        publisher.close()
+
+    assert events.index("disconnect") < events.index("loop_stop")
+    assert all(i < events.index("disconnect") for i, e in enumerate(events) if e == "wait")
+    assert info.wait_for_publish.call_count == 5  # discovery+state+attrs + battery discovery+state
+
+
+def test_ha_publisher_close_still_stops_loop_when_wait_or_disconnect_fails():
+    with patch("airtag_sentry.notifiers.homeassistant.mqtt.Client") as mock_client_cls:
+        mock_client = mock_client_cls.return_value
+        info = MagicMock()
+        info.wait_for_publish.side_effect = RuntimeError("timeout")
+        mock_client.publish.return_value = info
+        mock_client.disconnect.side_effect = RuntimeError("broker gone")
+
+        publisher = HomeAssistantPublisher(
+            MqttConfig(host="broker", port=1883, username=None, password=None, use_tls=False)
+        )
+        publisher.publish_airtag("my-bike", "My Bike", 52.5, 13.4, 5.0, None)
+        with pytest.raises(RuntimeError, match="broker gone"):
+            publisher.close()
+
+    mock_client.loop_stop.assert_called_once()

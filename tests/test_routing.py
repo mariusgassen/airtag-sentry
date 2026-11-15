@@ -103,3 +103,41 @@ def test_route_along_roads_dedupes_near_duplicate_consecutive_points(monkeypatch
 
 def test_route_along_roads_returns_none_when_dedup_leaves_a_single_point():
     assert route_along_roads([(49.8728, 8.6512), (49.8728, 8.6512)]) is None
+
+
+def test_routing_releases_lock_during_http_request(monkeypatch):
+    import threading
+    import airtag_sentry.routing as routing_module
+
+    monkeypatch.setattr(routing_module, "_MIN_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(routing_module, "_next_allowed", 0.0)
+
+    started = threading.Event()
+    release = threading.Event()
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "code": "Ok",
+        "routes": [{"geometry": {"coordinates": [[8.6512, 49.8728], [8.6530, 49.8735]]}}],
+    }
+    mock_response.raise_for_status = Mock()
+
+    def slow_get(*a, **k):
+        started.set()
+        release.wait(timeout=2.0)
+        return mock_response
+
+    monkeypatch.setattr("requests.get", slow_get)
+
+    thread = threading.Thread(target=route_along_roads, args=([(49.8728, 8.6512), (49.8735, 8.6530)],))
+    thread.start()
+    try:
+        assert started.wait(timeout=1.0)
+        acquired = routing_module._lock.acquire(timeout=0.2)
+        try:
+            assert acquired, "_lock must not be held while HTTP request is in flight"
+        finally:
+            if acquired:
+                routing_module._lock.release()
+    finally:
+        release.set()
+        thread.join(timeout=2.0)

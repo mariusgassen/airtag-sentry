@@ -456,7 +456,7 @@ def test_evaluate_device_away_alerts_fires_on_new_away_transition(monkeypatch, c
 
     _setup_primary_and_device(conn)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
-    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
     monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
 
@@ -493,7 +493,7 @@ def test_evaluate_device_away_alerts_classifies_left_behind_when_device_is_stati
 
     _setup_primary_and_device(conn)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
-    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
     monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
 
@@ -551,7 +551,7 @@ def test_evaluate_device_away_alerts_does_not_suppress_autonomous_movement_at_a_
     _setup_primary_and_device(conn)
     create_named_place(conn, "Zuhause", 52.5, 13.4, 50.0)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
-    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
     monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
 
@@ -578,7 +578,7 @@ def test_evaluate_device_away_alerts_does_not_repeat_while_still_away(monkeypatc
 
     _setup_primary_and_device(conn)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
-    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
     monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
 
@@ -610,7 +610,7 @@ def test_evaluate_device_away_alerts_suppresses_notification_when_already_reunit
 
     _setup_primary_and_device(conn)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
-    monkeypatch.setattr(tracker_module, "reverse_geocode", lambda lat, lon: GeocodeResult(address=None, poi_name=None))
+    monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
     monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
 
@@ -797,3 +797,89 @@ def test_poll_once_prunes_old_history_when_retention_days_is_set(monkeypatch):
     assert pruned == [("fake-conn", 30)]
 
 
+def test_evaluate_device_away_alerts_uses_cached_geocodes(monkeypatch, conn):
+    from airtag_sentry import geocode as geocode_module
+    from airtag_sentry import tracker as tracker_module
+
+    _setup_primary_and_device(conn)
+    store_geocoded_point(conn, 52.5, 13.4, "Zuhauseweg 1, Berlin", None)
+    store_geocoded_point(conn, 52.51, 13.4, "Buerostr. 9, Berlin", None)
+    monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
+    monkeypatch.setattr(
+        geocode_module,
+        "reverse_geocode",
+        lambda lat, lon: (_ for _ in ()).throw(AssertionError("should hit geocoded_points cache")),
+    )
+    notified = []
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+
+    t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
+    t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    _record(conn, "primary", t0, 52.5, 13.4)
+    _record(conn, "laptop", t0, 52.5, 13.4)
+    _record(conn, "primary", t1, 52.5, 13.4)
+    _record(conn, "laptop", t1, 52.51, 13.4)
+
+    tracker_module._evaluate_device_away_alerts(_fake_cfg(), conn, [], _settings())
+
+    assert len(notified) == 1
+    assert "Buerostr. 9, Berlin" in notified[0][1]
+    assert "Zuhauseweg 1, Berlin" in notified[0][1]
+
+
+def test_poll_airtag_publishes_to_ha_even_when_no_new_reports(monkeypatch):
+    from unittest.mock import MagicMock
+
+    ts = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    raw_report = types.SimpleNamespace(
+        timestamp=ts,
+        latitude=52.5,
+        longitude=13.4,
+        horizontal_accuracy=12.0,
+        confidence=3,
+        status=0b00_000000,
+    )
+    account = MagicMock()
+    account.fetch_location_history.return_value = [raw_report]
+
+    monkeypatch.setattr(tracker, "_load_key", lambda cfg, conn, airtag_id: object())
+    monkeypatch.setattr(tracker, "fetch_reports_before", lambda conn, airtag_id, timestamp: [])
+    monkeypatch.setattr(tracker, "count_reports", lambda conn, airtag_id: 1)
+    monkeypatch.setattr(tracker, "insert_reports", lambda conn, reports: [])  # all already known
+
+    ha_publisher = MagicMock()
+    airtag = types.SimpleNamespace(id="keys", name="Schluessel", away_alert_enabled=False)
+
+    tracker._poll_airtag(_fake_cfg(), account, airtag, object(), [], _settings(), ha_publisher)
+
+    ha_publisher.publish_airtag.assert_called_once_with("keys", "Schluessel", 52.5, 13.4, 12.0, "full")
+
+
+def test_poll_airtag_publishes_persisted_report_to_ha_when_apple_returns_empty(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from airtag_sentry.db import Report
+
+    ts = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
+    persisted = Report(
+        id=42,
+        airtag_id="keys",
+        timestamp=ts,
+        lat=52.5,
+        lon=13.4,
+        accuracy=15.0,
+        confidence=3,
+        battery_level="medium",
+    )
+    account = MagicMock()
+    account.fetch_location_history.return_value = []
+
+    monkeypatch.setattr(tracker, "_load_key", lambda cfg, conn, airtag_id: object())
+    monkeypatch.setattr(tracker, "fetch_reports", lambda conn, airtag_id, limit=None: [persisted])
+
+    ha_publisher = MagicMock()
+    airtag = types.SimpleNamespace(id="keys", name="Schluessel", away_alert_enabled=False)
+
+    tracker._poll_airtag(_fake_cfg(), account, airtag, object(), [], _settings(), ha_publisher)
+
+    ha_publisher.publish_airtag.assert_called_once_with("keys", "Schluessel", 52.5, 13.4, 15.0, "medium")

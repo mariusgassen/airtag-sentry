@@ -36,7 +36,23 @@ _MAX_POINTS = 100
 _DEDUPE_MIN_DISTANCE_METERS = 25.0
 
 _lock = threading.Lock()
-_last_call = 0.0
+_next_allowed = 0.0
+
+
+def _wait_for_rate_limit() -> None:
+    """Reserve the next 1 req/sec OSRM slot under _lock and release it before
+    sleeping or doing HTTP I/O, so a slow/timed-out route fetch never holds
+    the lock against concurrent requests."""
+    global _next_allowed
+    if _MIN_INTERVAL_SECONDS <= 0:
+        return
+    with _lock:
+        now = time.monotonic()
+        scheduled = max(now, _next_allowed)
+        _next_allowed = scheduled + _MIN_INTERVAL_SECONDS
+        wait = scheduled - now
+    if wait > 0:
+        time.sleep(wait)
 
 
 def _haversine_meters(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -66,25 +82,20 @@ def _fetch_route(points: tuple[tuple[float, float], ...]) -> tuple[tuple[float, 
     """Cached on the exact ordered point sequence - the frontend re-requests
     the same trail on every detail-view open/tab switch without new data in
     between, so this avoids hitting OSRM again for an unchanged trail."""
-    global _last_call
     coords = ";".join(f"{lon},{lat}" for lat, lon in points)
     url = _OSRM_ROUTE_URL.format(coords=coords)
-    with _lock:
-        wait = _MIN_INTERVAL_SECONDS - (time.monotonic() - _last_call)
-        if wait > 0:
-            time.sleep(wait)
-        try:
-            resp = requests.get(
-                url,
-                params={"overview": "full", "geometries": "geojson"},
-                headers={"User-Agent": _USER_AGENT},
-                timeout=10.0,
-            )
-            _last_call = time.monotonic()
-            resp.raise_for_status()
-            body = resp.json()
-        except (requests.RequestException, ValueError):
-            return None
+    _wait_for_rate_limit()
+    try:
+        resp = requests.get(
+            url,
+            params={"overview": "full", "geometries": "geojson"},
+            headers={"User-Agent": _USER_AGENT},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
     if body.get("code") != "Ok" or not body.get("routes"):
         return None
     try:
