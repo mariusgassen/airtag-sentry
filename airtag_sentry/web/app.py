@@ -40,7 +40,6 @@ from airtag_sentry.config import Config, load_config
 from airtag_sentry.notifiers import build_notifiers
 from airtag_sentry.db import (
     AppSettings,
-    NamedPlace,
     PushSubscription,
     StoredKey,
     add_push_subscription,
@@ -124,6 +123,23 @@ AIRTAG_ICON_CHOICES = {
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _COLOR_PALETTE_CHOICES = {"vivid", "pastel", "pastel_white"}
 _MAP_TILE_PROVIDER_CHOICES = {"auto", "osm"}
+_URL_CREDENTIALS_RE = re.compile(r"://[^/\s:@]+:[^/\s@]+@")
+_TELEGRAM_TOKEN_RE = re.compile(r"/bot\d+:[^/\s]+")
+_BEARER_TOKEN_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+def _safe_error_detail(exc: Exception, *, fallback: str = "Upstream request failed.") -> str:
+    """Redacts URL credentials, bot/bearer tokens, and extra lines from exception text."""
+    text = str(exc)
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if not first_line:
+        return fallback
+    sanitized = _URL_CREDENTIALS_RE.sub("://***@", first_line)
+    sanitized = _TELEGRAM_TOKEN_RE.sub("/bot***", sanitized)
+    sanitized = _BEARER_TOKEN_RE.sub("Bearer ***", sanitized)
+    if len(sanitized) > 240:
+        sanitized = sanitized[:237] + "..."
+    return sanitized
 
 
 class _CacheControlledStaticFiles(StaticFiles):
@@ -922,7 +938,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             tracker.poll_once(cfg)
         except Exception as exc:
             logger.exception("Manual poll failed.")
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise HTTPException(status_code=502, detail=_safe_error_detail(exc)) from exc
         return {"ok": True}
 
     @app.get("/api/settings")
@@ -1089,7 +1105,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             except Exception as exc:
                 logger.exception("Play sound failed for owner device '%s'.", body.device_id)
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
+                raise HTTPException(status_code=502, detail=_safe_error_detail(exc)) from exc
         return {"ok": True}
 
     @app.get("/api/owner-device-locations")
@@ -1129,7 +1145,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             locations = fetch_owner_device_location_history(conn, device_id, limit=limit)
             radius = get_settings(conn).history_cluster_radius_meters
             places = list_named_places(conn)
-            clusters = cluster_by_proximity(locations, lambda l: (l.lat, l.lon), radius)
+            clusters = cluster_by_proximity(locations, lambda loc: (loc.lat, loc.lon), radius)
             stays = []
             for c in clusters:
                 place = match_place(c.anchor.lat, c.anchor.lon, places)
@@ -1224,8 +1240,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     continue
                 locations = fetch_owner_device_location_history(conn, device.id, limit=None)
                 if since is not None:
-                    locations = [l for l in locations if l.recorded_at >= since]
-                for c in cluster_by_proximity(locations, lambda l: (l.lat, l.lon), radius):
+                    locations = [loc for loc in locations if loc.recorded_at >= since]
+                for c in cluster_by_proximity(locations, lambda loc: (loc.lat, loc.lon), radius):
                     place = match_place(c.anchor.lat, c.anchor.lon, places)
                     details = _stay_place_details(conn, place, c.anchor.lat, c.anchor.lon)
                     # locations are newest-first (see CLAUDE.md's asymmetry),
@@ -1281,7 +1297,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             result = auth.start_login(cfg, body.email, body.password)
         except Exception as exc:
             logger.exception("Apple login failed.")
-            raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
+            raise HTTPException(status_code=400, detail=f"Login failed: {_safe_error_detail(exc)}") from exc
         if not result.requires_2fa:
             with get_conn(cfg.database_url) as conn:
                 clear_airtag_apple_sync_status(conn)
@@ -1293,7 +1309,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             auth.request_2fa_code(body.method_index)
         except Exception as exc:
             logger.exception("Apple 2FA method selection failed.")
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
         return {"ok": True}
 
     @app.post("/api/apple/2fa/submit")
@@ -1302,7 +1318,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             auth.submit_2fa_code(cfg, body.code)
         except Exception as exc:
             logger.exception("Apple 2FA code submission failed.")
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
         with get_conn(cfg.database_url) as conn:
             clear_airtag_apple_sync_status(conn)
         return {"ok": True}
@@ -1348,7 +1364,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 )
             except Exception as exc:
                 logger.exception("Owner Apple login failed.")
-                raise HTTPException(status_code=400, detail=f"Login failed: {exc}") from exc
+                raise HTTPException(status_code=400, detail=f"Login failed: {_safe_error_detail(exc)}") from exc
         return result
 
     @app.post("/api/apple/owner/2fa/submit")
@@ -1358,7 +1374,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 owner_tracking.submit_owner_2fa_code(cfg, conn, body.code)
             except Exception as exc:
                 logger.exception("Owner Apple 2FA code submission failed.")
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise HTTPException(status_code=400, detail=_safe_error_detail(exc)) from exc
         return {"ok": True}
 
     @app.post("/api/apple/owner/cancel")
@@ -1570,7 +1586,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 results.append({"channel": channel, "ok": True})
             except Exception as exc:
                 logger.exception("Test notification failed for channel %s", channel)
-                results.append({"channel": channel, "ok": False, "error": str(exc)})
+                results.append({"channel": channel, "ok": False, "error": _safe_error_detail(exc)})
         return {"results": results}
 
     @app.get("/api/ha/token/status")

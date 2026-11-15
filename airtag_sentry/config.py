@@ -35,6 +35,7 @@ class AppleConfig:
 class WebConfig:
     host: str
     port: int
+    forwarded_allow_ips: str = "*"
 
 
 @dataclasses.dataclass
@@ -134,7 +135,11 @@ def load_config() -> Config:
         owner_session_dir=_env_str("APPLE_OWNER_SESSION_PATH", "data/pyicloud_session"),
     )
 
-    web = WebConfig(host=_env_str("WEB_HOST", "0.0.0.0"), port=_env_int("WEB_PORT", 8000))
+    web = WebConfig(
+        host=_env_str("WEB_HOST", "0.0.0.0"),
+        port=_env_int("WEB_PORT", 8000),
+        forwarded_allow_ips=_env_str("FORWARDED_ALLOW_IPS", "*"),
+    )
 
     oidc_issuer = _env("OIDC_ISSUER")
     oidc_client_id = _env("OIDC_CLIENT_ID")

@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
             host=cfg.web.host,
             port=cfg.web.port,
             proxy_headers=True,
-            forwarded_allow_ips="*",
+            forwarded_allow_ips=cfg.web.forwarded_allow_ips,
         )
 
     return 0
