@@ -214,3 +214,38 @@ def test_search_address_returns_empty_list_on_request_failure(monkeypatch):
     monkeypatch.setattr("requests.get", raise_error)
 
     assert search_address("Darmstadt") == []
+
+
+def test_rate_limited_get_releases_lock_during_http_request(monkeypatch):
+    import threading
+    import airtag_sentry.geocode as geocode_module
+
+    monkeypatch.setattr(geocode_module, "_MIN_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(geocode_module, "_next_allowed", 0.0)
+
+    started = threading.Event()
+    release = threading.Event()
+    mock_response = Mock()
+    mock_response.json.return_value = {"display_name": "Berlin"}
+    mock_response.raise_for_status = Mock()
+
+    def slow_get(*a, **k):
+        started.set()
+        release.wait(timeout=2.0)
+        return mock_response
+
+    monkeypatch.setattr("requests.get", slow_get)
+
+    thread = threading.Thread(target=reverse_geocode, args=(52.5, 13.4))
+    thread.start()
+    try:
+        assert started.wait(timeout=1.0)
+        acquired = geocode_module._lock.acquire(timeout=0.2)
+        try:
+            assert acquired, "_lock must not be held while HTTP request is in flight"
+        finally:
+            if acquired:
+                geocode_module._lock.release()
+    finally:
+        release.set()
+        thread.join(timeout=2.0)
