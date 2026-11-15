@@ -68,7 +68,9 @@ from airtag_sentry.db import (
     get_settings,
     get_telegram_credentials,
     latest_alert,
+    latest_alerts_by_airtag,
     latest_owner_device_locations,
+    latest_reports_by_airtag,
     list_airtags,
     list_keyed_airtag_ids,
     list_named_places,
@@ -953,6 +955,37 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "last_alert": ({"reason": alert[0], "timestamp": alert[1].isoformat()} if alert else None),
             "poll_interval_minutes": poll_interval_minutes,
         }
+
+    @app.get("/api/statuses")
+    def get_statuses():
+        """Bulk status map for every enabled AirTag, avoiding N per-AirTag HTTP
+        round trips during background refreshes."""
+        with get_conn(cfg.database_url) as conn:
+            airtags = list_airtags(conn, only_enabled=True)
+            reports_by_id = latest_reports_by_airtag(conn)
+            alerts_by_id = latest_alerts_by_airtag(conn)
+            poll_interval_minutes = get_settings(conn).polling_interval_minutes
+        result: dict[str, Any] = {}
+        for airtag in airtags:
+            report = reports_by_id.get(airtag.id)
+            alert = alerts_by_id.get(airtag.id)
+            result[airtag.id] = {
+                "airtag_id": airtag.id,
+                "airtag_name": airtag.name,
+                "last_report": (
+                    {
+                        "timestamp": report.timestamp.isoformat(),
+                        "lat": report.lat,
+                        "lon": report.lon,
+                        "battery_level": report.battery_level,
+                    }
+                    if report is not None
+                    else None
+                ),
+                "last_alert": ({"reason": alert[0], "timestamp": alert[1].isoformat()} if alert else None),
+                "poll_interval_minutes": poll_interval_minutes,
+            }
+        return result
 
     @app.post("/api/poll-now")
     def poll_now_route():

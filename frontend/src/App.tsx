@@ -26,7 +26,7 @@ import {
   getPlaces,
   getReports,
   getSettings,
-  getStatus,
+  getStatuses,
   getTimeline,
   ping,
   pollNow,
@@ -42,6 +42,7 @@ import { ChevronDownIcon, ChevronUpIcon } from './components/icons'
 import { MapCard } from './components/MapCard'
 import { OverviewMap } from './components/OverviewMap'
 import { SettingsPanel } from './components/SettingsPanel'
+import type { SettingsPage } from './components/SettingsPanel'
 import type { PlaceSeed } from './components/SettingsPlaces'
 import { TabBar } from './components/TabBar'
 import type { TabKey } from './components/TabBar'
@@ -109,21 +110,20 @@ export default function App() {
   // instead of hanging forever.
   const [offline, setOffline] = useState(false)
   const [manualRefreshing, setManualRefreshing] = useState(false)
-  // Only used to read back color_palette - fetched here (not just inside
-  // SettingsPanel) so a saved palette change applies app-wide without a
-  // manual reload, same as any other background refresh (see AUTO_REFRESH_MS).
-  const [settings, setSettings] = useState<AppSettings | null>(null)
-  // Applied synchronously during render (not a useEffect) so every badge/pin
-  // below - all read the live PALETTE export, see airtagColor.ts - already
-  // sees the current palette by the time they render, without threading a
-  // `palette` prop through the whole tree just to reach a handful of leaf
-  // color lookups.
-  if (settings) setColorPalette(settings.color_palette)
-  if (settings) setMapTileProvider(settings.map_tile_provider)
-  // Same live-module-variable pattern as color_palette above, for CARTO's
-  // basemap-tiles API key (mapTiles.ts) - see AppTileLayer/SettingsPlaces.tsx.
-  const [cartoApiKey, setCartoApiKeyState] = useState<string | null>(null)
-  setCartoApiKey(cartoApiKey)
+  // Only used to trigger re-renders when color_palette / map_tile_provider or
+  // CARTO's API key changes - fetched here (not just inside SettingsPanel) so a
+  // saved change applies app-wide without a manual reload.
+  const [, setSettings] = useState<AppSettings | null>(null)
+  const applySettings = useCallback((next: AppSettings) => {
+    setColorPalette(next.color_palette)
+    setMapTileProvider(next.map_tile_provider)
+    setSettings(next)
+  }, [])
+  const [, setCartoApiKeyState] = useState<string | null>(null)
+  const applyCartoApiKey = useCallback((key: string | null) => {
+    setCartoApiKey(key)
+    setCartoApiKeyState(key)
+  }, [])
   // Named geofences (Settings -> Orte) - fetched here (not just inside
   // wherever they're managed) since they label stays on the map/history list
   // app-wide, same reasoning as ownerLocations above.
@@ -173,12 +173,10 @@ export default function App() {
   // owner devices get the same map navigation features, see CLAUDE.md.
   const [selectedDeviceLocationKey, setSelectedDeviceLocationKey] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabKey>('objects')
-  // Bumped whenever the Einstellungen tab button is clicked while already
-  // active, so SettingsPanel's own internal page stack (root/notifications/
-  // apple/tracking/places) pops back to root - see handleTabChange and
-  // SettingsPanel's resetSignal prop. Objects/Zeitachse don't need this
-  // since their own "root" state (detail/timelineFilter) already lives here.
-  const [settingsResetSignal, setSettingsResetSignal] = useState(0)
+  // Lifted from SettingsPanel so handleTabChange (tapping active settings tab
+  // pops back to 'root') and handleAddPlace (jumps straight to 'places') can
+  // drive it directly without prop-reset signals or effects.
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>('root')
   // Which detail screen (if any) the sheet/map are drilled into - an AirTag's
   // or a tracked device's. Only one of the two `current*Id` values below is
   // ever "the selected one" at a time; this disambiguates which.
@@ -192,25 +190,13 @@ export default function App() {
 
   const refreshAirtags = useCallback(async () => {
     // Hidden AirTags (Settings -> Eigene Geräte) stay out of every view here.
-    const list = (await getAirtags()).filter((a) => a.enabled)
-    setAirtags(list)
-    setCurrentId((prev) => (prev && list.some((a) => a.id === prev) ? prev : (list[0]?.id ?? null)))
-
-    const entries = await Promise.all(
-      list.map(async (a) => {
-        try {
-          return [a.id, await getStatus(a.id)] as const
-        } catch {
-          return null
-        }
-      }),
-    )
-    const nextStatuses: Record<string, Status> = {}
-    for (const entry of entries) {
-      if (entry) nextStatuses[entry[0]] = entry[1]
-    }
-    setStatuses(nextStatuses)
-    return list
+    return Promise.all([getAirtags(), getStatuses()]).then(([allAirtags, nextStatuses]) => {
+      const list = allAirtags.filter((a) => a.enabled)
+      setAirtags(list)
+      setCurrentId((prev) => (prev && list.some((a) => a.id === prev) ? prev : (list[0]?.id ?? null)))
+      setStatuses(nextStatuses)
+      return list
+    })
   }, [])
 
   useEffect(() => {
@@ -225,9 +211,9 @@ export default function App() {
 
   const refreshSettings = useCallback(async () => {
     await getSettings()
-      .then(setSettings)
+      .then(applySettings)
       .catch(() => {})
-  }, [])
+  }, [applySettings])
 
   useEffect(() => {
     refreshSettings()
@@ -235,9 +221,9 @@ export default function App() {
 
   const refreshCartoApiKey = useCallback(async () => {
     await getCartoStatus()
-      .then((s) => setCartoApiKeyState(s.api_key))
+      .then((s) => applyCartoApiKey(s.api_key))
       .catch(() => {})
-  }, [])
+  }, [applyCartoApiKey])
 
   useEffect(() => {
     refreshCartoApiKey()
@@ -259,21 +245,17 @@ export default function App() {
     const enabled = await getOwnerDevices()
       .then((ds) => ds.filter((d) => d.enabled))
       .catch(() => [] as OwnerDevice[])
-    setOwnerDevices(enabled)
-    if (enabled.length === 0) {
-      setOwnerLocationHistories({})
-      setOwnerLocationStays({})
-      return
-    }
-    const entries = await Promise.all(
+    await Promise.all(
       enabled.map((d) =>
         getOwnerDeviceHistory(d.id)
           .then((h) => [d.id, h] as [string, LocationHistory])
           .catch(() => [d.id, { raw: [], stays: [] }] as [string, LocationHistory]),
       ),
-    )
-    setOwnerLocationHistories(Object.fromEntries(entries.map(([id, h]) => [id, h.raw])))
-    setOwnerLocationStays(Object.fromEntries(entries.map(([id, h]) => [id, h.stays])))
+    ).then((entries) => {
+      setOwnerDevices(enabled)
+      setOwnerLocationHistories(Object.fromEntries(entries.map(([id, h]) => [id, h.raw])))
+      setOwnerLocationStays(Object.fromEntries(entries.map(([id, h]) => [id, h.stays])))
+    })
   }, [])
 
   useEffect(() => {
@@ -298,6 +280,10 @@ export default function App() {
   // instead of unconditionally clearing it.
   const pendingReportIdRef = useRef<number | null>(null)
 
+  const showReports =
+    (activeTab === 'objects' && detail === 'airtag') ||
+    (activeTab === 'timeline' && timelineFilter?.type === 'airtag')
+
   const refreshReports = useCallback(async () => {
     const id = currentId
     if (!id) {
@@ -315,8 +301,8 @@ export default function App() {
   useEffect(() => {
     setSelectedReportId(pendingReportIdRef.current)
     pendingReportIdRef.current = null
-    refreshReports()
-  }, [currentId, refreshReports])
+    if (showReports) refreshReports()
+  }, [currentId, showReports, refreshReports])
 
   const refreshPlaces = useCallback(async () => {
     await getPlaces()
@@ -338,29 +324,31 @@ export default function App() {
   }, [timelineRangeDays])
 
   useEffect(() => {
-    refreshTimeline()
-  }, [refreshTimeline])
+    if (activeTab === 'timeline') refreshTimeline()
+  }, [activeTab, refreshTimeline])
 
-  // Re-fetches every endpoint the app depends on, and reports back whether
-  // the server was actually reachable - refreshAirtags/refreshReports below
-  // let a network failure propagate (no internal .catch), while the other
-  // four swallow theirs (they've always tolerated e.g. owner tracking not
-  // being connected), so Promise.allSettled is what turns "at least one of
-  // these truly failed to reach the server" into a single signal.
+  // Re-fetches every endpoint the active view depends on, and reports back
+  // whether the server was actually reachable - refreshAirtags/refreshReports
+  // let a network failure propagate (no internal .catch), while the others
+  // swallow theirs, so Promise.allSettled turns "at least one of these
+  // truly failed to reach the server" into a single reachability signal.
   const fullRefresh = useCallback(async () => {
-    const results = await Promise.allSettled([
+    const tasks: Promise<unknown>[] = [
       refreshAirtags(),
       refreshOwnerConnected(),
       refreshOwnerDevices(),
-      refreshReports(),
       refreshSettings(),
       refreshPlaces(),
-      refreshTimeline(),
-    ])
+    ]
+    if (showReports) tasks.push(refreshReports())
+    if (activeTab === 'timeline') tasks.push(refreshTimeline())
+    const results = await Promise.allSettled(tasks)
     const reachable = results.every((r) => r.status === 'fulfilled')
     setOffline(!reachable)
     return reachable
   }, [
+    activeTab,
+    showReports,
     refreshAirtags,
     refreshOwnerConnected,
     refreshOwnerDevices,
@@ -499,7 +487,7 @@ export default function App() {
     }
     if (tab === 'objects') setDetail(null)
     else if (tab === 'timeline') setTimelineFilter(null)
-    else if (tab === 'settings') setSettingsResetSignal((s) => s + 1)
+    else if (tab === 'settings') setSettingsPage('root')
   }
 
   function handleSelect(id: string) {
@@ -522,7 +510,9 @@ export default function App() {
   // server via refreshOwnerDevices (a no-op if the PUT already applied
   // cleanly, a correction if it didn't).
   async function handleReorderDevices(deviceIds: string[]) {
-    setOwnerDevices((prev) => deviceIds.map((id) => prev.find((d) => d.id === id)!))
+    setOwnerDevices((prev) =>
+      deviceIds.map((id) => prev.find((d) => d.id === id)).filter((d): d is OwnerDevice => d !== undefined),
+    )
     try {
       await reorderOwnerDevices(deviceIds)
     } finally {
@@ -534,7 +524,9 @@ export default function App() {
   // handleReorderDevices/reorderOwnerDevices above (CLAUDE.md's AirTag/owner-
   // device parity rule).
   async function handleReorderAirtags(airtagIds: string[]) {
-    setAirtags((prev) => airtagIds.map((id) => prev.find((a) => a.id === id)!))
+    setAirtags((prev) =>
+      airtagIds.map((id) => prev.find((a) => a.id === id)).filter((a): a is Airtag => a !== undefined),
+    )
     try {
       await reorderAirtags(airtagIds)
     } finally {
@@ -543,10 +535,11 @@ export default function App() {
   }
 
   // "Ort hier hinzufügen" from any map popup (MapCard/DeviceMapCard/
-  // OverviewMap) - switches to Settings, where the placeSeed effect below
-  // opens Orte straight into a new place's editor at this exact position.
+  // OverviewMap) - switches directly to Settings -> Orte, where SettingsPlaces
+  // opens straight into a new place's editor at this exact position.
   function handleAddPlace(lat: number, lon: number, name?: string) {
     setPlaceSeed({ lat, lon, name })
+    setSettingsPage('places')
     setActiveTab('settings')
   }
 
@@ -926,18 +919,19 @@ export default function App() {
               />
             ) : activeTab === 'settings' ? (
               <SettingsPanel
+                page={settingsPage}
+                onPageChange={setSettingsPage}
                 pushStatus={push.status}
                 pushBusy={push.busy}
                 onEnablePush={push.enable}
                 onDisablePush={push.disable}
-                onSettingsChanged={setSettings}
-                onCartoApiKeyChanged={setCartoApiKeyState}
+                onSettingsChanged={applySettings}
+                onCartoApiKeyChanged={applyCartoApiKey}
                 places={places}
                 onPlacesChanged={refreshPlaces}
                 placeSeed={placeSeed}
                 onPlaceSeedConsumed={() => setPlaceSeed(null)}
                 onRequestExpand={() => setSheetState('expanded')}
-                resetSignal={settingsResetSignal}
               />
             ) : detail === 'airtag' && currentAirtag ? (
               <AirtagDetail

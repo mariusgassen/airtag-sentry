@@ -222,11 +222,15 @@ const APPLE_AUTH_TIMEOUT_MS = 45_000
 async function apiFetch(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
+  const headers = new Headers(init?.headers)
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
   let res: Response
   try {
     res = await fetch(path, {
       ...init,
-      headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+      headers,
       signal: controller.signal,
     })
   } finally {
@@ -358,6 +362,10 @@ export function ownerDeviceExportUrl(deviceId: string, format: 'csv' | 'gpx'): s
 
 export async function getStatus(airtagId: string): Promise<Status> {
   return (await apiFetch(`/api/status?airtag_id=${encodeURIComponent(airtagId)}`)).json()
+}
+
+export async function getStatuses(): Promise<Record<string, Status>> {
+  return (await apiFetch('/api/statuses')).json()
 }
 
 export async function getAddress(lat: number, lon: number): Promise<string | null> {
@@ -715,9 +723,12 @@ export async function revokeHaToken(): Promise<void> {
 }
 
 export async function getVapidPublicKey(): Promise<string | null> {
-  const res = await fetch('/api/push/vapid-public-key')
-  if (!res.ok) return null
-  return (await res.json()).publicKey
+  try {
+    const res = await apiFetch('/api/push/vapid-public-key')
+    return (await res.json()).publicKey
+  } catch {
+    return null
+  }
 }
 
 export async function subscribePush(subscription: PushSubscription): Promise<void> {

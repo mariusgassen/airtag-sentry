@@ -470,6 +470,17 @@ def fetch_reports_before(
         return [Report(*row) for row in cur.fetchall()]
 
 
+def latest_reports_by_airtag(conn: psycopg.Connection) -> dict[str, Report]:
+    """Single-query latest non-outlier report per AirTag, for bulk /api/statuses."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT DISTINCT ON (airtag_id) {_REPORT_COLUMNS} "
+            'FROM location_reports WHERE NOT is_outlier '
+            'ORDER BY airtag_id, "timestamp" DESC'
+        )
+        return {row[1]: Report(*row) for row in cur.fetchall()}
+
+
 def record_alert(conn: psycopg.Connection, alert: Alert) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -495,6 +506,16 @@ def latest_alert(conn: psycopg.Connection, airtag_id: str) -> tuple[str, dt.date
         )
         row = cur.fetchone()
         return tuple(row) if row else None
+
+
+def latest_alerts_by_airtag(conn: psycopg.Connection) -> dict[str, tuple[str, dt.datetime]]:
+    """Single-query latest alert (reason, timestamp) per AirTag."""
+    with conn.cursor() as cur:
+        cur.execute(
+            'SELECT DISTINCT ON (airtag_id) airtag_id, reason, "timestamp" '
+            'FROM alerts WHERE airtag_id IS NOT NULL ORDER BY airtag_id, "timestamp" DESC'
+        )
+        return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
 
 
 def add_push_subscription(conn: psycopg.Connection, sub: PushSubscription) -> None:

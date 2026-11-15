@@ -406,3 +406,33 @@ def test_settings_route_persists_history_retention_days(client, conn, monkeypatc
     finally:
         client.put("/api/settings", json=current)
 
+
+def test_statuses_route_returns_bulk_status_map(client, conn, monkeypatch):
+    _login(client, monkeypatch)
+    create_airtag(conn, "keys", "Schlüssel")
+    with conn.cursor() as cur:
+        cur.execute("UPDATE airtags SET enabled = FALSE WHERE id = 'keys'")
+    conn.commit()
+
+    ts = dt.datetime(2026, 2, 1, 12, 0, tzinfo=dt.timezone.utc)
+    insert_reports(
+        conn,
+        [
+            Report(
+                id=None, airtag_id="bike", timestamp=ts,
+                lat=49.87, lon=8.65, accuracy=12.0, confidence=3, battery_level="medium",
+            ),
+        ],
+    )
+
+    resp = client.get("/api/statuses")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert list(body.keys()) == ["bike"]
+    assert body["bike"]["airtag_id"] == "bike"
+    assert body["bike"]["airtag_name"] == "Fahrrad"
+    assert body["bike"]["last_report"]["lat"] == 49.87
+    assert body["bike"]["last_report"]["battery_level"] == "medium"
+    assert body["bike"]["last_alert"] is None
+    assert body["bike"]["poll_interval_minutes"] >= 1
+

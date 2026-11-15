@@ -153,9 +153,11 @@ function BackHeader({ title, onBack, status }: { title: string; onBack: () => vo
   )
 }
 
-type Page = 'root' | 'notifications' | 'apple' | 'tracking' | 'places'
+export type SettingsPage = 'root' | 'notifications' | 'apple' | 'tracking' | 'places'
 
 interface Props {
+  page: SettingsPage
+  onPageChange: (page: SettingsPage) => void
   pushStatus: 'idle' | 'active' | 'error'
   pushBusy: boolean
   onEnablePush: () => void
@@ -170,14 +172,11 @@ interface Props {
   onPlaceSeedConsumed?: () => void
   // Forwarded to SettingsPlaces - see its own onRequestExpand comment.
   onRequestExpand?: () => void
-  // Bumped by App.tsx's handleTabChange when the Einstellungen tab button is
-  // clicked while already active - pops this panel's own page stack back to
-  // 'root', mirroring the "tap the active tab to go back" behavior the
-  // Objects/Zeitachse tabs get for free from their own App.tsx-level state.
-  resetSignal?: number
 }
 
 export function SettingsPanel({
+  page,
+  onPageChange,
   pushStatus,
   pushBusy,
   onEnablePush,
@@ -189,9 +188,7 @@ export function SettingsPanel({
   placeSeed = null,
   onPlaceSeedConsumed,
   onRequestExpand,
-  resetSignal,
 }: Props) {
-  const [page, setPage] = useState<Page>('root')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({})
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -200,17 +197,6 @@ export function SettingsPanel({
   useEffect(() => {
     getSettings().then(setSettings)
   }, [])
-
-  useEffect(() => {
-    if (resetSignal !== undefined) setPage('root')
-  }, [resetSignal])
-
-  // A seed arriving means the user just tapped "Ort hier hinzufügen" on the
-  // map (Settings isn't even necessarily open yet) - jump straight past the
-  // root/Orte-list pages into the new place's editor.
-  useEffect(() => {
-    if (placeSeed) setPage('places')
-  }, [placeSeed])
 
   useEffect(() => {
     return () => {
@@ -259,7 +245,7 @@ export function SettingsPanel({
   if (page === 'notifications') {
     return (
       <div className="flex h-full flex-col">
-        <BackHeader title="Benachrichtigungen" onBack={() => setPage('root')} />
+        <BackHeader title="Benachrichtigungen" onBack={() => onPageChange('root')} />
         <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
           <SettingsNotifications
             pushStatus={pushStatus}
@@ -277,7 +263,7 @@ export function SettingsPanel({
   if (page === 'apple') {
     return (
       <div className="flex h-full flex-col">
-        <BackHeader title="Apple-Konten" onBack={() => setPage('root')} />
+        <BackHeader title="Apple-Konten" onBack={() => onPageChange('root')} />
         <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
           <SettingsAppleAccounts />
         </div>
@@ -290,7 +276,7 @@ export function SettingsPanel({
       <div className="flex h-full flex-col">
         <BackHeader
           title="Tracking"
-          onBack={() => setPage('root')}
+          onBack={() => onPageChange('root')}
           status={
             <span
               aria-live="polite"
@@ -314,7 +300,7 @@ export function SettingsPanel({
   if (page === 'places') {
     return (
       <div className="flex h-full flex-col">
-        <BackHeader title="Orte" onBack={() => setPage('root')} />
+        <BackHeader title="Orte" onBack={() => onPageChange('root')} />
         <div className="flex-1 overflow-y-auto pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2">
           <SettingsPlaces
             places={places}
@@ -362,25 +348,25 @@ export function SettingsPanel({
               icon={<BellIcon className="h-5 w-5" />}
               label="Benachrichtigungen"
               trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
-              onClick={() => setPage('notifications')}
+              onClick={() => onPageChange('notifications')}
             />
             <Row
               icon={<PersonIcon className="h-5 w-5" />}
               label="Apple-Konten"
               trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
-              onClick={() => setPage('apple')}
+              onClick={() => onPageChange('apple')}
             />
             <Row
               icon={<GearIcon className="h-5 w-5" />}
               label="Tracking"
               trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
-              onClick={() => setPage('tracking')}
+              onClick={() => onPageChange('tracking')}
             />
             <Row
               icon={<MapPinIcon className="h-5 w-5" />}
               label="Orte"
               trailing={<ChevronRightIcon className="h-4 w-4 text-[var(--text-secondary)]" />}
-              onClick={() => setPage('places')}
+              onClick={() => onPageChange('places')}
             />
           </Section>
         </div>

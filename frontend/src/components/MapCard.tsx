@@ -322,28 +322,26 @@ const addressCache = new Map<string, string | null>()
  * Exported for DeviceMapCard.tsx, which shares this same popup content. */
 export function AddressLine({ lat, lon, skipIfSame }: { lat: number; lon: number; skipIfSame?: string | null }) {
   const key = `${lat},${lon}`
-  const [address, setAddress] = useState<string | null | undefined>(() => addressCache.get(key))
+  const cached = addressCache.get(key)
+  const [fetched, setFetched] = useState<{ key: string; value: string | null } | null>(null)
 
   useEffect(() => {
-    if (addressCache.has(key)) {
-      setAddress(addressCache.get(key))
-      return
-    }
+    if (addressCache.has(key)) return
     let cancelled = false
-    setAddress(undefined)
     getAddress(lat, lon)
       .then((a) => {
         addressCache.set(key, a)
-        if (!cancelled) setAddress(a)
+        if (!cancelled) setFetched({ key, value: a })
       })
       .catch(() => {
-        if (!cancelled) setAddress(null)
+        if (!cancelled) setFetched({ key, value: null })
       })
     return () => {
       cancelled = true
     }
   }, [key, lat, lon])
 
+  const address = cached !== undefined ? cached : fetched?.key === key ? fetched.value : undefined
   if (!address || address === skipIfSame) return null
   return (
     <InfoRow icon={<MapPinIcon className="h-3.5 w-3.5" />}>
