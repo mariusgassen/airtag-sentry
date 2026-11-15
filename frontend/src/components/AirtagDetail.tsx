@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import type { Airtag, ReportStay, Status } from '../api'
 import {
+  airtagExportUrl,
   deleteAirtag,
   deleteAirtagKey,
   renameAirtag,
@@ -22,6 +23,7 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   ClockIcon,
+  DownloadIcon,
   KeyIcon,
   PaletteIcon,
   PencilIcon,
@@ -316,6 +318,32 @@ export function AirtagDetail({
                 </span>
               }
               onClick={onViewTimeline}
+              bordered={false}
+            />
+          </Section>
+
+          <Section>
+            <Row
+              icon={<DownloadIcon className="h-5 w-5" />}
+              label="Verlauf exportieren"
+              trailing={
+                <span className="flex items-center gap-1.5">
+                  <a
+                    href={airtagExportUrl(airtag.id, 'csv')}
+                    download
+                    className="rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:opacity-80"
+                  >
+                    CSV
+                  </a>
+                  <a
+                    href={airtagExportUrl(airtag.id, 'gpx')}
+                    download
+                    className="rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:opacity-80"
+                  >
+                    GPX
+                  </a>
+                </span>
+              }
               bordered={false}
             />
           </Section>

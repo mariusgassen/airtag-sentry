@@ -45,6 +45,7 @@ from airtag_sentry.db import (
     list_owner_devices,
     primary_owner_device_latest_location,
     primary_owner_device_location_near,
+    prune_old_history,
     record_alert,
     record_owner_device_location,
     round_coord,
@@ -499,6 +500,22 @@ def poll_once(cfg: Config) -> bool:
                 finally:
                     close_airtag_account(account)
             finally:
+                retention_days = getattr(settings, "history_retention_days", None)
+                if retention_days:
+                    try:
+                        alerts_del, reports_del, locs_del = prune_old_history(
+                            conn, retention_days
+                        )
+                        if alerts_del or reports_del or locs_del:
+                            logger.info(
+                                "Retention (%d d) pruned %d alert(s), %d report(s), %d owner location(s).",
+                                retention_days,
+                                alerts_del,
+                                reports_del,
+                                locs_del,
+                            )
+                    except Exception:
+                        logger.exception("History retention pruning failed.")
                 if ha_publisher is not None:
                     ha_publisher.close()
     finally:

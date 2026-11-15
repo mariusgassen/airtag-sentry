@@ -992,3 +992,73 @@ def test_record_alert_rejects_row_with_both_sources(conn):
             ),
         )
     conn.rollback()
+
+
+def test_update_settings_persists_history_retention_days(conn):
+    import dataclasses
+
+    from airtag_sentry.db import prune_old_history
+
+    current = get_settings(conn)
+    assert current.history_retention_days is None
+
+    try:
+        updated = update_settings(conn, dataclasses.replace(current, history_retention_days=90))
+        assert updated.history_retention_days == 90
+        assert get_settings(conn).history_retention_days == 90
+
+        # No-op when disabled / None.
+        assert prune_old_history(conn, None) == (0, 0, 0)
+        assert prune_old_history(conn, 0) == (0, 0, 0)
+    finally:
+        update_settings(conn, current)
+
+
+def test_prune_old_history_cleans_reports_locations_and_referencing_alerts(conn):
+    from airtag_sentry.db import fetch_reports, prune_old_history
+
+    now = dt.datetime.now(dt.timezone.utc)
+    old_ts = now - dt.timedelta(days=45)
+    new_ts = now - dt.timedelta(days=5)
+
+    inserted = insert_reports(
+        conn,
+        [
+            Report(id=None, airtag_id="bike", timestamp=old_ts, lat=52.5, lon=13.4, accuracy=5.0, confidence=3),
+            Report(id=None, airtag_id="bike", timestamp=new_ts, lat=52.51, lon=13.41, accuracy=5.0, confidence=3),
+        ],
+    )
+    old_report, recent_report = inserted
+
+    # Alert referencing an old report (must be removed before location_reports
+    # because alerts.report_id has no ON DELETE CASCADE).
+    record_alert(
+        conn,
+        Alert(reason="left_behind", distance_meters=200.0, airtag_id="bike", report_id=old_report.id),
+    )
+    # Alert referencing a recent report whose own alert timestamp is also recent.
+    record_alert(
+        conn,
+        Alert(reason="left_behind", distance_meters=210.0, airtag_id="bike", report_id=recent_report.id),
+    )
+
+    upsert_owner_devices(conn, [{"id": "mac-1", "name": "MacBook", "device_type": "Mac"}], seen_at=now)
+    old_loc = record_owner_device_location(
+        conn, OwnerLocation(id=None, device_id="mac-1", recorded_at=old_ts, lat=52.5, lon=13.4, horizontal_accuracy=5.0)
+    )
+    recent_loc = record_owner_device_location(
+        conn, OwnerLocation(id=None, device_id="mac-1", recorded_at=new_ts, lat=52.52, lon=13.42, horizontal_accuracy=5.0)
+    )
+    record_alert(
+        conn,
+        Alert(reason="autonomous_movement", distance_meters=300.0, owner_device_id="mac-1", owner_location_id=old_loc.id),
+    )
+
+    alerts_del, reports_del, locs_del = prune_old_history(conn, 30)
+
+    assert alerts_del == 2  # both old-report alert and cascaded/matched device alert
+    assert reports_del == 1
+    assert locs_del == 1
+    assert [r.id for r in fetch_reports(conn, "bike")] == [recent_report.id]
+    assert [loc.id for loc in fetch_owner_device_location_history(conn, "mac-1")] == [recent_loc.id]
+

@@ -164,6 +164,29 @@ export function SettingsTracking({ settings, errors, update }: Props) {
           onChange={(v) => update({ history_cluster_radius_meters: v })}
         />
       </Section>
+
+      <p className="mb-2 px-1 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+        Datenspeicherung
+      </p>
+      <Section>
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <span className="flex-1 text-[0.95rem]">Verlauf automatisch löschen nach</span>
+          <select
+            value={settings.history_retention_days ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value
+              update({ history_retention_days: raw ? Number(raw) : null }, { immediate: true })
+            }}
+            className="rounded-lg border border-[var(--divider)] bg-[var(--surface-2)] px-2 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+          >
+            <option value="">Nie (alles behalten)</option>
+            <option value="30">30 Tagen</option>
+            <option value="90">90 Tagen</option>
+            <option value="180">180 Tagen</option>
+            <option value="365">1 Jahr</option>
+          </select>
+        </div>
+      </Section>
     </div>
   )
 }
