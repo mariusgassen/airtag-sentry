@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { deleteMqttSettings, getMqttStatus, setMqttSettings } from '../api'
 import { ChevronRightIcon, HomeAssistantIcon } from './icons'
 import { Row, Section, Switch } from './AirtagDetail'
@@ -15,15 +15,23 @@ export function MqttPanel() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    refreshStatus()
-  }, [])
-
-  async function refreshStatus() {
+  const refreshStatus = useCallback(async () => {
     const s = await getMqttStatus()
     setConnected(s.connected)
     setHost(s.connected ? `${s.host}:${s.port}` : null)
-  }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    getMqttStatus().then((s) => {
+      if (cancelled) return
+      setConnected(s.connected)
+      setHost(s.connected ? `${s.host}:${s.port}` : null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function reset() {
     setHostInput('')

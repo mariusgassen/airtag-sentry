@@ -41,25 +41,20 @@ interface Props {
 
 export function SettingsPlaces({ places, onChanged, seed = null, onSeedConsumed, onRequestExpand }: Props) {
   const [editing, setEditing] = useState<Place | 'new' | null>(null)
-
-  // A seed arriving (from a map popup) always opens straight into a new
-  // place's editor, even if the user was sitting on the plain list.
-  useEffect(() => {
-    if (seed) setEditing('new')
-  }, [seed])
+  const activeEditing = seed ? 'new' : editing
 
   // Covers every way into the editor (a seed, "Ort hinzufügen", or picking
   // an existing place) in one place, rather than repeating the call at each
   // of those three call sites.
   useEffect(() => {
-    if (editing !== null) onRequestExpand?.()
-  }, [editing, onRequestExpand])
+    if (activeEditing !== null) onRequestExpand?.()
+  }, [activeEditing, onRequestExpand])
 
-  if (editing !== null) {
+  if (activeEditing !== null) {
     return (
       <PlaceEditor
-        place={editing === 'new' ? null : editing}
-        seed={editing === 'new' ? seed : null}
+        place={activeEditing === 'new' ? null : activeEditing}
+        seed={activeEditing === 'new' ? seed : null}
         onDone={async () => {
           setEditing(null)
           onSeedConsumed?.()
@@ -116,14 +111,12 @@ function AddressSearch({ onSelect }: { onSelect: (lat: number, lon: number) => v
   const [results, setResults] = useState<AddressSearchResult[]>([])
   const [open, setOpen] = useState(false)
   const debounceRef = useRef<number | null>(null)
+  const trimmed = query.trim()
+  const visibleResults = trimmed.length >= MIN_QUERY_LENGTH ? results : []
 
   useEffect(() => {
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
-    const trimmed = query.trim()
-    if (trimmed.length < MIN_QUERY_LENGTH) {
-      setResults([])
-      return
-    }
+    if (trimmed.length < MIN_QUERY_LENGTH) return
     debounceRef.current = window.setTimeout(() => {
       searchAddress(trimmed)
         .then(setResults)
@@ -132,23 +125,25 @@ function AddressSearch({ onSelect }: { onSelect: (lat: number, lon: number) => v
     return () => {
       if (debounceRef.current !== null) window.clearTimeout(debounceRef.current)
     }
-  }, [query])
+  }, [trimmed])
 
   return (
     <div className="absolute left-2 right-12 top-2 z-[500]">
       <input
         value={query}
         onChange={(e) => {
-          setQuery(e.target.value)
+          const next = e.target.value
+          setQuery(next)
+          if (next.trim().length < MIN_QUERY_LENGTH) setResults([])
           setOpen(true)
         }}
         onFocus={() => setOpen(true)}
         placeholder="Adresse suchen…"
         className="w-full rounded-lg border border-[var(--divider)] bg-[var(--surface)] px-3 py-2 text-sm shadow outline-none focus:border-[var(--accent)]"
       />
-      {open && results.length > 0 && (
+      {open && visibleResults.length > 0 && (
         <ul className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-[var(--divider)] bg-[var(--surface)] shadow-lg">
-          {results.map((r) => (
+          {visibleResults.map((r) => (
             <li key={`${r.lat},${r.lon}`}>
               <button
                 type="button"

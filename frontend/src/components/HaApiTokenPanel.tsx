@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { generateHaToken, getHaTokenStatus, revokeHaToken } from '../api'
 import { HomeAssistantIcon } from './icons'
 import { Row, Section } from './AirtagDetail'
@@ -12,14 +12,20 @@ export function HaApiTokenPanel() {
   const [newToken, setNewToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    refreshStatus()
-  }, [])
-
-  async function refreshStatus() {
+  const refreshStatus = useCallback(async () => {
     const s = await getHaTokenStatus()
     setConfigured(s.configured)
-  }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    getHaTokenStatus().then((s) => {
+      if (!cancelled) setConfigured(s.configured)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   async function handleGenerate() {
     if (configured && !confirm('Neuen Token erzeugen? Der bisherige Token funktioniert danach nicht mehr.')) {
