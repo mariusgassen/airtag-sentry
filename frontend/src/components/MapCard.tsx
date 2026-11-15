@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import L from 'leaflet'
 import { DomEvent } from 'leaflet'
-import 'leaflet.heat'
+import { HeatLayer } from 'leaflet.heat'
 import {
   Circle,
   CircleMarker,
@@ -553,9 +553,11 @@ export function HeatmapLayer<T extends { lat: number; lon: number; count: number
   useEffect(() => {
     if (buttonRef.current) buttonRef.current.style.background = visible ? 'var(--accent)' : ''
     if (!visible) return
-    const layer = L.heatLayer(
-      points.map((p) => [p.lat, p.lon, p.count]),
-      { radius: 28, blur: 22, maxZoom: 17 },
+    const layer = (
+      new HeatLayer(
+        points.map((p) => [p.lat, p.lon, p.count]),
+        { radius: 28, blur: 22, maxZoom: 17 },
+      ) as unknown as L.Layer
     ).addTo(map)
     return () => {
       layer.remove()

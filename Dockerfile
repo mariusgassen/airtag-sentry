@@ -9,6 +9,7 @@ COPY frontend/ ./
 RUN npm run build
 
 
+# Stay on 3.14-slim until upstream `findmy` lifts its `<3.15` Python cap.
 FROM python:3.14-slim
 
 WORKDIR /app

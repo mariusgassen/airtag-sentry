@@ -103,6 +103,13 @@ This prompts for your macOS keychain password/Touch ID and writes one
 and check its `"name"` field to find your AirTag, then upload it directly
 in that AirTag's detail view in the dashboard.
 
+> **macOS 26 (Tahoe) note:** `python -m findmy decrypt` fails on macOS 26
+> because `BeaconStoreKey` is guarded by an Apple-only keychain entitlement
+> (`com.apple.icloud.searchpartyuseragent`). See
+> [`FindMy.py#260`](https://github.com/malmeloo/FindMy.py/pull/260) and
+> [`stek29/export-findmy`](https://github.com/stek29/export-findmy) for the
+> iCloud Keychain escrow export workaround.
+
 ### 3. Start it up
 
 ```bash
@@ -118,15 +125,18 @@ container access needed to reconnect. Then add each AirTag's key from its
 detail view. A tag without a key yet is simply skipped each poll (logged,
 not fatal) until you add one.
 
-#### Troubleshooting: login fails with `GSA request: 503`
+#### Troubleshooting: login fails with `GSA request: 503`, `-80045`, or `401` on report fetch
 
-If connecting your Apple ID keeps failing 2FA submission with
-`findmy.errors.UnhandledProtocolError: Error response for GSA request: 503`
-(a raw rejection from Apple's own GrandSlam-auth endpoint), it's Apple's
-anti-automation defenses rejecting the login handshake, not a bug in this
-app - see `tasks/roadmap.md` #12. As a fallback, generate the session on a
-different machine (your own laptop is fine) and upload it instead of
-retrying the live login:
+If connecting your Apple ID fails with
+`findmy.errors.UnhandledProtocolError: Error response for GSA request: 503`,
+GSA `-80045`, or logs in without `searchPartyToken` (causing `401` when
+fetching reports, see [`FindMy.py#278`](https://github.com/malmeloo/FindMy.py/issues/278)
+and [`anisette-v3-server#61`](https://github.com/Dadoum/anisette-v3-server/issues/61)),
+Apple's auth/mobileme endpoints are rejecting or restricting the non-macOS
+Anisette identity (upstream macOS ADI emulation is tracked in
+[`FindMy.py#279`](https://github.com/malmeloo/FindMy.py/pull/279)). As a
+fallback, generate the session on a different machine (ideally a real Mac)
+and upload it instead of using the live login form:
 
 ```bash
 pip install findmy
@@ -158,7 +168,7 @@ network, which mostly only produces reports for a device that's off, dead, or
 in airplane mode - not useful for tracking a phone that's normally on and
 connected. Instead, this feature uses Apple's separate, classic **Find My
 iPhone web service** (the same one behind `icloud.com/find`) via the
-[`pyicloud`](https://github.com/picklepete/pyicloud) library, which gives a
+[`pyicloud`](https://github.com/timlaing/pyicloud) library, which gives a
 near-real-time location for your own signed-in devices. This is a second,
 independent Apple session from the AirTag one above - its own login, its own
 2FA, its own persisted session - and it's entirely optional.
