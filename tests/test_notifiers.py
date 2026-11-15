@@ -1,7 +1,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from pywebpush import WebPushException
 
 from airtag_sentry.db import MqttCredentials, PushSubscription

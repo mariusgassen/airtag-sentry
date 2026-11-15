@@ -60,6 +60,7 @@ def required_env(postgres_env, monkeypatch):
         "ANISETTE_REMOTE_URL",
         "WEB_HOST",
         "WEB_PORT",
+        "FORWARDED_ALLOW_IPS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -73,15 +74,18 @@ def test_load_config_defaults(required_env):
     assert cfg.apple.anisette.remote_url is None
     assert cfg.web.host == "0.0.0.0"
     assert cfg.web.port == 8000
+    assert cfg.web.forwarded_allow_ips == "*"
 
 
 def test_load_config_honors_overrides(required_env, monkeypatch):
     monkeypatch.setenv("ANISETTE_MODE", "remote")
     monkeypatch.setenv("ANISETTE_REMOTE_URL", "http://anisette:6969")
     monkeypatch.setenv("WEB_PORT", "9000")
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "10.0.0.1,172.16.0.0/12")
 
     cfg = load_config()
 
     assert cfg.apple.anisette.mode == "remote"
     assert cfg.apple.anisette.remote_url == "http://anisette:6969"
     assert cfg.web.port == 9000
+    assert cfg.web.forwarded_allow_ips == "10.0.0.1,172.16.0.0/12"

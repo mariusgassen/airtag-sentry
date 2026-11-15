@@ -17,7 +17,6 @@ be what's tripping Apple's abuse detection. See tasks/roadmap.md #12.
 from __future__ import annotations
 
 import getpass
-import json
 
 from findmy import (
     AppleAccount,

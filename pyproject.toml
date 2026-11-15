@@ -40,6 +40,7 @@ dev = [
     "pytest-mock>=3.17.0",
     # Used by FastAPI/Starlette TestClient in tests.
     "httpx>=0.28.1",
+    "ruff>=0.11.0",
 ]
 
 [build-system]
@@ -54,3 +55,14 @@ include = ["airtag_sentry*"]
 # with no dashboard assets at all - only `pip install -e .` happens to work,
 # since it just adds the source tree to sys.path instead of repackaging it.
 "airtag_sentry.web" = ["static/**/*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Never edit already-shipped migrations (CLAUDE.md); leave any legacy unused imports untouched.
+"alembic/versions/*" = ["F401"]

@@ -288,6 +288,29 @@ def test_poll_now_route_surfaces_a_poll_failure(client, monkeypatch):
     assert "Apple session expired" in resp.json()["detail"]
 
 
+def test_poll_now_route_sanitizes_credentials_and_tokens_in_error_detail(client, monkeypatch):
+    _login(client, monkeypatch)
+
+    def _boom(_cfg):
+        raise RuntimeError(
+            "POST https://user:secret@proxy.internal/bot12345:AASECRET/sendMessage "
+            "Authorization: Bearer tok_123 failed\nTraceback line 2"
+        )
+
+    monkeypatch.setattr(app_module.tracker, "poll_once", _boom)
+
+    resp = client.post("/api/poll-now")
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "secret" not in detail
+    assert "AASECRET" not in detail
+    assert "tok_123" not in detail
+    assert "Traceback line 2" not in detail
+    assert "://***@proxy.internal/bot***" in detail
+    assert "Bearer ***" in detail
+
+
 def test_notifications_test_route_requires_a_session(client):
     resp = client.post("/api/notifications/test")
     assert resp.status_code == 401
