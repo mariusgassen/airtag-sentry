@@ -28,6 +28,14 @@ updates:
       docker-images:
         patterns:
           - "*"
+    ignore:
+      # findmy>=0.10.2 sets Requires-Python >=3.10,<3.15, blocking Python 3.15 builds.
+      - dependency-name: "python"
+        versions: [">= 3.15"]
+      # Postgres 18 moved PGDATA to /var/lib/postgresql/18/docker and breaks
+      # upgrades of existing 17-alpine volumes without manual migration.
+      - dependency-name: "postgres"
+        versions: [">= 18"]
 
   - package-ecosystem: github-actions
     directory: /
