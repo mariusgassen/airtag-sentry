@@ -254,3 +254,15 @@ and the escrow/passcode step either goes away or is confirmed unavoidable
 for a single-user single-device setup (session inheritance might imply the
 requesting session itself already counts as a "trusted device," avoiding
 the second-device passcode entirely - unconfirmed either way).
+
+**Nov 2026 upstream status:** `malmeloo/findmy-export` remains unchanged
+since May 2026 and `malmeloo`'s 5 `OpenBubbles/rustpush` PRs (`#22`–`#26`)
+are still open. Meanwhile, [`stek29/export-findmy`](https://github.com/stek29/export-findmy)
+added direct `FindMy.py`-compatible JSON output, non-hardcoded escrow bottle
+passwords, SMS 2FA, and bottle deletion (plus open PR `#1` for macOS 26,
+where `python -m findmy decrypt` broke; see `FindMy.py#260`). The escrow
+passcode requirement remains, and since Oct 2026 Apple also requires a
+macOS/iOS Anisette identity for `searchPartyToken` (`FindMy.py#278`,
+`anisette-v3-server#61`; macOS CoreADI emulation work is in `FindMy.py#279` /
+`Anisette.py#6` / `sacca97/os-findmy-e`).
+
