@@ -359,7 +359,7 @@ def test_evaluate_device_away_alerts_noop_without_primary_device(monkeypatch, co
     set_owner_device_away_alert_enabled(conn, "laptop", True)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     tracker_module._evaluate_device_away_alerts(object(), conn, [], _settings())
 
@@ -373,7 +373,7 @@ def test_evaluate_device_away_alerts_skips_device_not_opted_in(monkeypatch, conn
     _setup_primary_and_device(conn, away_alert_enabled=False)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     now = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
     _record(conn, "primary", now, 52.5, 13.4)
@@ -391,7 +391,7 @@ def test_evaluate_device_away_alerts_skips_primary_device_itself(monkeypatch, co
     set_owner_device_away_alert_enabled(conn, "primary", True)  # shouldn't matter - primary is never evaluated
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     now = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
     _record(conn, "primary", now, 52.5, 13.4)
@@ -410,7 +410,7 @@ def test_evaluate_device_away_alerts_skips_first_ever_reading_by_default(monkeyp
     _setup_primary_and_device(conn)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     now = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
     _record(conn, "primary", now, 52.5, 13.4)
@@ -429,7 +429,7 @@ def test_evaluate_device_away_alerts_still_records_when_notify_setting_off(monke
     _setup_primary_and_device(conn)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
@@ -458,7 +458,7 @@ def test_evaluate_device_away_alerts_fires_on_new_away_transition(monkeypatch, c
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
@@ -495,7 +495,7 @@ def test_evaluate_device_away_alerts_classifies_left_behind_when_device_is_stati
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
@@ -525,7 +525,7 @@ def test_evaluate_device_away_alerts_suppresses_left_behind_at_a_named_place(mon
     create_named_place(conn, "Zuhause", 52.5, 13.4, 50.0)
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
@@ -553,7 +553,7 @@ def test_evaluate_device_away_alerts_does_not_suppress_autonomous_movement_at_a_
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)
@@ -580,7 +580,7 @@ def test_evaluate_device_away_alerts_does_not_repeat_while_still_away(monkeypatc
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 8, 30, tzinfo=dt.timezone.utc)
@@ -612,7 +612,7 @@ def test_evaluate_device_away_alerts_suppresses_notification_when_already_reunit
     monkeypatch.setattr(tracker_module, "fetch_owner_device_locations", _fail_fetch)
     monkeypatch.setattr(tracker_module, "get_or_fetch_geocode", lambda _conn, lat, lon: GeocodeResult(address=None, poi_name=None))
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message, **_kw: notified.append((title, message)))
 
     t_home = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t_office = dt.datetime(2026, 1, 1, 8, 15, tzinfo=dt.timezone.utc)
@@ -811,7 +811,9 @@ def test_evaluate_device_away_alerts_uses_cached_geocodes(monkeypatch, conn):
         lambda lat, lon: (_ for _ in ()).throw(AssertionError("should hit geocoded_points cache")),
     )
     notified = []
-    monkeypatch.setattr(tracker_module, "notify_all", lambda notifiers, title, message: notified.append((title, message)))
+    monkeypatch.setattr(
+        tracker_module, "notify_all", lambda notifiers, title, message, **_kwargs: notified.append((title, message))
+    )
 
     t0 = dt.datetime(2026, 1, 1, 8, 0, tzinfo=dt.timezone.utc)
     t1 = dt.datetime(2026, 1, 1, 9, 0, tzinfo=dt.timezone.utc)

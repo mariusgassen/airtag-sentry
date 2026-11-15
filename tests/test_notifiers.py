@@ -178,3 +178,52 @@ def test_ha_publisher_close_still_stops_loop_when_wait_or_disconnect_fails():
             publisher.close()
 
     mock_client.loop_stop.assert_called_once()
+
+
+@patch("airtag_sentry.notifiers.webpush.webpush")
+@patch("airtag_sentry.notifiers.webpush.list_push_subscriptions")
+@patch("airtag_sentry.notifiers.webpush.get_conn")
+def test_webpush_notifier_embeds_optional_data_payload(mock_get_conn, mock_list_subs, mock_webpush):
+    mock_get_conn.return_value.__enter__.return_value = MagicMock()
+    mock_list_subs.return_value = [
+        PushSubscription(endpoint="https://push.example/a", p256dh="p1", auth="a1"),
+    ]
+    cfg = WebPushConfig(public_key="pub", private_key="priv", subject="mailto:me@example.com")
+
+    WebPushNotifier("postgresql://unused", cfg).send(
+        "Titel", "Nachricht", data={"object_type": "airtag", "object_id": "bike"}
+    )
+
+    sent_payload = json.loads(mock_webpush.call_args.kwargs["data"])
+    assert sent_payload == {
+        "title": "Titel",
+        "message": "Nachricht",
+        "data": {"object_type": "airtag", "object_id": "bike"},
+    }
+
+
+def test_notify_all_forwards_data_only_to_supporting_notifiers():
+    from airtag_sentry.notifiers import notify_all
+
+    received_plain = []
+    received_data = []
+
+    class PlainNotifier:
+        def send(self, title: str, message: str) -> None:
+            received_plain.append((title, message))
+
+    class DataNotifier:
+        supports_data = True
+
+        def send(self, title: str, message: str, *, data=None) -> None:
+            received_data.append((title, message, data))
+
+    notify_all(
+        [PlainNotifier(), DataNotifier()],
+        "Alarm",
+        "Bewegung",
+        data={"object_type": "device", "object_id": "d1"},
+    )
+
+    assert received_plain == [("Alarm", "Bewegung")]
+    assert received_data == [("Alarm", "Bewegung", {"object_type": "device", "object_id": "d1"})]

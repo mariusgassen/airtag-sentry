@@ -454,6 +454,7 @@ def test_owner_devices_route_reads_persisted_devices_without_a_live_apple_call(c
             apple_id="owner@example.com", encrypted_password="enc", last_sync_at=last_sync, last_sync_error=None
         ),
     )
+    monkeypatch.setattr(app_module, "latest_alerts_by_owner_device", lambda _conn: {})
 
     resp = client.get("/api/owner-devices")
 

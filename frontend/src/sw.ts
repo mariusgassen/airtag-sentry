@@ -26,6 +26,10 @@ self.addEventListener('activate', (event: ExtendableEvent) => {
 interface PushPayload {
   title: string
   message: string
+  data?: {
+    object_type?: 'airtag' | 'device'
+    object_id?: string
+  }
 }
 
 self.addEventListener('push', (event: PushEvent) => {
@@ -42,18 +46,33 @@ self.addEventListener('push', (event: PushEvent) => {
       body: payload.message,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
+      data: payload.data,
     }),
   )
 })
 
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close()
+  const data = event.notification.data as PushPayload['data'] | undefined
+  const objectType = data?.object_type
+  const objectId = data?.object_id
+  const targetUrl =
+    objectType && objectId
+      ? `/?type=${encodeURIComponent(objectType)}&id=${encodeURIComponent(objectId)}`
+      : '/'
+
   event.waitUntil(
-    self.clients.matchAll({ type: 'window' }).then((clientList) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if ('focus' in client) return (client as WindowClient).focus()
+        if ('focus' in client) {
+          const win = client as WindowClient
+          if (objectType && objectId) {
+            win.postMessage({ type: 'SELECT_OBJECT', object_type: objectType, object_id: objectId })
+          }
+          return win.focus()
+        }
       }
-      if (self.clients.openWindow) return self.clients.openWindow('/')
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl)
     }),
   )
 })

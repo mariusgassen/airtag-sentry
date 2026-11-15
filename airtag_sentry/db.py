@@ -77,6 +77,24 @@ class Alert:
 
 
 @dataclasses.dataclass(frozen=True)
+class AlertHistoryItem:
+    id: int
+    timestamp: dt.datetime
+    reason: str
+    distance_meters: float
+    object_type: str  # "airtag" | "device"
+    object_id: str
+    object_name: str
+    object_icon: str | None
+    object_color: str | None
+    object_device_type: str | None
+    lat: float | None
+    lon: float | None
+    anchor_id: int | None
+    anchor_recorded_at: dt.datetime | None
+
+
+@dataclasses.dataclass(frozen=True)
 class StoredKey:
     airtag_id: str
     key_type: str  # "accessory_json" | "private_key_b64"
@@ -543,6 +561,82 @@ def latest_alerts_by_airtag(conn: psycopg.Connection) -> dict[str, tuple[str, dt
             'FROM alerts WHERE airtag_id IS NOT NULL ORDER BY airtag_id, "timestamp" DESC'
         )
         return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+
+
+def latest_alerts_by_owner_device(conn: psycopg.Connection) -> dict[str, tuple[str, dt.datetime]]:
+    """Single-query latest alert (reason, timestamp) per owner device, mirroring
+    latest_alert for DeviceDetail/AirtagDetail parity."""
+    with conn.cursor() as cur:
+        cur.execute(
+            'SELECT DISTINCT ON (owner_device_id) owner_device_id, reason, "timestamp" '
+            'FROM alerts WHERE owner_device_id IS NOT NULL ORDER BY owner_device_id, "timestamp" DESC'
+        )
+        return {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+
+
+def list_alerts(
+    conn: psycopg.Connection,
+    *,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    since: dt.datetime | None = None,
+    limit: int = 100,
+) -> list[AlertHistoryItem]:
+    """Chronological (newest-first) alert feed across AirTags and enabled owner devices."""
+    clauses = [
+        "((a.airtag_id IS NOT NULL AND at.enabled) OR (a.owner_device_id IS NOT NULL AND od.enabled))"
+    ]
+    params: list[object] = []
+    if object_type == "airtag":
+        clauses.append("a.airtag_id IS NOT NULL")
+        if object_id is not None:
+            clauses.append("a.airtag_id = %s")
+            params.append(object_id)
+    elif object_type == "device":
+        clauses.append("a.owner_device_id IS NOT NULL")
+        if object_id is not None:
+            clauses.append("a.owner_device_id = %s")
+            params.append(object_id)
+    elif object_id is not None:
+        clauses.append("(a.airtag_id = %s OR a.owner_device_id = %s)")
+        params.extend([object_id, object_id])
+
+    if since is not None:
+        clauses.append('a."timestamp" >= %s')
+        params.append(since)
+
+    params.append(limit)
+    where_sql = " AND ".join(clauses)
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT
+                a.id,
+                a."timestamp",
+                a.reason,
+                a.distance_meters,
+                CASE WHEN a.airtag_id IS NOT NULL THEN 'airtag' ELSE 'device' END,
+                COALESCE(a.airtag_id, a.owner_device_id),
+                COALESCE(at.name, od.display_name, od.name, a.airtag_id, a.owner_device_id),
+                COALESCE(at.icon, od.icon),
+                COALESCE(at.color, od.color),
+                od.device_type,
+                COALESCE(lr.lat, odl.lat),
+                COALESCE(lr.lon, odl.lon),
+                a.report_id,
+                odl.recorded_at
+            FROM alerts a
+            LEFT JOIN airtags at ON a.airtag_id = at.id
+            LEFT JOIN owner_devices od ON a.owner_device_id = od.id
+            LEFT JOIN location_reports lr ON a.report_id = lr.id
+            LEFT JOIN owner_device_locations odl ON a.owner_location_id = odl.id
+            WHERE {where_sql}
+            ORDER BY a."timestamp" DESC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [AlertHistoryItem(*row) for row in cur.fetchall()]
 
 
 def add_push_subscription(conn: psycopg.Connection, sub: PushSubscription) -> None:

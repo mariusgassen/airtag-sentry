@@ -98,6 +98,7 @@ export interface OwnerDevice {
   // Apple stopped listing it (e.g. removed from iCloud/Find My) - treat a
   // missing value the same as true (unknown yet, not flagged).
   on_account?: boolean
+  last_alert?: { reason: string; timestamp: string } | null
 }
 
 export interface OwnerLocation {
@@ -182,6 +183,28 @@ export interface Timeline {
 export async function getTimeline(days?: number | null): Promise<Timeline> {
   const query = days != null ? `?days=${days}` : ''
   return (await apiFetch(`/api/timeline${query}`)).json()
+}
+
+export interface AlertEntry {
+  id: number
+  timestamp: string
+  reason: string
+  distance_meters: number
+  object_type: 'airtag' | 'device'
+  object_id: string
+  object_name: string
+  object_icon: string | null
+  object_color: string | null
+  object_device_type: string | null
+  lat: number | null
+  lon: number | null
+  anchor_id: number | null
+  anchor_recorded_at: string | null
+}
+
+export async function getAlerts(days?: number | null): Promise<{ alerts: AlertEntry[] }> {
+  const query = days != null ? `?days=${days}` : ''
+  return (await apiFetch(`/api/alerts${query}`)).json()
 }
 
 export interface AppleTwoFactorMethod {

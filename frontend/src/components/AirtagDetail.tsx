@@ -44,6 +44,7 @@ interface Props {
   // handleTimelineFilterChange) - replaces what used to be an inline,
   // collapsible history list duplicating that tab's own feed.
   onViewTimeline: () => void
+  onViewAlerts?: () => void
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -176,6 +177,7 @@ export function AirtagDetail({
   onChanged,
   onDeleted,
   onViewTimeline,
+  onViewAlerts,
   stepOlder,
   stepNewer,
   stepPosition,
@@ -236,11 +238,20 @@ export function AirtagDetail({
               Batterie: {formatAirtagBattery(status.last_report.battery_level)}
             </p>
           )}
-          {status?.last_alert && (
-            <p className="mt-1 text-sm text-[var(--destructive)]">
-              Alarm: {formatAlertReason(status.last_alert.reason)} · {formatRelative(status.last_alert.timestamp)}
-            </p>
-          )}
+          {status?.last_alert &&
+            (onViewAlerts ? (
+              <button
+                type="button"
+                onClick={onViewAlerts}
+                className="mt-1 text-sm text-[var(--destructive)] hover:underline"
+              >
+                Alarm: {formatAlertReason(status.last_alert.reason)} · {formatRelative(status.last_alert.timestamp)}
+              </button>
+            ) : (
+              <p className="mt-1 text-sm text-[var(--destructive)]">
+                Alarm: {formatAlertReason(status.last_alert.reason)} · {formatRelative(status.last_alert.timestamp)}
+              </p>
+            ))}
         </div>
 
         <div className="px-3">

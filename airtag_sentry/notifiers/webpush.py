@@ -12,12 +12,17 @@ logger = logging.getLogger(__name__)
 
 
 class WebPushNotifier:
+    supports_data = True
+
     def __init__(self, database_url: str, cfg: WebPushConfig) -> None:
         self._database_url = database_url
         self._cfg = cfg
 
-    def send(self, title: str, message: str) -> None:
-        payload = json.dumps({"title": title, "message": message})
+    def send(self, title: str, message: str, *, data: dict[str, object] | None = None) -> None:
+        payload_obj: dict[str, object] = {"title": title, "message": message}
+        if data:
+            payload_obj["data"] = data
+        payload = json.dumps(payload_obj)
         with get_conn(self._database_url) as conn:
             subscriptions = list_push_subscriptions(conn)
             if not subscriptions:

@@ -1,28 +1,36 @@
-import type { Airtag, OwnerDevice, TimelineVisit } from '../api'
+import type { Airtag, AlertEntry, OwnerDevice, TimelineVisit } from '../api'
 import { airtagColor } from '../airtagColor'
-import { capitalize, deviceLabel, formatClusterRange, formatDayHeading, formatRelative } from '../format'
+import {
+  capitalize,
+  deviceLabel,
+  formatAlertReason,
+  formatClusterRange,
+  formatDayHeading,
+  formatRelative,
+} from '../format'
 import { mapsUrl } from '../maps'
 import { staticMapTileUrl } from '../staticMapTile'
 import { AirtagAvatar } from './AirtagAvatar'
 import { HistoryStepper } from './AirtagDetail'
 import { DeviceAvatar } from './DeviceAvatar'
-import { ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
+import { BellIcon, ClockIcon, LocationArrowIcon, MapPinIcon } from './icons'
 
 /** Which single object (if any) the feed/map pane are narrowed to - see
  * App.tsx's handleTimelineFilterChange. */
 export type TimelineFilter = { type: 'airtag' | 'device'; id: string } | null
+export type TimelineMode = 'visits' | 'alarms'
 
-/** Groups newest-first visits (already sorted that way by GET /api/timeline)
+/** Groups newest-first items (already sorted that way by backend)
  * into calendar-day buckets, preserving order within and across days. */
-function groupByDay(visits: TimelineVisit[]): { heading: string; visits: TimelineVisit[] }[] {
-  const groups: { heading: string; visits: TimelineVisit[] }[] = []
-  for (const visit of visits) {
-    const heading = formatDayHeading(visit.start)
+function groupByDay<T>(items: T[], getTimestamp: (item: T) => string): { heading: string; items: T[] }[] {
+  const groups: { heading: string; items: T[] }[] = []
+  for (const item of items) {
+    const heading = formatDayHeading(getTimestamp(item))
     const current = groups[groups.length - 1]
     if (current?.heading === heading) {
-      current.visits.push(visit)
+      current.items.push(item)
     } else {
-      groups.push({ heading, visits: [visit] })
+      groups.push({ heading, items: [item] })
     }
   }
   return groups
@@ -128,6 +136,56 @@ function VisitRow({ visit, onSelect }: { visit: TimelineVisit; onSelect: () => v
   )
 }
 
+function AlertRow({ alert, onSelect }: { alert: AlertEntry; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={new Date(alert.timestamp).toLocaleString()}
+      className="flex w-full items-center gap-3 border-t border-[var(--divider)] px-4 py-2.5 text-left first:border-t-0 hover:bg-white/5"
+    >
+      {alert.object_type === 'airtag' ? (
+        <AirtagAvatar airtag={{ id: alert.object_id, icon: alert.object_icon, color: alert.object_color }} size={40} />
+      ) : (
+        <DeviceAvatar
+          device={{
+            id: alert.object_id,
+            icon: alert.object_icon,
+            color: alert.object_color,
+            device_type: alert.object_device_type ?? '',
+            name: alert.object_name,
+          }}
+          size={40}
+        />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <BellIcon className="h-3.5 w-3.5 shrink-0 text-[var(--destructive)]" />
+          <span className="block truncate text-[0.95rem] font-medium text-[var(--destructive)]">
+            {formatAlertReason(alert.reason)}
+          </span>
+          <span className="shrink-0 text-[0.8rem] text-[var(--text-secondary)]">· {alert.object_name}</span>
+        </span>
+        <span className="mt-0.5 flex items-center gap-2 text-[0.8rem] text-[var(--text-secondary)]">
+          <span className="flex items-center gap-1">
+            <ClockIcon className="h-3 w-3 shrink-0" />
+            {capitalize(formatRelative(alert.timestamp))}
+          </span>
+          <span>· {Math.round(alert.distance_meters)} m</span>
+        </span>
+      </span>
+      {alert.lat != null && alert.lon != null && (
+        <img
+          src={staticMapTileUrl(alert.lat, alert.lon)}
+          alt=""
+          loading="lazy"
+          className="h-12 w-12 shrink-0 rounded-lg object-cover"
+        />
+      )}
+    </button>
+  )
+}
+
 function FilterChip({
   label,
   color,
@@ -172,21 +230,19 @@ const RANGE_OPTIONS: { label: string; value: TimelineRange }[] = [
 ]
 
 /** Aggregate, cross-object "Google Timeline" style feed - every AirTag's and
- * every tracked owner device's stays (see GET /api/timeline), grouped by
- * calendar day and shown newest-first, each stop's place info (resolved
- * label + raw address) shown alongside it. Deliberately a plain list rather
- * than embedding its own map: a visit here already carries its object's
- * identity, and picking one (or a filter chip) hands off to that object's
- * own MapCard/DeviceMapCard in App.tsx's map pane (see onSelectVisit/
- * onFilterChange) rather than duplicating that map's trail/selection logic
- * in a second place. */
+ * every tracked owner device's stays (see GET /api/timeline) and alert log
+ * (GET /api/alerts), grouped by calendar day and shown newest-first. */
 export function TimelinePage({
   visits,
+  alerts,
+  mode,
+  onModeChange,
   airtags,
   devices,
   filter,
   onFilterChange,
   onSelectVisit,
+  onSelectAlert,
   rangeDays,
   onRangeChange,
   stepOlder,
@@ -194,39 +250,67 @@ export function TimelinePage({
   stepPosition,
 }: {
   visits: TimelineVisit[]
+  alerts: AlertEntry[]
+  mode: TimelineMode
+  onModeChange: (mode: TimelineMode) => void
   airtags: Airtag[]
   devices: OwnerDevice[]
   filter: TimelineFilter
   onFilterChange: (filter: TimelineFilter) => void
   onSelectVisit: (visit: TimelineVisit) => void
+  onSelectAlert: (alert: AlertEntry) => void
   // A numeric/null range is already applied server-side (see App.tsx's
-  // refreshTimeline) - `visits` contains that range's data already. 'today'
-  // is applied here instead (see TimelineRange's comment), on top of
-  // whatever range was fetched (always "all" when 'today' is selected - see
-  // App.tsx).
+  // refreshTimeline) - `visits`/`alerts` contain that range's data already.
+  // 'today' is applied here instead (see TimelineRange's comment).
   rangeDays: TimelineRange
   onRangeChange: (range: TimelineRange) => void
   // Desktop-sidebar stepper (HistoryStepper, see AirtagDetail.tsx) for
-  // whichever object `filter` currently narrows the feed to - App.tsx
-  // already computes these for the mobile title bar's own stepper
-  // (md:hidden there), but that's the only place they used to render,
-  // leaving the desktop layout - which has no title bar at all - with no
-  // way to step through a filtered object's history. Mirrors
-  // AirtagDetail/DeviceDetail's own header exactly.
+  // whichever object `filter` currently narrows the feed to.
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
 }) {
-  const filtered = filter ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id) : visits
-  const rangeFiltered =
-    rangeDays === 'today' ? filtered.filter((v) => formatDayHeading(v.start) === 'Heute') : filtered
-  const groups = groupByDay(rangeFiltered)
+  const filteredVisits = filter
+    ? visits.filter((v) => v.object_type === filter.type && v.object_id === filter.id)
+    : visits
+  const rangeFilteredVisits =
+    rangeDays === 'today' ? filteredVisits.filter((v) => formatDayHeading(v.start) === 'Heute') : filteredVisits
+  const visitGroups = groupByDay(rangeFilteredVisits, (v) => v.start)
+
+  const filteredAlerts = filter
+    ? alerts.filter((a) => a.object_type === filter.type && a.object_id === filter.id)
+    : alerts
+  const rangeFilteredAlerts =
+    rangeDays === 'today' ? filteredAlerts.filter((a) => formatDayHeading(a.timestamp) === 'Heute') : filteredAlerts
+  const alertGroups = groupByDay(rangeFilteredAlerts, (a) => a.timestamp)
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 pb-2 pt-[0.9rem]">
+      <div className="flex items-center justify-between gap-2 px-4 pb-2 pt-[0.9rem]">
         <h1 className="text-[1.7rem] font-bold tracking-tight">Zeitachse</h1>
         <HistoryStepper stepOlder={stepOlder} stepNewer={stepNewer} stepPosition={stepPosition} />
+      </div>
+      <div className="mb-2 px-4">
+        <div className="inline-flex rounded-lg bg-[var(--surface-2)] p-0.5">
+          <button
+            type="button"
+            onClick={() => onModeChange('visits')}
+            className={`rounded-md px-3 py-1 text-[0.8rem] font-medium ${
+              mode === 'visits' ? 'bg-[var(--surface)] text-[var(--text)]' : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            Aufenthalte
+          </button>
+          <button
+            type="button"
+            onClick={() => onModeChange('alarms')}
+            className={`rounded-md px-3 py-1 text-[0.8rem] font-medium ${
+              mode === 'alarms' ? 'bg-[var(--surface)] text-[var(--text)]' : 'text-[var(--text-secondary)]'
+            }`}
+          >
+            Alarme{rangeFilteredAlerts.length > 0 ? ` (${rangeFilteredAlerts.length})` : ''}
+          </button>
+        </div>
       </div>
       {(airtags.length > 0 || devices.length > 0) && (
         <div className="mb-1 flex gap-2 overflow-x-auto px-4 pb-2">
@@ -234,8 +318,7 @@ export function TimelinePage({
           {/* Devices before AirTags, matching ObjectsList.tsx's own group
               order (Geräte, then AirTags) - both already read the same
               backend-ordered `devices`/`airtags` arrays (see CLAUDE.md's
-              AirTag/device parity section), so this only needed the section
-              order swapped to actually match. */}
+              AirTag/device parity section). */}
           {devices.map((d) => (
             <FilterChip
               key={d.id}
@@ -267,23 +350,42 @@ export function TimelinePage({
         ))}
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-        {groups.length === 0 ? (
+        {mode === 'visits' ? (
+          visitGroups.length === 0 ? (
+            <div className="mx-1 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
+              {filter || rangeDays ? 'Keine Standortverläufe für diese Auswahl.' : 'Noch keine Standortverläufe vorhanden.'}
+            </div>
+          ) : (
+            visitGroups.map((group) => (
+              <div key={group.heading} className="mb-4">
+                <p className="mb-2 px-2 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+                  {group.heading}
+                </p>
+                <div className="overflow-hidden rounded-2xl bg-[var(--surface)]">
+                  {group.items.map((visit) => (
+                    <VisitRow
+                      key={`${visit.object_type}-${visit.object_id}-${visit.start}`}
+                      visit={visit}
+                      onSelect={() => onSelectVisit(visit)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))
+          )
+        ) : alertGroups.length === 0 ? (
           <div className="mx-1 rounded-2xl bg-[var(--surface)] p-6 text-center text-sm text-[var(--text-secondary)]">
-            {filter || rangeDays ? 'Keine Standortverläufe für diese Auswahl.' : 'Noch keine Standortverläufe vorhanden.'}
+            {filter || rangeDays ? 'Keine Alarme für diese Auswahl.' : 'Noch keine Alarme aufgezeichnet.'}
           </div>
         ) : (
-          groups.map((group) => (
+          alertGroups.map((group) => (
             <div key={group.heading} className="mb-4">
               <p className="mb-2 px-2 text-[0.75rem] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
                 {group.heading}
               </p>
               <div className="overflow-hidden rounded-2xl bg-[var(--surface)]">
-                {group.visits.map((visit) => (
-                  <VisitRow
-                    key={`${visit.object_type}-${visit.object_id}-${visit.start}`}
-                    visit={visit}
-                    onSelect={() => onSelectVisit(visit)}
-                  />
+                {group.items.map((alert) => (
+                  <AlertRow key={alert.id} alert={alert} onSelect={() => onSelectAlert(alert)} />
                 ))}
               </div>
             </div>

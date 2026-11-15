@@ -9,7 +9,7 @@ import {
 } from '../api'
 import { airtagColor, glyphColor, PALETTE } from '../airtagColor'
 import { DEVICE_ICON_COMPONENTS, DEVICE_ICON_LABELS, DEVICE_ICON_NAMES } from '../deviceIconRegistry'
-import { deviceLabel, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
+import { deviceLabel, formatAlertReason, formatDeviceBattery, formatRelative, isLowBattery } from '../format'
 import { DeviceAvatar } from './DeviceAvatar'
 import { HistoryStepper, Row, Section, Switch } from './AirtagDetail'
 import {
@@ -40,6 +40,7 @@ interface Props {
   // handleTimelineFilterChange) - replaces what used to be an inline,
   // collapsible history list duplicating that tab's own feed.
   onViewTimeline: () => void
+  onViewAlerts?: () => void
   stepOlder?: (() => void) | null
   stepNewer?: (() => void) | null
   stepPosition?: { current: number; total: number } | null
@@ -57,6 +58,7 @@ export function DeviceDetail({
   onBack,
   onChanged,
   onViewTimeline,
+  onViewAlerts,
   stepOlder,
   stepNewer,
   stepPosition,
@@ -132,6 +134,20 @@ export function DeviceDetail({
                   {!location.battery_reported && '*'}
                 </p>
               )}
+              {device.last_alert &&
+                (onViewAlerts ? (
+                  <button
+                    type="button"
+                    onClick={onViewAlerts}
+                    className="mt-1 text-sm text-[var(--destructive)] hover:underline"
+                  >
+                    Alarm: {formatAlertReason(device.last_alert.reason)} · {formatRelative(device.last_alert.timestamp)}
+                  </button>
+                ) : (
+                  <p className="mt-1 text-sm text-[var(--destructive)]">
+                    Alarm: {formatAlertReason(device.last_alert.reason)} · {formatRelative(device.last_alert.timestamp)}
+                  </p>
+                ))}
             </>
           )}
         </div>
