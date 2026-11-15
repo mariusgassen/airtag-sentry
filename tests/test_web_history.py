@@ -309,3 +309,100 @@ def test_timeline_route_defaults_to_all_history_and_days_filters_older_visits(cl
     visits = resp.json()["visits"]
     assert len(visits) == 1
     assert visits[0]["lat"] == 49.9
+
+
+def test_reports_export_returns_csv_and_gpx_with_days_filter(client, conn, monkeypatch):
+    _login(client, monkeypatch)
+    now = dt.datetime.now(dt.timezone.utc)
+    insert_reports(
+        conn,
+        [
+            Report(
+                id=None, airtag_id="bike", timestamp=now - dt.timedelta(days=20),
+                lat=49.8728, lon=8.6512, accuracy=5.0, confidence=3, battery_level="low",
+            ),
+            Report(
+                id=None, airtag_id="bike", timestamp=now - dt.timedelta(hours=2),
+                lat=49.9, lon=8.7, accuracy=8.0, confidence=2, battery_level="full",
+            ),
+        ],
+    )
+
+    csv_resp = client.get("/api/reports/export", params={"airtag_id": "bike", "format": "csv"})
+    assert csv_resp.status_code == 200
+    assert "text/csv" in csv_resp.headers["content-type"]
+    assert 'attachment; filename="Fahrrad.csv"' == csv_resp.headers["content-disposition"]
+    lines = csv_resp.text.strip().splitlines()
+    assert lines[0] == "timestamp,lat,lon,accuracy,confidence,battery_level"
+    assert len(lines) == 3
+
+    gpx_resp = client.get("/api/reports/export", params={"airtag_id": "bike", "format": "gpx", "days": 7})
+    assert gpx_resp.status_code == 200
+    assert "application/gpx+xml" in gpx_resp.headers["content-type"]
+    assert 'attachment; filename="Fahrrad.gpx"' == gpx_resp.headers["content-disposition"]
+    assert "<name>Fahrrad</name>" in gpx_resp.text
+    assert 'lat="49.9000000" lon="8.7000000"' in gpx_resp.text
+    assert "49.8728" not in gpx_resp.text
+
+
+def test_owner_device_history_export_supports_csv_gpx_and_slashy_ids(client, conn, monkeypatch):
+    _login(client, monkeypatch)
+    slashy_id = "dev/abc+123=="
+    now = dt.datetime.now(dt.timezone.utc)
+    upsert_owner_devices(
+        conn,
+        [{"id": slashy_id, "name": "MacBook Pro", "device_type": "Mac"}],
+        now,
+    )
+    record_owner_device_location(
+        conn,
+        OwnerLocation(
+            id=None, device_id=slashy_id, recorded_at=now - dt.timedelta(days=15),
+            lat=52.5, lon=13.4, horizontal_accuracy=10.0, battery_level=0.8, battery_status="Unplugged",
+        ),
+    )
+    record_owner_device_location(
+        conn,
+        OwnerLocation(
+            id=None, device_id=slashy_id, recorded_at=now - dt.timedelta(minutes=30),
+            lat=52.52, lon=13.42, horizontal_accuracy=5.0, battery_level=0.75, battery_status="Charging",
+        ),
+    )
+
+    csv_resp = client.get("/api/owner-devices/history/export", params={"device_id": slashy_id, "format": "csv"})
+    assert csv_resp.status_code == 200
+    assert 'attachment; filename="MacBook-Pro.csv"' == csv_resp.headers["content-disposition"]
+    lines = csv_resp.text.strip().splitlines()
+    assert lines[0] == "timestamp,lat,lon,horizontal_accuracy,battery_level,battery_status,battery_reported"
+    assert len(lines) == 3
+
+    gpx_resp = client.get(
+        "/api/owner-devices/history/export",
+        params={"device_id": slashy_id, "format": "gpx", "days": 7},
+    )
+    assert gpx_resp.status_code == 200
+    assert 'attachment; filename="MacBook-Pro.gpx"' == gpx_resp.headers["content-disposition"]
+    assert "<name>MacBook Pro</name>" in gpx_resp.text
+    assert 'lat="52.5200000" lon="13.4200000"' in gpx_resp.text
+    assert "52.5000000" not in gpx_resp.text
+
+    missing = client.get("/api/owner-devices/history/export", params={"device_id": "nope"})
+    assert missing.status_code == 404
+
+
+def test_settings_route_persists_history_retention_days(client, conn, monkeypatch):
+    _login(client, monkeypatch)
+    current = client.get("/api/settings").json()
+    assert current["history_retention_days"] is None
+
+    try:
+        updated = client.put("/api/settings", json={**current, "history_retention_days": 90})
+        assert updated.status_code == 200
+        assert updated.json()["history_retention_days"] == 90
+
+        cleared = client.put("/api/settings", json={**current, "history_retention_days": None})
+        assert cleared.status_code == 200
+        assert cleared.json()["history_retention_days"] is None
+    finally:
+        client.put("/api/settings", json=current)
+

@@ -283,6 +283,8 @@ class AppSettings:
     # Minimum FindMy.py report confidence (1-3) that may drive an alert - see
     # movement.is_low_confidence. 1 = off.
     movement_min_confidence: int = 1
+    # Optional rolling retention window in days (None = keep history forever).
+    history_retention_days: int | None = None
 
 
 @contextmanager
@@ -838,6 +840,7 @@ _SETTINGS_COLUMNS = (
     "notify_on_left_behind",
     "notify_on_autonomous_movement",
     "movement_min_confidence",
+    "history_retention_days",
 )
 
 
@@ -869,6 +872,7 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 notify_on_left_behind = %s,
                 notify_on_autonomous_movement = %s,
                 movement_min_confidence = %s,
+                history_retention_days = %s,
                 updated_at = now()
             WHERE id = 1
             """,
@@ -889,10 +893,38 @@ def update_settings(conn: psycopg.Connection, settings: AppSettings) -> AppSetti
                 settings.notify_on_left_behind,
                 settings.notify_on_autonomous_movement,
                 settings.movement_min_confidence,
+                settings.history_retention_days,
             ),
         )
     conn.commit()
     return settings
+
+
+def prune_old_history(conn: psycopg.Connection, retention_days: int | None) -> tuple[int, int, int]:
+    """Deletes alerts, AirTag reports, and owner-device locations older than
+    `retention_days` days. Returns (alerts_deleted, reports_deleted,
+    locations_deleted). `alerts.report_id` has no ON DELETE CASCADE in the
+    initial schema, so referencing alerts are pruned before `location_reports`."""
+    if retention_days is None or retention_days <= 0:
+        return (0, 0, 0)
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=retention_days)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM alerts
+            WHERE "timestamp" < %s
+               OR report_id IN (SELECT id FROM location_reports WHERE "timestamp" < %s)
+               OR owner_location_id IN (SELECT id FROM owner_device_locations WHERE recorded_at < %s)
+            """,
+            (cutoff, cutoff, cutoff),
+        )
+        alerts_deleted = cur.rowcount
+        cur.execute('DELETE FROM location_reports WHERE "timestamp" < %s', (cutoff,))
+        reports_deleted = cur.rowcount
+        cur.execute("DELETE FROM owner_device_locations WHERE recorded_at < %s", (cutoff,))
+        locations_deleted = cur.rowcount
+    conn.commit()
+    return (alerts_deleted, reports_deleted, locations_deleted)
 
 
 def upsert_owner_devices(conn: psycopg.Connection, devices: list[dict], seen_at: dt.datetime) -> None:

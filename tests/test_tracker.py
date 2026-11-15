@@ -772,3 +772,28 @@ def test_poll_once_skips_airtag_poll_when_reauth_required_or_login_in_progress(m
     )
     assert tracker.poll_once(cfg) is True
 
+
+def test_poll_once_prunes_old_history_when_retention_days_is_set(monkeypatch):
+    @contextlib.contextmanager
+    def fake_get_conn(_url):
+        yield "fake-conn"
+
+    pruned = []
+    monkeypatch.setattr(tracker, "get_conn", fake_get_conn)
+    monkeypatch.setattr(tracker, "get_settings", lambda conn: _settings(history_retention_days=30))
+    monkeypatch.setattr(tracker, "build_notifiers", lambda cfg, conn: [])
+    monkeypatch.setattr(tracker, "build_ha_publisher", lambda cfg, conn: None)
+    monkeypatch.setattr(tracker, "_update_owner_devices", lambda cfg, conn, ha: True)
+    monkeypatch.setattr(tracker, "_evaluate_device_away_alerts", lambda *a, **k: None)
+    monkeypatch.setattr(tracker, "is_connected", lambda cfg: False)
+    monkeypatch.setattr(
+        tracker,
+        "prune_old_history",
+        lambda conn, days: pruned.append((conn, days)) or (1, 2, 3),
+    )
+
+    cfg = types.SimpleNamespace(database_url="unused")
+    assert tracker.poll_once(cfg) is True
+    assert pruned == [("fake-conn", 30)]
+
+

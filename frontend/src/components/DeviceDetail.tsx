@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { LocationStay, OwnerDevice, OwnerLocation } from '../api'
 import {
+  ownerDeviceExportUrl,
   playOwnerDeviceSound,
   renameOwnerDevice,
   setOwnerDeviceAppearance,
@@ -16,6 +17,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
+  DownloadIcon,
   PaletteIcon,
   PencilIcon,
   PersonIcon,
@@ -219,6 +221,32 @@ export function DeviceDetail({
                 </span>
               }
               onClick={onViewTimeline}
+              bordered={false}
+            />
+          </Section>
+
+          <Section>
+            <Row
+              icon={<DownloadIcon className="h-5 w-5" />}
+              label="Verlauf exportieren"
+              trailing={
+                <span className="flex items-center gap-1.5">
+                  <a
+                    href={ownerDeviceExportUrl(device.id, 'csv')}
+                    download
+                    className="rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:opacity-80"
+                  >
+                    CSV
+                  </a>
+                  <a
+                    href={ownerDeviceExportUrl(device.id, 'gpx')}
+                    download
+                    className="rounded-lg bg-[var(--surface-2)] px-2.5 py-1 text-xs font-medium text-[var(--accent)] hover:opacity-80"
+                  >
+                    GPX
+                  </a>
+                </span>
+              }
               bordered={false}
             />
           </Section>

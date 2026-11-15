@@ -21,12 +21,12 @@ import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import requests
 from authlib.integrations.starlette_client import OAuth, OAuthError
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from findmy import FindMyAccessory, KeyPair
 from pydantic import BaseModel, Field
@@ -34,10 +34,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from airtag_sentry import auth, keystore, owner_tracking, telegram_bot, tracker
-from airtag_sentry.geocode import get_or_fetch_geocode, search_address
-from airtag_sentry.routing import route_along_roads
 from airtag_sentry.config import Config, load_config
+from airtag_sentry.export import owner_locations_to_csv, points_to_gpx, reports_to_csv, safe_filename_part
+from airtag_sentry.geocode import get_or_fetch_geocode, search_address
 from airtag_sentry.notifiers import build_notifiers
+from airtag_sentry.routing import route_along_roads
 from airtag_sentry.db import (
     AppSettings,
     PushSubscription,
@@ -309,6 +310,7 @@ class SettingsIn(BaseModel):
     notify_on_left_behind: bool
     notify_on_autonomous_movement: bool
     movement_min_confidence: int = Field(ge=1, le=3)
+    history_retention_days: int | None = Field(default=None, ge=1, le=3650)
 
 
 class NamedPlaceIn(BaseModel):
@@ -862,6 +864,33 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             "stays": stays,
         }
 
+    @app.get("/api/reports/export")
+    def export_reports_route(
+        airtag_id: str | None = None,
+        format: Literal["csv", "gpx"] = "csv",
+        days: int | None = Query(default=None, ge=1),
+    ):
+        """Exports one AirTag's non-outlier location history as CSV or GPX."""
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days) if days is not None else None
+        with get_conn(cfg.database_url) as conn:
+            resolved = _resolve_airtag_id(conn, airtag_id)
+            name = _airtag_name(conn, resolved)
+            reports = fetch_reports(conn, resolved, limit=None)
+        if since is not None:
+            reports = [r for r in reports if r.timestamp >= since]
+        stem = safe_filename_part(name, fallback=resolved)
+        if format == "gpx":
+            content = points_to_gpx(name, [(r.timestamp, r.lat, r.lon) for r in reports])
+            media_type = "application/gpx+xml; charset=utf-8"
+        else:
+            content = reports_to_csv(reports)
+            media_type = "text/csv; charset=utf-8"
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{stem}.{format}"'},
+        )
+
     @app.get("/api/geocode")
     def geocode_route(lat: float, lon: float):
         with get_conn(cfg.database_url) as conn:
@@ -1182,6 +1211,39 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             ],
             "stays": stays,
         }
+
+    @app.get("/api/owner-devices/history/export")
+    def export_owner_device_history_route(
+        device_id: str,
+        format: Literal["csv", "gpx"] = "csv",
+        days: int | None = Query(default=None, ge=1),
+    ):
+        """Exports one owner device's location history as CSV or GPX.
+
+        device_id is a query param (not a path segment) because Apple device IDs
+        can contain '/'. Mirrors GET /api/reports/export.
+        """
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days) if days is not None else None
+        with get_conn(cfg.database_url) as conn:
+            device = next((d for d in db_list_owner_devices(conn) if d.id == device_id), None)
+            if device is None:
+                raise HTTPException(status_code=404, detail=f"Unknown device_id '{device_id}'")
+            name = device.display_name or device.name
+            locations = fetch_owner_device_location_history(conn, device_id, limit=None)
+        if since is not None:
+            locations = [loc for loc in locations if loc.recorded_at >= since]
+        stem = safe_filename_part(name, fallback="device")
+        if format == "gpx":
+            content = points_to_gpx(name, [(loc.recorded_at, loc.lat, loc.lon) for loc in locations])
+            media_type = "application/gpx+xml; charset=utf-8"
+        else:
+            content = owner_locations_to_csv(locations)
+            media_type = "text/csv; charset=utf-8"
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={"Content-Disposition": f'attachment; filename="{stem}.{format}"'},
+        )
 
     @app.get("/api/timeline")
     def get_timeline(days: int | None = None):

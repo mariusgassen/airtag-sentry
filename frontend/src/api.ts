@@ -72,6 +72,8 @@ export interface AppSettings {
   // FindMy.py report confidence (1-3) below which an AirTag report never
   // drives an alert; 1 = off. See movement.is_low_confidence.
   movement_min_confidence: number
+  // Optional rolling retention window in days (null = keep history forever).
+  history_retention_days: number | null
 }
 
 export interface OwnerDevice {
@@ -344,6 +346,14 @@ export async function getReports(airtagId: string, limit = 500): Promise<ReportH
   return (
     await apiFetch(`/api/reports?airtag_id=${encodeURIComponent(airtagId)}&limit=${limit}`)
   ).json()
+}
+
+export function airtagExportUrl(airtagId: string, format: 'csv' | 'gpx'): string {
+  return `/api/reports/export?airtag_id=${encodeURIComponent(airtagId)}&format=${format}`
+}
+
+export function ownerDeviceExportUrl(deviceId: string, format: 'csv' | 'gpx'): string {
+  return `/api/owner-devices/history/export?device_id=${encodeURIComponent(deviceId)}&format=${format}`
 }
 
 export async function getStatus(airtagId: string): Promise<Status> {
